@@ -1,51 +1,40 @@
-const ADSB_BASE_URLS = [
-  "https://api.adsb.lol/v2",
-  "https://opendata.adsb.fi/api/v3"
-];
-const WORKER_VERSION = "2026-06-07-adsb-fallback-v2";
-
-const corsHeaders = {
+const SOURCES = ["https://api.adsb.lol/v2", "https://opendata.adsb.fi/api/v3"];
+const VERSION = "2026-06-07-short-worker-v1";
+const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, OPTIONS",
   "access-control-allow-headers": "content-type",
   "cache-control": "no-store"
 };
 
-function jsonResponse(body, status = 200) {
-  return new Response(JSON.stringify(body), {
+const json = (body, status = 200) =>
+  new Response(JSON.stringify(body), {
     status,
-    headers: {
-      ...corsHeaders,
-      "content-type": "application/json; charset=utf-8"
-    }
+    headers: { ...CORS, "content-type": "application/json; charset=utf-8" }
   });
-}
 
-function parseNumber(value, fallback = null) {
+const num = (value, fallback = null) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
-}
+};
 
-function milesToNauticalMiles(miles) {
-  return miles * 0.868976;
-}
+const nm = (miles) => miles * 0.868976;
 
-function distanceMiles(latA, lonA, latB, lonB) {
-  const earthMiles = 3958.7613;
-  const toRad = (value) => (value * Math.PI) / 180;
-  const dLat = toRad(latB - latA);
-  const dLon = toRad(lonB - lonA);
+function miles(aLat, aLon, bLat, bLon) {
+  const earth = 3958.7613;
+  const rad = (value) => (value * Math.PI) / 180;
+  const dLat = rad(bLat - aLat);
+  const dLon = rad(bLon - aLon);
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(latA)) * Math.cos(toRad(latB)) * Math.sin(dLon / 2) ** 2;
-  return 2 * earthMiles * Math.asin(Math.sqrt(a));
+    Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * earth * Math.asin(Math.sqrt(a));
 }
 
-function normalizeAircraft(raw) {
-  const lat = parseNumber(raw.lat);
-  const lon = parseNumber(raw.lon);
+function aircraft(raw) {
+  const lat = num(raw.lat);
+  const lon = num(raw.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-
   return {
     hex: raw.hex || raw.icao || "",
     nNumber: (raw.r || raw.reg || raw.registration || "").trim(),
@@ -64,80 +53,39 @@ function normalizeAircraft(raw) {
 }
 
 async function handleAircraft(url) {
-  const lat = parseNumber(url.searchParams.get("lat"));
-  const lon = parseNumber(url.searchParams.get("lon"));
-  const radiusMiles = parseNumber(url.searchParams.get("radiusMiles"), 15);
+  const lat = num(url.searchParams.get("lat"));
+  const lon = num(url.searchParams.get("lon"));
+  const radiusMiles = num(url.searchParams.get("radiusMiles"), 15);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return json({ error: "lat and lon are required" }, 400);
 
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-    return jsonResponse({ error: "lat and lon query parameters are required" }, 400);
-  }
-
-  const radiusNm = Math.max(1, Math.min(250, milesToNauticalMiles(radiusMiles)));
-  let response = null;
   const failures = [];
-
-  for (const baseUrl of ADSB_BASE_URLS) {
-    const endpoint = `${baseUrl}/lat/${lat}/lon/${lon}/dist/${radiusNm.toFixed(1)}`;
-
+  for (const base of SOURCES) {
+    const endpoint = `${base}/lat/${lat}/lon/${lon}/dist/${Math.max(1, Math.min(250, nm(radiusMiles))).toFixed(1)}`;
     try {
-      response = await fetch(endpoint, {
-        headers: {
-          accept: "application/json"
-        }
-      });
+      const response = await fetch(endpoint, { headers: { accept: "application/json" } });
+      if (!response.ok) {
+        failures.push(`${base}: HTTP ${response.status}`);
+        continue;
+      }
+      const data = await response.json();
+      const list = (data.ac || [])
+        .map(aircraft)
+        .filter(Boolean)
+        .filter((plane) => miles(lat, lon, plane.lat, plane.lon) <= radiusMiles + 1);
+      return json({ source: base, workerVersion: VERSION, now: data.now || Date.now() / 1000, aircraft: list, total: list.length });
     } catch (error) {
-      failures.push(`${baseUrl}: ${error.message}`);
-      continue;
+      failures.push(`${base}: ${error.message}`);
     }
-
-    if (response.ok) {
-      break;
-    }
-
-    failures.push(`${baseUrl}: HTTP ${response.status}`);
-    response = null;
   }
-
-  if (!response) {
-    return jsonResponse(
-      {
-        error: "All ADS-B upstreams failed",
-        detail: failures
-      },
-      502
-    );
-  }
-
-  const data = await response.json();
-  const aircraft = (data.ac || [])
-    .map(normalizeAircraft)
-    .filter(Boolean)
-    .filter((plane) => distanceMiles(lat, lon, plane.lat, plane.lon) <= radiusMiles + 1);
-
-  return jsonResponse({
-    source: "ADS-B worker",
-    workerVersion: WORKER_VERSION,
-    now: data.now || Date.now() / 1000,
-    aircraft,
-    total: aircraft.length
-  });
+  return json({ error: "All ADS-B upstreams failed", detail: failures, workerVersion: VERSION }, 502);
 }
 
 export default {
   async fetch(request) {
-    if (request.method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders });
-    }
-
+    if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     const url = new URL(request.url);
-    if (url.pathname === "/" || url.pathname === "/health") {
-      return jsonResponse({ ok: true, workerVersion: WORKER_VERSION });
-    }
-
-    if (url.pathname === "/api/aircraft") {
-      return handleAircraft(url);
-    }
-
-    return jsonResponse({ error: "Not found" }, 404);
+    if (url.pathname === "/" || url.pathname === "/health") return json({ ok: true, workerVersion: VERSION });
+    if (url.pathname === "/api/aircraft") return handleAircraft(url);
+    return json({ error: "Not found", workerVersion: VERSION }, 404);
   }
 };
