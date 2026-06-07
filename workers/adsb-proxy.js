@@ -1,7 +1,8 @@
 const ADSB_BASE_URLS = [
-  "https://opendata.adsb.fi/api/v3",
-  "https://api.adsb.lol/v2"
+  "https://api.adsb.lol/v2",
+  "https://opendata.adsb.fi/api/v3"
 ];
+const WORKER_VERSION = "2026-06-07-adsb-fallback-v2";
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -115,6 +116,7 @@ async function handleAircraft(url) {
 
   return jsonResponse({
     source: "ADS-B worker",
+    workerVersion: WORKER_VERSION,
     now: data.now || Date.now() / 1000,
     aircraft,
     total: aircraft.length
@@ -128,6 +130,10 @@ export default {
     }
 
     const url = new URL(request.url);
+    if (url.pathname === "/" || url.pathname === "/health") {
+      return jsonResponse({ ok: true, workerVersion: WORKER_VERSION });
+    }
+
     if (url.pathname === "/api/aircraft") {
       return handleAircraft(url);
     }
