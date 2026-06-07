@@ -17,6 +17,16 @@ const historyLimit = 12;
 const allowedRanges = [5, 10, 15, 20, 50, 100];
 const adsbBaseUrl = "https://opendata.adsb.fi/api/v3";
 const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
+const proxyUrlFromQuery = new URLSearchParams(window.location.search).get("proxy");
+if (proxyUrlFromQuery) {
+  window.localStorage.setItem("ADSB_RADAR_PROXY_URL", proxyUrlFromQuery);
+}
+const adsbProxyBaseUrl = (
+  proxyUrlFromQuery ||
+  window.localStorage.getItem("ADSB_RADAR_PROXY_URL") ||
+  window.ADSB_RADAR_PROXY_URL ||
+  ""
+).replace(/\/$/, "");
 const tracks = new Map();
 
 let center = { lat: 33.7292, lon: -111.9918 };
@@ -251,9 +261,12 @@ async function loadAirportCache() {
 async function fetchStaticTraffic() {
   const radiusNm = Math.max(1, Math.min(250, milesToNauticalMiles(radiusMiles)));
   const adsbUrl = `${adsbBaseUrl}/lat/${center.lat}/lon/${center.lon}/dist/${radiusNm.toFixed(1)}`;
+  const aircraftUrl = adsbProxyBaseUrl
+    ? `${adsbProxyBaseUrl}/api/aircraft?lat=${center.lat}&lon=${center.lon}&radiusMiles=${radiusMiles}`
+    : adsbUrl;
 
   const [trafficResponse, airportRows] = await Promise.all([
-    fetch(adsbUrl, {
+    fetch(aircraftUrl, {
       headers: {
         accept: "application/json"
       }
@@ -262,14 +275,16 @@ async function fetchStaticTraffic() {
   ]);
 
   if (!trafficResponse.ok) {
-    throw new Error(`adsb.fi returned ${trafficResponse.status}`);
+    throw new Error(`aircraft feed returned ${trafficResponse.status}`);
   }
 
   const trafficData = await trafficResponse.json();
-  const aircraftRows = (trafficData.ac || [])
-    .map(normalizeAircraft)
-    .filter(Boolean)
-    .filter((plane) => milesBetween(center.lat, center.lon, plane.lat, plane.lon) <= radiusMiles + 1);
+  const aircraftRows = adsbProxyBaseUrl
+    ? trafficData.aircraft || []
+    : (trafficData.ac || [])
+        .map(normalizeAircraft)
+        .filter(Boolean)
+        .filter((plane) => milesBetween(center.lat, center.lon, plane.lat, plane.lon) <= radiusMiles + 1);
 
   const airportMatches = airportRows
     .map((airport) => ({
@@ -283,7 +298,7 @@ async function fetchStaticTraffic() {
   return {
     aircraft: aircraftRows,
     airports: airportMatches,
-    source: "adsb.fi web"
+    source: adsbProxyBaseUrl ? "adsb.fi proxy" : "adsb.fi web"
   };
 }
 
@@ -308,7 +323,8 @@ async function fetchTraffic() {
     aircraft = [];
     airports = [];
     lastDataSource = "offline";
-    statusEl.textContent = `Live data unavailable: ${error.message}.`;
+    const proxyHint = adsbProxyBaseUrl ? "" : " A live web page needs the ADS-B proxy URL configured.";
+    statusEl.textContent = `Live data unavailable: ${error.message}.${proxyHint}`;
   }
 
   updateTrackHistory(aircraft);

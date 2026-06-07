@@ -61,4 +61,27 @@ The page will be available at:
 https://captainseang.github.io/ADSB-Radar/
 ```
 
-The static page tries to fetch `adsb.fi` and OurAirports directly from the browser. If a live data request is blocked by browser CORS rules or unavailable, the radar shows an offline state. For guaranteed live traffic on a public web URL, deploy the included Node server or add a small hosted proxy.
+The static page can fetch OurAirports directly from the browser, but live `adsb.fi` aircraft data needs a tiny proxy because `adsb.fi` does not send browser CORS headers.
+
+## Live Data Proxy
+
+The repo includes a Cloudflare Worker proxy at `workers/adsb-proxy.js`.
+
+To enable live traffic on GitHub Pages:
+
+1. Create a Cloudflare Worker.
+2. Paste in the contents of `workers/adsb-proxy.js`.
+3. Deploy it and copy the Worker URL.
+4. Put that URL in `public/config.js`:
+
+```js
+window.ADSB_RADAR_PROXY_URL = "https://your-worker-name.your-account.workers.dev";
+```
+
+You can also test a proxy without editing the repo by opening:
+
+```text
+https://captainseang.github.io/ADSB-Radar/?proxy=https://your-worker-name.your-account.workers.dev
+```
+
+The app remembers that proxy URL in the browser after the first visit.
