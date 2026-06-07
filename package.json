@@ -1,0 +1,14 @@
+{
+  "name": "adsb-plane-tracker-radar",
+  "version": "0.1.0",
+  "description": "A laptop-friendly ADS-B radar display using adsb.fi open data.",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

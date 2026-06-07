@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ADSB Radar</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="radar-wrap" aria-label="ADS-B radar display">
+        <canvas id="radar" aria-label="Radar screen"></canvas>
+        <div class="scope-glass"></div>
+      </section>
+
+      <aside class="panel" aria-label="Radar controls and aircraft list">
+        <header>
+          <p class="eyebrow">ADS-B Radar</p>
+          <h1>Local Airspace</h1>
+          <p id="status">Enter a position and start the sweep.</p>
+        </header>
+
+        <form id="controls" class="controls">
+          <label>
+            Latitude
+            <input id="lat" name="lat" inputmode="decimal" value="33.4484" required />
+          </label>
+          <label>
+            Longitude
+            <input id="lon" name="lon" inputmode="decimal" value="-112.0740" required />
+          </label>
+
+          <fieldset>
+            <legend>Range</legend>
+            <div class="range-buttons" id="rangeButtons">
+              <button type="button" data-range="5">5</button>
+              <button type="button" data-range="10">10</button>
+              <button type="button" data-range="15">15</button>
+              <button type="button" data-range="20" class="active">20</button>
+              <button type="button" data-range="50">50</button>
+              <button type="button" data-range="100">100</button>
+            </div>
+          </fieldset>
+
+          <div class="switch-row">
+            <label class="switch">
+              <input id="demoMode" type="checkbox" />
+              <span>Demo fallback</span>
+            </label>
+            <button class="primary" type="submit">Start Radar</button>
+          </div>
+        </form>
+
+        <section class="metrics" aria-label="Radar metrics">
+          <div>
+            <span id="planeCount">0</span>
+            <small>Aircraft</small>
+          </div>
+          <div>
+            <span id="airportCount">0</span>
+            <small>Airports</small>
+          </div>
+          <div>
+            <span id="rangeReadout">20 mi</span>
+            <small>Range</small>
+          </div>
+        </section>
+
+        <section class="traffic">
+          <div class="section-title">
+            <h2>Traffic</h2>
+            <span id="lastUpdate">No sweep yet</span>
+          </div>
+          <ol id="aircraftList"></ol>
+        </section>
+      </aside>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>
