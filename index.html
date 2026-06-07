@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./public/styles.css?v=20260607-2" />
+    <link rel="stylesheet" href="./public/styles.css?v=20260607-4" />
   </head>
   <body>
     <main class="shell">
@@ -58,6 +58,15 @@
             </div>
           </fieldset>
 
+          <fieldset>
+            <legend>Airspace</legend>
+            <div class="airspace-toggles" id="airspaceToggles">
+              <label><input type="checkbox" data-class="B" checked /><span>Class B</span></label>
+              <label><input type="checkbox" data-class="C" checked /><span>Class C</span></label>
+              <label><input type="checkbox" data-class="D" checked /><span>Class D</span></label>
+            </div>
+          </fieldset>
+
           <div class="action-row">
             <button class="primary" type="submit">Start Radar</button>
           </div>
@@ -88,7 +97,7 @@
       </aside>
     </main>
 
-    <script src="./public/config.js?v=20260607-3"></script>
-    <script type="module" src="./public/app.js?v=20260607-3"></script>
+    <script src="./public/config.js?v=20260607-4"></script>
+    <script type="module" src="./public/app.js?v=20260607-4"></script>
   </body>
 </html>

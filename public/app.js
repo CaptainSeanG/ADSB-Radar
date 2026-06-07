@@ -5,6 +5,7 @@ const airportSelect = document.querySelector("#airportSelect");
 const latInput = document.querySelector("#lat");
 const lonInput = document.querySelector("#lon");
 const rangeButtons = document.querySelector("#rangeButtons");
+const airspaceToggles = document.querySelector("#airspaceToggles");
 const statusEl = document.querySelector("#status");
 const planeCountEl = document.querySelector("#planeCount");
 const airportCountEl = document.querySelector("#airportCount");
@@ -17,6 +18,8 @@ const historyLimit = 12;
 const allowedRanges = [5, 10, 15, 20, 50, 100];
 const adsbBaseUrl = "https://opendata.adsb.fi/api/v3";
 const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
+const airspaceQueryUrl =
+  "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0/query";
 const proxyUrlFromQuery = new URLSearchParams(window.location.search).get("proxy");
 if (proxyUrlFromQuery) {
   window.localStorage.setItem("ADSB_RADAR_PROXY_URL", proxyUrlFromQuery);
@@ -33,12 +36,14 @@ let center = { lat: 33.7292, lon: -111.9918 };
 let radiusMiles = 15;
 let aircraft = [];
 let airports = [];
+let airspaces = [];
 let running = false;
 let lastSweepBucket = -1;
 let lastFetchAt = 0;
 let lastDataSource = "standby";
 let pixelRatio = window.devicePixelRatio || 1;
 let airportsCachePromise = null;
+let lastAirspaceKey = "";
 
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
@@ -185,6 +190,18 @@ function formatSpeed(value) {
   return Number.isFinite(number) ? `${Math.round(number)} kt` : "SPD ?";
 }
 
+function formatAirspaceAltitude(value, code) {
+  if (code === "SFC" || Number(value) === 0) return "SFC";
+  const number = Number(value);
+  return Number.isFinite(number) ? String(Math.round(number / 100)) : "?";
+}
+
+function getVisibleAirspaceClasses() {
+  return new Set(
+    Array.from(airspaceToggles.querySelectorAll("input[data-class]:checked")).map((input) => input.dataset.class)
+  );
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -300,6 +317,64 @@ async function fetchStaticTraffic() {
     airports: airportMatches,
     source: adsbProxyBaseUrl ? "adsb.fi proxy" : "adsb.fi web"
   };
+}
+
+function airspaceEnvelope() {
+  const latPad = radiusMiles / 69 + 0.08;
+  const lonPad = radiusMiles / (69 * Math.max(0.2, Math.cos((center.lat * Math.PI) / 180))) + 0.08;
+  return `${center.lon - lonPad},${center.lat - latPad},${center.lon + lonPad},${center.lat + latPad}`;
+}
+
+function normalizeAirspaceFeature(feature) {
+  const attributes = feature.attributes || {};
+  const rings = (feature.geometry?.rings || []).map((ring) => ring.map(([lon, lat]) => ({ lat, lon })));
+  if (!rings.length || !attributes.CLASS) return null;
+
+  return {
+    id: attributes.OBJECTID,
+    ident: attributes.IDENT || attributes.ICAO_ID || "",
+    name: attributes.NAME || "",
+    classCode: attributes.CLASS,
+    sector: attributes.SECTOR || "",
+    lower: formatAirspaceAltitude(attributes.LOWER_VAL, attributes.LOWER_CODE),
+    upper: formatAirspaceAltitude(attributes.UPPER_VAL, attributes.UPPER_CODE),
+    rings
+  };
+}
+
+async function fetchAirspace() {
+  const visibleClasses = getVisibleAirspaceClasses();
+  if (!visibleClasses.size) {
+    airspaces = [];
+    lastAirspaceKey = "";
+    return;
+  }
+
+  const key = `${center.lat.toFixed(4)},${center.lon.toFixed(4)},${radiusMiles}`;
+  if (key === lastAirspaceKey && airspaces.length) return;
+
+  const params = new URLSearchParams({
+    f: "json",
+    where: "TYPE_CODE='CLASS' AND CLASS in ('B','C','D')",
+    outFields: "OBJECTID,IDENT,ICAO_ID,NAME,CLASS,LOWER_VAL,LOWER_CODE,UPPER_VAL,UPPER_CODE,SECTOR",
+    geometry: airspaceEnvelope(),
+    geometryType: "esriGeometryEnvelope",
+    inSR: "4326",
+    spatialRel: "esriSpatialRelIntersects",
+    outSR: "4326",
+    returnGeometry: "true",
+    maxAllowableOffset: "0.0015",
+    resultRecordCount: "120"
+  });
+
+  try {
+    const data = await getJson(`${airspaceQueryUrl}?${params}`);
+    airspaces = (data.features || []).map(normalizeAirspaceFeature).filter(Boolean);
+    lastAirspaceKey = key;
+  } catch (error) {
+    airspaces = [];
+    console.warn("Unable to fetch FAA airspace boundaries", error);
+  }
 }
 
 async function fetchTraffic() {
@@ -421,6 +496,60 @@ function drawAirports(scope) {
     ctx.stroke();
     ctx.fillText(airport.iata || airport.ident, point.x + 9, point.y - 8);
   }
+  ctx.restore();
+}
+
+function drawAirspace(scope) {
+  const visibleClasses = getVisibleAirspaceClasses();
+  if (!visibleClasses.size || !airspaces.length) return;
+
+  const styles = {
+    B: { stroke: "rgba(87, 185, 255, 0.92)", fill: "rgba(87, 185, 255, 0.06)", dash: [] },
+    C: { stroke: "rgba(105, 224, 255, 0.78)", fill: "rgba(105, 224, 255, 0.045)", dash: [10, 7] },
+    D: { stroke: "rgba(151, 166, 255, 0.82)", fill: "rgba(151, 166, 255, 0.04)", dash: [4, 7] }
+  };
+
+  ctx.save();
+  ctx.font = "800 11px ui-monospace, SFMono-Regular, Consolas, monospace";
+  ctx.lineWidth = 2;
+
+  for (const airspace of airspaces) {
+    if (!visibleClasses.has(airspace.classCode)) continue;
+    const style = styles[airspace.classCode] || styles.D;
+    const labelPoints = [];
+
+    ctx.strokeStyle = style.stroke;
+    ctx.fillStyle = style.fill;
+    ctx.setLineDash(style.dash);
+
+    for (const ring of airspace.rings) {
+      if (ring.length < 2) continue;
+      ctx.beginPath();
+      ring.forEach((point, index) => {
+        const projected = project(point.lat, point.lon, scope);
+        labelPoints.push(projected);
+        if (index === 0) ctx.moveTo(projected.x, projected.y);
+        else ctx.lineTo(projected.x, projected.y);
+      });
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    const inScope = labelPoints.filter((point) => point.distance <= radiusMiles * 1.05);
+    if (inScope.length) {
+      const labelPoint = inScope[Math.floor(inScope.length / 2)];
+      ctx.setLineDash([]);
+      ctx.fillStyle = style.stroke;
+      ctx.fillText(
+        `${airspace.classCode} ${airspace.lower}/${airspace.upper}`,
+        Math.min(scope.width - 76, Math.max(8, labelPoint.x + 5)),
+        Math.min(scope.height - 12, Math.max(18, labelPoint.y - 5))
+      );
+    }
+  }
+
+  ctx.setLineDash([]);
   ctx.restore();
 }
 
@@ -547,6 +676,7 @@ function render(now) {
   ctx.fillRect(0, 0, width, height);
 
   drawGrid(scope);
+  drawAirspace(scope);
   drawAirports(scope);
   drawAircraft(scope);
   drawSweep(scope, angle);
@@ -567,7 +697,12 @@ rangeButtons.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-range]");
   if (!button) return;
   setRange(Number(button.dataset.range));
+  fetchAirspace();
   if (running) fetchTraffic();
+});
+
+airspaceToggles.addEventListener("change", () => {
+  if (getVisibleAirspaceClasses().size && !airspaces.length) fetchAirspace();
 });
 
 function applySelectedAirport() {
@@ -579,10 +714,12 @@ function applySelectedAirport() {
   lonInput.value = lon.toFixed(4);
   center = { lat, lon };
   tracks.clear();
+  lastAirspaceKey = "";
 }
 
 airportSelect.addEventListener("change", () => {
   applySelectedAirport();
+  fetchAirspace();
   if (running) fetchTraffic();
 });
 
@@ -605,7 +742,9 @@ form.addEventListener("submit", (event) => {
   center = { lat, lon };
   running = true;
   tracks.clear();
+  lastAirspaceKey = "";
   statusEl.textContent = "Sweep started. Refreshing aircraft on each pass.";
+  fetchAirspace();
   fetchTraffic();
 });
 
@@ -614,4 +753,5 @@ window.addEventListener("resize", resizeCanvas);
 applySelectedAirport();
 resizeCanvas();
 renderList();
+fetchAirspace();
 requestAnimationFrame(render);

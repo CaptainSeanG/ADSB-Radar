@@ -10,6 +10,7 @@ A laptop-friendly radar display that reads aircraft around a user-entered latitu
 - Aircraft labels with registration/N-number when available, callsign, type, altitude, speed, and distance.
 - Trend lines from recent positions.
 - Nearby airport reference markers from OurAirports data.
+- Toggleable FAA Class B, C, and D airspace overlays.
 - Airport selector that can fill coordinates for known airports.
 - No third-party npm dependencies, which keeps the Raspberry Pi path straightforward.
 
@@ -42,6 +43,8 @@ $env:ADSB_BASE_URL="https://opendata.adsb.fi/api/v3"; node server.js
 ```
 
 Airport data is fetched from OurAirports and cached in memory for 24 hours.
+
+Class B/C/D airspace overlays are fetched from the FAA ArcGIS `Class_Airspace` feature service and are intended for situational awareness only.
 
 ## Publish as a Web Page
 

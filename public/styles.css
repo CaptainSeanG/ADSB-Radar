@@ -191,6 +191,39 @@ fieldset {
   color: #d9ffe8;
 }
 
+.airspace-toggles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.airspace-toggles label {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(132, 255, 194, 0.2);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+  cursor: pointer;
+  text-transform: none;
+}
+
+.airspace-toggles input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--cyan);
+}
+
+.airspace-toggles label:has(input:checked) {
+  border-color: rgba(98, 213, 255, 0.58);
+  background: rgba(98, 213, 255, 0.14);
+}
+
 .action-row {
   display: grid;
   grid-template-columns: 1fr;
@@ -328,5 +361,9 @@ fieldset {
 
   .range-buttons {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .airspace-toggles {
+    grid-template-columns: 1fr;
   }
 }
