@@ -42,3 +42,23 @@ $env:ADSB_BASE_URL="https://opendata.adsb.fi/api/v3"; node server.js
 ```
 
 Airport data is fetched from OurAirports and cached in memory for 24 hours.
+
+## Publish as a Web Page
+
+This repo includes a root `index.html` so it can run from GitHub Pages without the Node server.
+
+In GitHub:
+
+1. Open the repository settings.
+2. Go to **Pages**.
+3. Set **Source** to **Deploy from a branch**.
+4. Pick branch `main` and folder `/root`.
+5. Save.
+
+The page will be available at:
+
+```text
+https://captainseang.github.io/ADSB-Radar/
+```
+
+The static page tries to fetch `adsb.fi` and OurAirports directly from the browser. If a live data request is blocked by browser CORS rules or unavailable, the radar automatically switches to demo traffic. For guaranteed live traffic on a public web URL, deploy the included Node server or add a small hosted proxy.

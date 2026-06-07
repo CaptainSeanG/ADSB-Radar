@@ -15,6 +15,8 @@ const aircraftListEl = document.querySelector("#aircraftList");
 const sweepSeconds = 4.2;
 const historyLimit = 12;
 const allowedRanges = [5, 10, 15, 20, 50, 100];
+const adsbBaseUrl = "https://opendata.adsb.fi/api/v3";
+const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
 const tracks = new Map();
 
 let center = { lat: 33.4484, lon: -112.074 };
@@ -26,6 +28,7 @@ let lastSweepBucket = -1;
 let lastFetchAt = 0;
 let lastDataSource = "standby";
 let pixelRatio = window.devicePixelRatio || 1;
+let airportsCachePromise = null;
 
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
@@ -44,6 +47,94 @@ function milesBetween(latA, lonA, latB, lonB) {
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(latA)) * Math.cos(toRad(latB)) * Math.sin(dLon / 2) ** 2;
   return 2 * earthMiles * Math.asin(Math.sqrt(a));
+}
+
+function milesToNauticalMiles(miles) {
+  return miles * 0.868976;
+}
+
+function parseNumber(value, fallback = null) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseCsvLine(line) {
+  const values = [];
+  let current = "";
+  let quoted = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+
+    if (char === '"' && quoted && next === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      values.push(current);
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+
+  values.push(current);
+  return values;
+}
+
+function parseAirportsCsv(csv) {
+  const [headerLine, ...lines] = csv.split(/\r?\n/).filter(Boolean);
+  const headers = parseCsvLine(headerLine);
+  const index = Object.fromEntries(headers.map((header, i) => [header, i]));
+  const usefulTypes = new Set(["small_airport", "medium_airport", "large_airport"]);
+
+  return lines
+    .map((line) => {
+      const row = parseCsvLine(line);
+      const lat = parseNumber(row[index.latitude_deg]);
+      const lon = parseNumber(row[index.longitude_deg]);
+      const type = row[index.type];
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !usefulTypes.has(type)) {
+        return null;
+      }
+
+      return {
+        ident: row[index.ident],
+        name: row[index.name],
+        type,
+        lat,
+        lon,
+        elevationFt: parseNumber(row[index.elevation_ft]),
+        municipality: row[index.municipality],
+        iata: row[index.iata_code]
+      };
+    })
+    .filter(Boolean);
+}
+
+function normalizeAircraft(raw) {
+  const lat = parseNumber(raw.lat);
+  const lon = parseNumber(raw.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+  return {
+    hex: raw.hex || raw.icao || "",
+    nNumber: (raw.r || raw.reg || raw.registration || "").trim(),
+    callsign: (raw.flight || raw.call || "").trim(),
+    type: (raw.t || raw.type || "").trim(),
+    lat,
+    lon,
+    altitude: raw.alt_baro ?? raw.alt_geom ?? raw.altitude ?? null,
+    speed: raw.gs ?? raw.tas ?? raw.ias ?? null,
+    track: raw.track ?? raw.true_heading ?? raw.nav_heading ?? null,
+    verticalRate: raw.baro_rate ?? raw.geom_rate ?? null,
+    seen: raw.seen ?? null,
+    emergency: raw.emergency || null,
+    category: raw.category || null
+  };
 }
 
 function bearingDegrees(latA, lonA, latB, lonB) {
@@ -166,6 +257,71 @@ async function getJson(url) {
   return payload;
 }
 
+async function fetchLocalTraffic(params) {
+  const [trafficData, airportData] = await Promise.all([
+    getJson(`./api/aircraft?${params}`),
+    getJson(`./api/airports?${params}`)
+  ]);
+
+  return {
+    aircraft: trafficData.aircraft || [],
+    airports: airportData.airports || [],
+    source: "adsb.fi"
+  };
+}
+
+async function loadAirportCache() {
+  if (!airportsCachePromise) {
+    airportsCachePromise = fetch(airportsCsvUrl)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Airport data returned ${response.status}`);
+        return response.text();
+      })
+      .then(parseAirportsCsv);
+  }
+
+  return airportsCachePromise;
+}
+
+async function fetchStaticTraffic() {
+  const radiusNm = Math.max(1, Math.min(250, milesToNauticalMiles(radiusMiles)));
+  const adsbUrl = `${adsbBaseUrl}/lat/${center.lat}/lon/${center.lon}/dist/${radiusNm.toFixed(1)}`;
+
+  const [trafficResponse, airportRows] = await Promise.all([
+    fetch(adsbUrl, {
+      headers: {
+        accept: "application/json"
+      }
+    }),
+    loadAirportCache()
+  ]);
+
+  if (!trafficResponse.ok) {
+    throw new Error(`adsb.fi returned ${trafficResponse.status}`);
+  }
+
+  const trafficData = await trafficResponse.json();
+  const aircraftRows = (trafficData.ac || [])
+    .map(normalizeAircraft)
+    .filter(Boolean)
+    .filter((plane) => milesBetween(center.lat, center.lon, plane.lat, plane.lon) <= radiusMiles + 1);
+
+  const airportMatches = airportRows
+    .map((airport) => ({
+      ...airport,
+      distanceMiles: milesBetween(center.lat, center.lon, airport.lat, airport.lon)
+    }))
+    .filter((airport) => airport.distanceMiles <= radiusMiles)
+    .sort((a, b) => a.distanceMiles - b.distanceMiles)
+    .slice(0, 120);
+
+  return {
+    aircraft: aircraftRows,
+    airports: airportMatches,
+    source: "adsb.fi web"
+  };
+}
+
 async function fetchTraffic() {
   const params = new URLSearchParams({
     lat: center.lat,
@@ -175,13 +331,14 @@ async function fetchTraffic() {
 
   try {
     if (demoModeInput.checked) throw new Error("Demo mode is on");
-    const [trafficData, airportData] = await Promise.all([
-      getJson(`/api/aircraft?${params}`),
-      getJson(`/api/airports?${params}`)
-    ]);
-    aircraft = trafficData.aircraft || [];
-    airports = airportData.airports || [];
-    lastDataSource = "adsb.fi";
+    const localHostnames = new Set(["localhost", "127.0.0.1", "::1"]);
+    const data = localHostnames.has(window.location.hostname)
+      ? await fetchLocalTraffic(params).catch(() => fetchStaticTraffic())
+      : await fetchStaticTraffic();
+
+    aircraft = data.aircraft;
+    airports = data.airports;
+    lastDataSource = data.source;
     statusEl.textContent = `Live ADS-B feed active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
   } catch (error) {
     aircraft = createDemoAircraft();
@@ -200,7 +357,7 @@ function renderList() {
   airportCountEl.textContent = airports.length;
   rangeReadoutEl.textContent = `${radiusMiles} mi`;
   lastUpdateEl.textContent = lastFetchAt
-    ? `${lastDataSource} • ${new Date(lastFetchAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+    ? `${lastDataSource} | ${new Date(lastFetchAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
     : "No sweep yet";
 
   const sorted = aircraft
@@ -320,7 +477,7 @@ function drawAircraft(scope) {
     const heading = Number.isFinite(Number(plane.track)) ? ((Number(plane.track) - 90) * Math.PI) / 180 : -Math.PI / 2;
     ctx.translate(point.x, point.y);
     ctx.rotate(heading);
-    ctx.fillStyle = plane.emergency ? "#ff6a75" : "#e9fff3";
+    ctx.fillStyle = plane.emergency && plane.emergency !== "none" ? "#ff6a75" : "#e9fff3";
     ctx.beginPath();
     ctx.moveTo(10, 0);
     ctx.lineTo(-7, -5);
