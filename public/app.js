@@ -1,9 +1,9 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
 const form = document.querySelector("#controls");
+const airportSelect = document.querySelector("#airportSelect");
 const latInput = document.querySelector("#lat");
 const lonInput = document.querySelector("#lon");
-const demoModeInput = document.querySelector("#demoMode");
 const rangeButtons = document.querySelector("#rangeButtons");
 const statusEl = document.querySelector("#status");
 const planeCountEl = document.querySelector("#planeCount");
@@ -19,8 +19,8 @@ const adsbBaseUrl = "https://opendata.adsb.fi/api/v3";
 const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
 const tracks = new Map();
 
-let center = { lat: 33.4484, lon: -112.074 };
-let radiusMiles = 20;
+let center = { lat: 33.7292, lon: -111.9918 };
+let radiusMiles = 15;
 let aircraft = [];
 let airports = [];
 let running = false;
@@ -213,41 +213,6 @@ function updateTrackHistory(nextAircraft) {
   }
 }
 
-function createDemoAircraft() {
-  const base = Date.now() / 1000;
-  const demo = [
-    ["AAL204", "N817AN", "B789", 0.27, 0.18, 34000, 477, 244],
-    ["SWA1187", "N8675A", "B38M", -0.2, 0.26, 18250, 318, 128],
-    ["N42EV", "N42EV", "C172", 0.08, -0.12, 4200, 104, 44],
-    ["DAL943", "N376DN", "A321", -0.38, -0.18, 29100, 424, 300],
-    ["UPS612", "N461UP", "B752", 0.42, -0.04, 11800, 261, 92]
-  ];
-
-  return demo.map(([callsign, nNumber, type, latOffset, lonOffset, altitude, speed, track], index) => {
-    const drift = ((base / 26 + index) % 1) - 0.5;
-    return {
-      hex: `demo${index}`,
-      callsign,
-      nNumber,
-      type,
-      lat: center.lat + latOffset + Math.sin(base / 54 + index) * 0.035 + drift * 0.025,
-      lon: center.lon + lonOffset + Math.cos(base / 49 + index) * 0.04,
-      altitude,
-      speed,
-      track
-    };
-  });
-}
-
-function createDemoAirports() {
-  return [
-    { ident: "KPHX", iata: "PHX", name: "Phoenix Sky Harbor Intl", type: "large_airport", lat: 33.4353, lon: -112.006 },
-    { ident: "KDVT", iata: "DVT", name: "Phoenix Deer Valley", type: "medium_airport", lat: 33.6883, lon: -112.083 },
-    { ident: "KGEU", iata: "GEU", name: "Glendale Municipal", type: "small_airport", lat: 33.5269, lon: -112.295 },
-    { ident: "KIWA", iata: "AZA", name: "Phoenix-Mesa Gateway", type: "large_airport", lat: 33.3078, lon: -111.655 }
-  ].filter((airport) => milesBetween(center.lat, center.lon, airport.lat, airport.lon) <= radiusMiles);
-}
-
 async function getJson(url) {
   const response = await fetch(url);
   const payload = await response.json();
@@ -330,7 +295,6 @@ async function fetchTraffic() {
   });
 
   try {
-    if (demoModeInput.checked) throw new Error("Demo mode is on");
     const localHostnames = new Set(["localhost", "127.0.0.1", "::1"]);
     const data = localHostnames.has(window.location.hostname)
       ? await fetchLocalTraffic(params).catch(() => fetchStaticTraffic())
@@ -341,10 +305,10 @@ async function fetchTraffic() {
     lastDataSource = data.source;
     statusEl.textContent = `Live ADS-B feed active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
   } catch (error) {
-    aircraft = createDemoAircraft();
-    airports = createDemoAirports();
-    lastDataSource = "demo";
-    statusEl.textContent = `Using animated demo traffic. Live data was unavailable: ${error.message}.`;
+    aircraft = [];
+    airports = [];
+    lastDataSource = "offline";
+    statusEl.textContent = `Live data unavailable: ${error.message}.`;
   }
 
   updateTrackHistory(aircraft);
@@ -498,20 +462,26 @@ function drawAircraft(scope) {
 }
 
 function drawSweep(scope, angle) {
-  const gradient = ctx.createRadialGradient(scope.cx, scope.cy, 0, scope.cx, scope.cy, scope.radius);
-  gradient.addColorStop(0, "rgba(77, 255, 155, 0.34)");
-  gradient.addColorStop(0.75, "rgba(77, 255, 155, 0.12)");
-  gradient.addColorStop(1, "rgba(77, 255, 155, 0)");
-
+  const trailSegments = 28;
+  const trailWidth = 1.35;
   ctx.save();
   ctx.translate(scope.cx, scope.cy);
+
+  for (let index = 0; index < trailSegments; index += 1) {
+    const progress = index / trailSegments;
+    const segmentAngle = angle - progress * trailWidth;
+    const alpha = (1 - progress) ** 2 * 0.2;
+    const innerRadius = scope.radius * 0.04;
+
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(segmentAngle) * innerRadius, Math.sin(segmentAngle) * innerRadius);
+    ctx.arc(0, 0, scope.radius, segmentAngle - 0.026, segmentAngle + 0.026);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(77, 255, 155, ${alpha})`;
+    ctx.fill();
+  }
+
   ctx.rotate(angle);
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.arc(0, 0, scope.radius, -0.24, 0.035);
-  ctx.closePath();
-  ctx.fillStyle = gradient;
-  ctx.fill();
 
   ctx.strokeStyle = "rgba(148, 255, 199, 0.96)";
   ctx.lineWidth = 2;
@@ -583,6 +553,25 @@ rangeButtons.addEventListener("click", (event) => {
   setRange(Number(button.dataset.range));
   if (running) fetchTraffic();
 });
+
+airportSelect.addEventListener("change", () => {
+  if (!airportSelect.value) return;
+  const [lat, lon] = airportSelect.value.split(",").map(Number);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+
+  latInput.value = lat.toFixed(4);
+  lonInput.value = lon.toFixed(4);
+  center = { lat, lon };
+  tracks.clear();
+
+  if (running) fetchTraffic();
+});
+
+for (const input of [latInput, lonInput]) {
+  input.addEventListener("input", () => {
+    airportSelect.value = "";
+  });
+}
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();

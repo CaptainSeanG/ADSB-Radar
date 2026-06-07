@@ -22,12 +22,28 @@
 
         <form id="controls" class="controls">
           <label>
+            Airport
+            <select id="airportSelect" name="airport">
+              <option value="">Custom coordinates</option>
+              <option value="33.7292,-111.9918" selected>Default position</option>
+              <option value="33.6883,-112.0830">KDVT - Phoenix Deer Valley</option>
+              <option value="33.4353,-112.0059">KPHX - Phoenix Sky Harbor</option>
+              <option value="33.6229,-111.9110">KSDL - Scottsdale</option>
+              <option value="33.4608,-111.7280">KFFZ - Falcon Field</option>
+              <option value="33.5269,-112.2950">KGEU - Glendale Municipal</option>
+              <option value="33.3078,-111.6555">KIWA - Phoenix-Mesa Gateway</option>
+              <option value="33.2691,-111.8110">KCHD - Chandler Municipal</option>
+              <option value="33.4225,-112.3760">KGYR - Phoenix Goodyear</option>
+              <option value="33.5350,-112.3830">KLUF - Luke AFB</option>
+            </select>
+          </label>
+          <label>
             Latitude
-            <input id="lat" name="lat" inputmode="decimal" value="33.4484" required />
+            <input id="lat" name="lat" inputmode="decimal" value="33.7292" required />
           </label>
           <label>
             Longitude
-            <input id="lon" name="lon" inputmode="decimal" value="-112.0740" required />
+            <input id="lon" name="lon" inputmode="decimal" value="-111.9918" required />
           </label>
 
           <fieldset>
@@ -35,18 +51,14 @@
             <div class="range-buttons" id="rangeButtons">
               <button type="button" data-range="5">5</button>
               <button type="button" data-range="10">10</button>
-              <button type="button" data-range="15">15</button>
-              <button type="button" data-range="20" class="active">20</button>
+              <button type="button" data-range="15" class="active">15</button>
+              <button type="button" data-range="20">20</button>
               <button type="button" data-range="50">50</button>
               <button type="button" data-range="100">100</button>
             </div>
           </fieldset>
 
-          <div class="switch-row">
-            <label class="switch">
-              <input id="demoMode" type="checkbox" />
-              <span>Demo fallback</span>
-            </label>
+          <div class="action-row">
             <button class="primary" type="submit">Start Radar</button>
           </div>
         </form>
@@ -61,7 +73,7 @@
             <small>Airports</small>
           </div>
           <div>
-            <span id="rangeReadout">20 mi</span>
+            <span id="rangeReadout">15 mi</span>
             <small>Range</small>
           </div>
         </section>

@@ -10,7 +10,7 @@ A laptop-friendly radar display that reads aircraft around a user-entered latitu
 - Aircraft labels with registration/N-number when available, callsign, type, altitude, speed, and distance.
 - Trend lines from recent positions.
 - Nearby airport reference markers from OurAirports data.
-- Demo fallback when live data or airport data is unavailable.
+- Airport selector that can fill coordinates for known airports.
 - No third-party npm dependencies, which keeps the Raspberry Pi path straightforward.
 
 ## Run
@@ -61,4 +61,4 @@ The page will be available at:
 https://captainseang.github.io/ADSB-Radar/
 ```
 
-The static page tries to fetch `adsb.fi` and OurAirports directly from the browser. If a live data request is blocked by browser CORS rules or unavailable, the radar automatically switches to demo traffic. For guaranteed live traffic on a public web URL, deploy the included Node server or add a small hosted proxy.
+The static page tries to fetch `adsb.fi` and OurAirports directly from the browser. If a live data request is blocked by browser CORS rules or unavailable, the radar shows an offline state. For guaranteed live traffic on a public web URL, deploy the included Node server or add a small hosted proxy.

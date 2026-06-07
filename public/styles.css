@@ -35,7 +35,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -129,7 +130,8 @@ legend {
   text-transform: uppercase;
 }
 
-input {
+input,
+select {
   display: block;
   width: 100%;
   margin-top: 7px;
@@ -141,7 +143,17 @@ input {
   outline: none;
 }
 
-input:focus {
+select {
+  appearance: none;
+  background:
+    linear-gradient(45deg, transparent 50%, rgba(233, 255, 243, 0.78) 50%) right 17px center / 7px 7px no-repeat,
+    linear-gradient(135deg, rgba(233, 255, 243, 0.78) 50%, transparent 50%) right 12px center / 7px 7px no-repeat,
+    rgba(0, 0, 0, 0.3);
+  padding-right: 34px;
+}
+
+input:focus,
+select:focus {
   border-color: var(--green);
   box-shadow: 0 0 0 3px rgba(77, 255, 155, 0.14);
 }
@@ -179,25 +191,10 @@ fieldset {
   color: #d9ffe8;
 }
 
-.switch-row {
+.action-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
+  grid-template-columns: 1fr;
   align-items: center;
-}
-
-.switch {
-  display: flex;
-  gap: 9px;
-  align-items: center;
-  text-transform: none;
-}
-
-.switch input {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--green);
 }
 
 .primary {
@@ -325,7 +322,7 @@ fieldset {
     padding: 10px;
   }
 
-  .switch-row {
+  .action-row {
     grid-template-columns: 1fr;
   }
 
