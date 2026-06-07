@@ -37,7 +37,7 @@ let radiusMiles = 15;
 let aircraft = [];
 let airports = [];
 let airspaces = [];
-let running = false;
+let running = true;
 let lastSweepBucket = -1;
 let lastFetchAt = 0;
 let lastDataSource = "standby";
@@ -698,7 +698,7 @@ rangeButtons.addEventListener("click", (event) => {
   if (!button) return;
   setRange(Number(button.dataset.range));
   fetchAirspace();
-  if (running) fetchTraffic();
+  fetchTraffic();
 });
 
 airspaceToggles.addEventListener("change", () => {
@@ -720,7 +720,7 @@ function applySelectedAirport() {
 airportSelect.addEventListener("change", () => {
   applySelectedAirport();
   fetchAirspace();
-  if (running) fetchTraffic();
+  fetchTraffic();
 });
 
 for (const input of [latInput, lonInput]) {
@@ -731,22 +731,30 @@ for (const input of [latInput, lonInput]) {
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
+  applyManualCoordinates();
+});
+
+function applyManualCoordinates() {
   const lat = Number(latInput.value);
   const lon = Number(lonInput.value);
 
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
     statusEl.textContent = "Latitude must be -90 to 90 and longitude must be -180 to 180.";
-    return;
+    return false;
   }
 
   center = { lat, lon };
-  running = true;
   tracks.clear();
   lastAirspaceKey = "";
-  statusEl.textContent = "Sweep started. Refreshing aircraft on each pass.";
+  statusEl.textContent = "Radar sweep active. Updating aircraft every pass.";
   fetchAirspace();
   fetchTraffic();
-});
+  return true;
+}
+
+for (const input of [latInput, lonInput]) {
+  input.addEventListener("change", applyManualCoordinates);
+}
 
 window.addEventListener("resize", resizeCanvas);
 
@@ -754,4 +762,5 @@ applySelectedAirport();
 resizeCanvas();
 renderList();
 fetchAirspace();
+fetchTraffic();
 requestAnimationFrame(render);

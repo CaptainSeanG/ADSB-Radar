@@ -17,7 +17,7 @@
         <header>
           <p class="eyebrow">ADS-B Radar</p>
           <h1>Local Airspace</h1>
-          <p id="status">Enter a position and start the sweep.</p>
+          <p id="status">Radar sweep active. Updating aircraft every pass.</p>
         </header>
 
         <form id="controls" class="controls">
@@ -61,15 +61,11 @@
           <fieldset>
             <legend>Airspace</legend>
             <div class="airspace-toggles" id="airspaceToggles">
-              <label><input type="checkbox" data-class="B" checked /><span>Class B</span></label>
-              <label><input type="checkbox" data-class="C" checked /><span>Class C</span></label>
-              <label><input type="checkbox" data-class="D" checked /><span>Class D</span></label>
+              <label><input type="checkbox" data-class="B" /><span>Class B</span></label>
+              <label><input type="checkbox" data-class="C" /><span>Class C</span></label>
+              <label><input type="checkbox" data-class="D" /><span>Class D</span></label>
             </div>
           </fieldset>
-
-          <div class="action-row">
-            <button class="primary" type="submit">Start Radar</button>
-          </div>
         </form>
 
         <section class="metrics" aria-label="Radar metrics">
@@ -90,14 +86,14 @@
         <section class="traffic">
           <div class="section-title">
             <h2>Traffic</h2>
-            <span id="lastUpdate">No sweep yet</span>
+            <span id="lastUpdate">Starting sweep</span>
           </div>
           <ol id="aircraftList"></ol>
         </section>
       </aside>
     </main>
 
-    <script src="./config.js?v=20260607-4"></script>
-    <script type="module" src="./app.js?v=20260607-4"></script>
+    <script src="./config.js?v=20260607-5"></script>
+    <script type="module" src="./app.js?v=20260607-5"></script>
   </body>
 </html>

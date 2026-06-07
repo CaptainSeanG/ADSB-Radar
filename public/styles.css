@@ -172,8 +172,7 @@ fieldset {
   margin-top: 8px;
 }
 
-.range-buttons button,
-.primary {
+.range-buttons button {
   min-height: 40px;
   border: 1px solid rgba(132, 255, 194, 0.26);
   border-radius: 6px;
@@ -222,19 +221,6 @@ fieldset {
 .airspace-toggles label:has(input:checked) {
   border-color: rgba(98, 213, 255, 0.58);
   background: rgba(98, 213, 255, 0.14);
-}
-
-.action-row {
-  display: grid;
-  grid-template-columns: 1fr;
-  align-items: center;
-}
-
-.primary {
-  background: linear-gradient(180deg, rgba(77, 255, 155, 0.9), rgba(31, 151, 91, 0.92));
-  color: #021308;
-  font-weight: 850;
-  padding: 0 16px;
 }
 
 .metrics {
@@ -353,10 +339,6 @@ fieldset {
 @media (max-width: 520px) {
   .shell {
     padding: 10px;
-  }
-
-  .action-row {
-    grid-template-columns: 1fr;
   }
 
   .range-buttons {
