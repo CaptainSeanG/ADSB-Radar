@@ -1,4 +1,7 @@
-const ADSB_BASE_URL = "https://opendata.adsb.fi/api/v3";
+const ADSB_BASE_URLS = [
+  "https://opendata.adsb.fi/api/v3",
+  "https://api.adsb.lol/v2"
+];
 
 const corsHeaders = {
   "access-control-allow-origin": "*",
@@ -69,20 +72,39 @@ async function handleAircraft(url) {
   }
 
   const radiusNm = Math.max(1, Math.min(250, milesToNauticalMiles(radiusMiles)));
-  const endpoint = `${ADSB_BASE_URL}/lat/${lat}/lon/${lon}/dist/${radiusNm.toFixed(1)}`;
-  let response;
-  try {
-    response = await fetch(endpoint, {
-      headers: {
-        accept: "application/json"
-      }
-    });
-  } catch (error) {
-    return jsonResponse({ error: "Unable to reach adsb.fi", detail: error.message }, 502);
+  let response = null;
+  const failures = [];
+
+  for (const baseUrl of ADSB_BASE_URLS) {
+    const endpoint = `${baseUrl}/lat/${lat}/lon/${lon}/dist/${radiusNm.toFixed(1)}`;
+
+    try {
+      response = await fetch(endpoint, {
+        headers: {
+          accept: "application/json"
+        }
+      });
+    } catch (error) {
+      failures.push(`${baseUrl}: ${error.message}`);
+      continue;
+    }
+
+    if (response.ok) {
+      break;
+    }
+
+    failures.push(`${baseUrl}: HTTP ${response.status}`);
+    response = null;
   }
 
-  if (!response.ok) {
-    return jsonResponse({ error: `adsb.fi returned ${response.status}` }, 502);
+  if (!response) {
+    return jsonResponse(
+      {
+        error: "All ADS-B upstreams failed",
+        detail: failures
+      },
+      502
+    );
   }
 
   const data = await response.json();
@@ -92,7 +114,7 @@ async function handleAircraft(url) {
     .filter((plane) => distanceMiles(lat, lon, plane.lat, plane.lon) <= radiusMiles + 1);
 
   return jsonResponse({
-    source: "adsb.fi worker",
+    source: "ADS-B worker",
     now: data.now || Date.now() / 1000,
     aircraft,
     total: aircraft.length
