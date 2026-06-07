@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./public/styles.css?v=20260607-6" />
+    <link rel="stylesheet" href="./public/styles.css?v=20260607-7" />
   </head>
   <body>
     <main class="shell">
@@ -15,15 +15,12 @@
 
       <aside class="panel" aria-label="Radar controls and aircraft list">
         <header>
-          <div class="panel-title-row">
-            <div>
-              <p class="eyebrow">ADS-B Radar</p>
-              <h1>Local Airspace</h1>
-            </div>
-            <button type="button" class="settings-button" id="settingsOpen">Settings</button>
-          </div>
+          <p class="eyebrow">ADS-B Radar</p>
+          <h1>Local Airspace</h1>
           <p id="status">Radar sweep active. Updating aircraft every pass.</p>
         </header>
+
+        <button type="button" class="settings-button" id="settingsOpen">Radar Settings</button>
 
         <form id="controls" class="controls">
           <label>
@@ -125,7 +122,7 @@
       </section>
     </div>
 
-    <script src="./public/config.js?v=20260607-6"></script>
-    <script type="module" src="./public/app.js?v=20260607-6"></script>
+    <script src="./public/config.js?v=20260607-7"></script>
+    <script type="module" src="./public/app.js?v=20260607-7"></script>
   </body>
 </html>

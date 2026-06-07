@@ -100,13 +100,6 @@ select {
   text-transform: uppercase;
 }
 
-.panel-title-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-}
-
 h1,
 h2,
 p {
@@ -128,11 +121,15 @@ h1 {
 }
 
 .settings-button {
-  min-height: 36px;
-  padding: 0 12px;
+  width: 100%;
+  min-height: 46px;
+  padding: 0 14px;
+  background: linear-gradient(135deg, rgba(77, 255, 155, 0.18), rgba(98, 213, 255, 0.12));
   color: var(--green);
-  font-size: 0.78rem;
-  font-weight: 800;
+  font-size: 0.88rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .settings-button:hover,
