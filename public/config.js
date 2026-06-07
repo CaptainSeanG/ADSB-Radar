@@ -1,1 +1,1 @@
-window.ADSB_RADAR_PROXY_URL = "";
+window.ADSB_RADAR_PROXY_URL = "https://adsb-radar-proxy.macgyver2.workers.dev";

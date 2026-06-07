@@ -70,12 +70,16 @@ async function handleAircraft(url) {
 
   const radiusNm = Math.max(1, Math.min(250, milesToNauticalMiles(radiusMiles)));
   const endpoint = `${ADSB_BASE_URL}/lat/${lat}/lon/${lon}/dist/${radiusNm.toFixed(1)}`;
-  const response = await fetch(endpoint, {
-    headers: {
-      accept: "application/json",
-      "user-agent": "ADSB Radar Cloudflare Worker"
-    }
-  });
+  let response;
+  try {
+    response = await fetch(endpoint, {
+      headers: {
+        accept: "application/json"
+      }
+    });
+  } catch (error) {
+    return jsonResponse({ error: "Unable to reach adsb.fi", detail: error.message }, 502);
+  }
 
   if (!response.ok) {
     return jsonResponse({ error: `adsb.fi returned ${response.status}` }, 502);
