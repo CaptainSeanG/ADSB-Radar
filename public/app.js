@@ -11,24 +11,21 @@ const settingsClose = document.querySelector("#settingsClose");
 const settingsModal = document.querySelector("#settingsModal");
 const breadcrumbLengthInput = document.querySelector("#breadcrumbLength");
 const breadcrumbReadout = document.querySelector("#breadcrumbReadout");
-const sweepColors = document.querySelector("#sweepColors");
+const groundTrafficToggle = document.querySelector("#groundTrafficToggle");
+const sweepColorToggle = document.querySelector("#sweepColorToggle");
+const aircraftModal = document.querySelector("#aircraftModal");
+const aircraftClose = document.querySelector("#aircraftClose");
+const aircraftDetail = document.querySelector("#aircraftDetail");
 const statusEl = document.querySelector("#status");
-const planeCountEl = document.querySelector("#planeCount");
-const airportCountEl = document.querySelector("#airportCount");
-const rangeReadoutEl = document.querySelector("#rangeReadout");
 const lastUpdateEl = document.querySelector("#lastUpdate");
 const aircraftListEl = document.querySelector("#aircraftList");
 
 const sweepSeconds = 4.2;
-const allowedRanges = [5, 10, 15, 20, 50, 100];
+const allowedRanges = [2, 5, 10, 15, 20, 50, 100];
 const sweepPalettes = {
   green: {
     trail: "77, 255, 155",
     line: "rgba(148, 255, 199, 0.96)"
-  },
-  yellow: {
-    trail: "255, 220, 92",
-    line: "rgba(255, 232, 128, 0.96)"
   },
   orange: {
     trail: "255, 155, 64",
@@ -55,6 +52,7 @@ let center = { lat: 33.7292, lon: -111.9918 };
 let radiusMiles = 15;
 let breadcrumbLimit = 12;
 let sweepColor = "green";
+let showGroundTraffic = true;
 let aircraft = [];
 let airports = [];
 let airspaces = [];
@@ -65,6 +63,7 @@ let lastDataSource = "standby";
 let pixelRatio = window.devicePixelRatio || 1;
 let airportsCachePromise = null;
 let lastAirspaceKey = "";
+let aircraftHitAreas = [];
 
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
@@ -234,6 +233,18 @@ function escapeHtml(value) {
 
 function planeLabel(plane) {
   return plane.nNumber || plane.callsign || plane.hex || "Unknown";
+}
+
+function isGroundTraffic(plane) {
+  return plane.altitude === "ground";
+}
+
+function visibleAircraft() {
+  return showGroundTraffic ? aircraft : aircraft.filter((plane) => !isGroundTraffic(plane));
+}
+
+function aircraftKey(plane) {
+  return plane.hex || plane.nNumber || plane.callsign || `${plane.lat},${plane.lon}`;
 }
 
 function updateTrackHistory(nextAircraft) {
@@ -429,14 +440,11 @@ async function fetchTraffic() {
 }
 
 function renderList() {
-  planeCountEl.textContent = aircraft.length;
-  airportCountEl.textContent = airports.length;
-  rangeReadoutEl.textContent = `${radiusMiles} mi`;
   lastUpdateEl.textContent = lastFetchAt
-    ? `${lastDataSource} | ${new Date(lastFetchAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+    ? new Date(lastFetchAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : "No sweep yet";
 
-  const sorted = aircraft
+  const sorted = visibleAircraft()
     .map((plane) => ({
       ...plane,
       distance: milesBetween(center.lat, center.lon, plane.lat, plane.lon)
@@ -448,6 +456,7 @@ function renderList() {
     .map(
       (plane) => `
         <li>
+          <button type="button" class="aircraft-row" data-aircraft-key="${escapeHtml(aircraftKey(plane))}">
           <div class="plane-head">
             <span>${escapeHtml(planeLabel(plane))}</span>
             <span>${escapeHtml(plane.type || "TYPE ?")}</span>
@@ -457,6 +466,7 @@ function renderList() {
             <span>${formatSpeed(plane.speed)}</span>
             <span>${plane.distance.toFixed(1)} mi</span>
           </div>
+          </button>
         </li>
       `
     )
@@ -597,11 +607,13 @@ function drawTrack(scope, plane) {
 function drawAircraft(scope) {
   ctx.save();
   ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
+  aircraftHitAreas = [];
 
-  for (const plane of aircraft) {
+  for (const plane of visibleAircraft()) {
     const point = project(plane.lat, plane.lon, scope);
     if (point.distance > radiusMiles) continue;
 
+    aircraftHitAreas.push({ key: aircraftKey(plane), x: point.x, y: point.y, plane });
     drawTrack(scope, plane);
 
     const heading = Number.isFinite(Number(plane.track)) ? ((Number(plane.track) - 90) * Math.PI) / 180 : -Math.PI / 2;
@@ -663,12 +675,8 @@ function drawHud(scope) {
   ctx.save();
   ctx.fillStyle = "rgba(233, 255, 243, 0.75)";
   ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
-  ctx.textAlign = "left";
-  ctx.fillText(`CENTER ${center.lat.toFixed(4)} ${center.lon.toFixed(4)}`, 22, 28);
-  ctx.fillText(`RANGE ${radiusMiles} STATUTE MI`, 22, 48);
-  ctx.fillText(`SOURCE ${lastDataSource.toUpperCase()}`, 22, 68);
   ctx.textAlign = "right";
-  ctx.fillText(`${aircraft.length} TRACKS`, scope.width - 22, 28);
+  ctx.fillText(`${visibleAircraft().length} TRACKS`, scope.width - 22, 28);
   ctx.fillText(`${airports.length} AIRPORTS`, scope.width - 22, 48);
   ctx.restore();
 }
@@ -712,7 +720,6 @@ function setRange(nextRange) {
   for (const button of rangeButtons.querySelectorAll("button")) {
     button.classList.toggle("active", Number(button.dataset.range) === radiusMiles);
   }
-  rangeReadoutEl.textContent = `${radiusMiles} mi`;
 }
 
 rangeButtons.addEventListener("click", (event) => {
@@ -735,6 +742,32 @@ function closeSettings() {
   settingsModal.hidden = true;
 }
 
+function openAircraftDetails(plane) {
+  if (!plane) return;
+  const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
+  const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
+  aircraftDetail.innerHTML = `
+    <div class="detail-title">${escapeHtml(planeLabel(plane))}</div>
+    <dl>
+      <div><dt>Type</dt><dd>${escapeHtml(plane.type || "Unknown")}</dd></div>
+      <div><dt>Callsign</dt><dd>${escapeHtml(plane.callsign || "Unknown")}</dd></div>
+      <div><dt>ICAO</dt><dd>${escapeHtml(plane.hex || "Unknown")}</dd></div>
+      <div><dt>Altitude</dt><dd>${formatAltitude(plane.altitude)}</dd></div>
+      <div><dt>Speed</dt><dd>${formatSpeed(plane.speed)}</dd></div>
+      <div><dt>Track</dt><dd>${Number.isFinite(Number(plane.track)) ? `${Math.round(Number(plane.track))} deg` : "Unknown"}</dd></div>
+      <div><dt>Distance</dt><dd>${distance.toFixed(1)} mi</dd></div>
+      <div><dt>Bearing</dt><dd>${Math.round(bearing)} deg</dd></div>
+      <div><dt>Vertical rate</dt><dd>${Number.isFinite(Number(plane.verticalRate)) ? `${Math.round(Number(plane.verticalRate))} fpm` : "Unknown"}</dd></div>
+      <div><dt>Position</dt><dd>${plane.lat.toFixed(4)}, ${plane.lon.toFixed(4)}</dd></div>
+    </dl>
+  `;
+  aircraftModal.hidden = false;
+}
+
+function closeAircraftDetails() {
+  aircraftModal.hidden = true;
+}
+
 function trimTrackHistories() {
   for (const [key, history] of tracks.entries()) {
     tracks.set(key, history.slice(-breadcrumbLimit));
@@ -748,8 +781,15 @@ settingsModal.addEventListener("click", (event) => {
   if (event.target === settingsModal) closeSettings();
 });
 
+aircraftClose.addEventListener("click", closeAircraftDetails);
+
+aircraftModal.addEventListener("click", (event) => {
+  if (event.target === aircraftModal) closeAircraftDetails();
+});
+
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !settingsModal.hidden) closeSettings();
+  if (event.key === "Escape" && !aircraftModal.hidden) closeAircraftDetails();
 });
 
 breadcrumbLengthInput.addEventListener("input", () => {
@@ -758,10 +798,27 @@ breadcrumbLengthInput.addEventListener("input", () => {
   trimTrackHistories();
 });
 
-sweepColors.addEventListener("change", (event) => {
-  const input = event.target.closest("input[name='sweepColor']");
-  if (!input || !input.checked) return;
-  sweepColor = sweepPalettes[input.value] ? input.value : "green";
+sweepColorToggle.addEventListener("change", () => {
+  sweepColor = sweepColorToggle.checked ? "orange" : "green";
+});
+
+groundTrafficToggle.addEventListener("change", () => {
+  showGroundTraffic = groundTrafficToggle.checked;
+  renderList();
+});
+
+aircraftListEl.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-aircraft-key]");
+  if (!button) return;
+  openAircraftDetails(visibleAircraft().find((plane) => aircraftKey(plane) === button.dataset.aircraftKey));
+});
+
+canvas.addEventListener("click", (event) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
+  const hit = aircraftHitAreas.find((area) => Math.hypot(area.x - x, area.y - y) <= 18);
+  if (hit) openAircraftDetails(hit.plane);
 });
 
 function applySelectedAirport() {

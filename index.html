@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./public/styles.css?v=20260607-7" />
+    <link rel="stylesheet" href="./public/styles.css?v=20260607-8" />
   </head>
   <body>
     <main class="shell">
@@ -39,18 +39,21 @@
               <option value="33.5350,-112.3830">KLUF - Luke AFB</option>
             </select>
           </label>
-          <label>
-            Latitude
-            <input id="lat" name="lat" inputmode="decimal" value="33.7292" required />
-          </label>
-          <label>
-            Longitude
-            <input id="lon" name="lon" inputmode="decimal" value="-111.9918" required />
-          </label>
+          <div class="coord-row">
+            <label>
+              Latitude
+              <input id="lat" name="lat" inputmode="decimal" value="33.7292" required />
+            </label>
+            <label>
+              Longitude
+              <input id="lon" name="lon" inputmode="decimal" value="-111.9918" required />
+            </label>
+          </div>
 
           <fieldset>
             <legend>Range</legend>
             <div class="range-buttons" id="rangeButtons">
+              <button type="button" data-range="2">2</button>
               <button type="button" data-range="5">5</button>
               <button type="button" data-range="10">10</button>
               <button type="button" data-range="15" class="active">15</button>
@@ -61,21 +64,6 @@
           </fieldset>
 
         </form>
-
-        <section class="metrics" aria-label="Radar metrics">
-          <div>
-            <span id="planeCount">0</span>
-            <small>Aircraft</small>
-          </div>
-          <div>
-            <span id="airportCount">0</span>
-            <small>Airports</small>
-          </div>
-          <div>
-            <span id="rangeReadout">15 mi</span>
-            <small>Range</small>
-          </div>
-        </section>
 
         <section class="traffic">
           <div class="section-title">
@@ -110,19 +98,33 @@
             <output id="breadcrumbReadout">12</output>
           </label>
 
+          <label class="switch-row">
+            <span>Ground traffic</span>
+            <input id="groundTrafficToggle" type="checkbox" checked />
+          </label>
+
           <fieldset>
             <legend>Sweep color</legend>
-            <div class="sweep-colors" id="sweepColors">
-              <label><input type="radio" name="sweepColor" value="green" checked /><span>Green</span></label>
-              <label><input type="radio" name="sweepColor" value="yellow" /><span>Yellow</span></label>
-              <label><input type="radio" name="sweepColor" value="orange" /><span>Orange</span></label>
-            </div>
+            <label class="switch-row">
+              <span>Orange sweep</span>
+              <input id="sweepColorToggle" type="checkbox" />
+            </label>
           </fieldset>
         </div>
       </section>
     </div>
 
-    <script src="./public/config.js?v=20260607-7"></script>
-    <script type="module" src="./public/app.js?v=20260607-7"></script>
+    <div class="modal-backdrop" id="aircraftModal" hidden>
+      <section class="settings-modal aircraft-modal" role="dialog" aria-modal="true" aria-labelledby="aircraftTitle">
+        <header class="settings-header">
+          <h2 id="aircraftTitle">Aircraft</h2>
+          <button type="button" class="icon-button" id="aircraftClose" aria-label="Close aircraft details">x</button>
+        </header>
+        <div class="aircraft-detail" id="aircraftDetail"></div>
+      </section>
+    </div>
+
+    <script src="./public/config.js?v=20260607-8"></script>
+    <script type="module" src="./public/app.js?v=20260607-8"></script>
   </body>
 </html>

@@ -149,6 +149,12 @@ h1 {
   gap: 14px;
 }
 
+.coord-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 label,
 legend {
   color: var(--muted);
@@ -194,7 +200,7 @@ fieldset {
 
 .range-buttons {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 6px;
   margin-top: 8px;
 }
@@ -319,37 +325,57 @@ fieldset {
   font: 850 1rem ui-monospace, SFMono-Regular, Consolas, monospace;
 }
 
-.sweep-colors {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 8px;
-}
-
-.sweep-colors label {
+.switch-row {
   display: flex;
-  min-height: 40px;
+  min-height: 44px;
   align-items: center;
-  justify-content: center;
-  gap: 7px;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 8px;
   border: 1px solid rgba(132, 255, 194, 0.2);
   border-radius: 6px;
   background: rgba(0, 0, 0, 0.2);
   color: var(--text);
   cursor: pointer;
+  padding: 8px 10px 8px 12px;
   text-transform: none;
 }
 
-.sweep-colors input {
-  width: 16px;
-  height: 16px;
+.switch-row input {
+  position: relative;
+  width: 48px;
+  min-width: 48px;
+  height: 26px;
   margin: 0;
-  accent-color: var(--amber);
+  appearance: none;
+  border: 1px solid rgba(132, 255, 194, 0.28);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.34);
+  cursor: pointer;
+  padding: 0;
+  transition: background 160ms ease, border-color 160ms ease;
 }
 
-.sweep-colors label:has(input:checked) {
-  border-color: rgba(255, 207, 106, 0.62);
-  background: rgba(255, 207, 106, 0.13);
+.switch-row input::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+.switch-row input:checked {
+  border-color: var(--green);
+  background: rgba(77, 255, 155, 0.2);
+}
+
+.switch-row input:checked::after {
+  transform: translateX(22px);
+  background: var(--green);
 }
 
 .metrics {
@@ -416,7 +442,23 @@ fieldset {
   border: 1px solid rgba(132, 255, 194, 0.16);
   border-radius: 8px;
   background: var(--panel-strong);
+  padding: 0;
+}
+
+.aircraft-row {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
   padding: 11px 12px;
+  text-align: left;
+}
+
+.aircraft-row:hover {
+  background: rgba(77, 255, 155, 0.08);
 }
 
 .plane-head {
@@ -445,6 +487,45 @@ fieldset {
   font-size: 0.78rem;
 }
 
+.aircraft-detail {
+  color: var(--text);
+}
+
+.detail-title {
+  margin-bottom: 14px;
+  color: var(--green);
+  font-size: 1.4rem;
+  font-weight: 850;
+}
+
+.aircraft-detail dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.aircraft-detail div {
+  border: 1px solid rgba(132, 255, 194, 0.16);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 10px;
+}
+
+.aircraft-detail dt {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.aircraft-detail dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-weight: 750;
+}
+
 @media (max-width: 900px) {
   body {
     overflow: auto;
@@ -471,14 +552,15 @@ fieldset {
   }
 
   .range-buttons {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .airspace-toggles {
     grid-template-columns: 1fr;
   }
 
-  .sweep-colors {
+  .coord-row,
+  .aircraft-detail dl {
     grid-template-columns: 1fr;
   }
 }
