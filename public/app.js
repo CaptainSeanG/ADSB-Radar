@@ -6,6 +6,12 @@ const latInput = document.querySelector("#lat");
 const lonInput = document.querySelector("#lon");
 const rangeButtons = document.querySelector("#rangeButtons");
 const airspaceToggles = document.querySelector("#airspaceToggles");
+const settingsOpen = document.querySelector("#settingsOpen");
+const settingsClose = document.querySelector("#settingsClose");
+const settingsModal = document.querySelector("#settingsModal");
+const breadcrumbLengthInput = document.querySelector("#breadcrumbLength");
+const breadcrumbReadout = document.querySelector("#breadcrumbReadout");
+const sweepColors = document.querySelector("#sweepColors");
 const statusEl = document.querySelector("#status");
 const planeCountEl = document.querySelector("#planeCount");
 const airportCountEl = document.querySelector("#airportCount");
@@ -14,8 +20,21 @@ const lastUpdateEl = document.querySelector("#lastUpdate");
 const aircraftListEl = document.querySelector("#aircraftList");
 
 const sweepSeconds = 4.2;
-const historyLimit = 12;
 const allowedRanges = [5, 10, 15, 20, 50, 100];
+const sweepPalettes = {
+  green: {
+    trail: "77, 255, 155",
+    line: "rgba(148, 255, 199, 0.96)"
+  },
+  yellow: {
+    trail: "255, 220, 92",
+    line: "rgba(255, 232, 128, 0.96)"
+  },
+  orange: {
+    trail: "255, 155, 64",
+    line: "rgba(255, 180, 92, 0.96)"
+  }
+};
 const adsbBaseUrl = "https://opendata.adsb.fi/api/v3";
 const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
 const airspaceQueryUrl =
@@ -34,6 +53,8 @@ const tracks = new Map();
 
 let center = { lat: 33.7292, lon: -111.9918 };
 let radiusMiles = 15;
+let breadcrumbLimit = 12;
+let sweepColor = "green";
 let aircraft = [];
 let airports = [];
 let airspaces = [];
@@ -229,7 +250,7 @@ function updateTrackHistory(nextAircraft) {
     if (!last || Math.abs(last.lat - plane.lat) > 0.0001 || Math.abs(last.lon - plane.lon) > 0.0001) {
       history.push({ lat: plane.lat, lon: plane.lon, at: now });
     }
-    tracks.set(key, history.slice(-historyLimit));
+    tracks.set(key, history.slice(-breadcrumbLimit));
   }
 
   for (const [key, history] of tracks.entries()) {
@@ -609,6 +630,7 @@ function drawAircraft(scope) {
 function drawSweep(scope, angle) {
   const trailSegments = 28;
   const trailWidth = 1.35;
+  const palette = sweepPalettes[sweepColor] || sweepPalettes.green;
   ctx.save();
   ctx.translate(scope.cx, scope.cy);
 
@@ -622,13 +644,13 @@ function drawSweep(scope, angle) {
     ctx.moveTo(Math.cos(segmentAngle) * innerRadius, Math.sin(segmentAngle) * innerRadius);
     ctx.arc(0, 0, scope.radius, segmentAngle - 0.026, segmentAngle + 0.026);
     ctx.closePath();
-    ctx.fillStyle = `rgba(77, 255, 155, ${alpha})`;
+    ctx.fillStyle = `rgba(${palette.trail}, ${alpha})`;
     ctx.fill();
   }
 
   ctx.rotate(angle);
 
-  ctx.strokeStyle = "rgba(148, 255, 199, 0.96)";
+  ctx.strokeStyle = palette.line;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(0, 0);
@@ -703,6 +725,43 @@ rangeButtons.addEventListener("click", (event) => {
 
 airspaceToggles.addEventListener("change", () => {
   if (getVisibleAirspaceClasses().size && !airspaces.length) fetchAirspace();
+});
+
+function openSettings() {
+  settingsModal.hidden = false;
+}
+
+function closeSettings() {
+  settingsModal.hidden = true;
+}
+
+function trimTrackHistories() {
+  for (const [key, history] of tracks.entries()) {
+    tracks.set(key, history.slice(-breadcrumbLimit));
+  }
+}
+
+settingsOpen.addEventListener("click", openSettings);
+settingsClose.addEventListener("click", closeSettings);
+
+settingsModal.addEventListener("click", (event) => {
+  if (event.target === settingsModal) closeSettings();
+});
+
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !settingsModal.hidden) closeSettings();
+});
+
+breadcrumbLengthInput.addEventListener("input", () => {
+  breadcrumbLimit = Math.max(2, Math.min(30, Number(breadcrumbLengthInput.value) || 12));
+  breadcrumbReadout.textContent = String(breadcrumbLimit);
+  trimTrackHistories();
+});
+
+sweepColors.addEventListener("change", (event) => {
+  const input = event.target.closest("input[name='sweepColor']");
+  if (!input || !input.checked) return;
+  sweepColor = sweepPalettes[input.value] ? input.value : "green";
 });
 
 function applySelectedAirport() {

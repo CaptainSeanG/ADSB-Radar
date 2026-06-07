@@ -100,6 +100,13 @@ select {
   text-transform: uppercase;
 }
 
+.panel-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
 h1,
 h2,
 p {
@@ -109,6 +116,29 @@ p {
 h1 {
   font-size: clamp(1.8rem, 4vw, 2.45rem);
   line-height: 1;
+}
+
+.settings-button,
+.icon-button {
+  border: 1px solid rgba(132, 255, 194, 0.28);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.settings-button {
+  min-height: 36px;
+  padding: 0 12px;
+  color: var(--green);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.settings-button:hover,
+.icon-button:hover {
+  border-color: var(--green);
+  background: rgba(77, 255, 155, 0.14);
 }
 
 #status {
@@ -221,6 +251,108 @@ fieldset {
 .airspace-toggles label:has(input:checked) {
   border-color: rgba(98, 213, 255, 0.58);
   background: rgba(98, 213, 255, 0.14);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(10px);
+}
+
+.modal-backdrop[hidden] {
+  display: none;
+}
+
+.settings-modal {
+  width: min(440px, 100%);
+  border: 1px solid rgba(132, 255, 194, 0.26);
+  border-radius: 8px;
+  background: rgba(7, 18, 14, 0.96);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.58), inset 0 0 48px rgba(88, 255, 160, 0.05);
+  padding: 18px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.settings-header h2 {
+  color: var(--text);
+  font-size: 1.15rem;
+}
+
+.icon-button {
+  width: 36px;
+  height: 36px;
+  color: var(--muted);
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.settings-body {
+  display: grid;
+  gap: 20px;
+}
+
+.settings-range {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 9px 12px;
+}
+
+.settings-range input {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--green);
+}
+
+.settings-range output {
+  color: var(--green);
+  font: 850 1rem ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.sweep-colors {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.sweep-colors label {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid rgba(132, 255, 194, 0.2);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+  cursor: pointer;
+  text-transform: none;
+}
+
+.sweep-colors input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--amber);
+}
+
+.sweep-colors label:has(input:checked) {
+  border-color: rgba(255, 207, 106, 0.62);
+  background: rgba(255, 207, 106, 0.13);
 }
 
 .metrics {
@@ -346,6 +478,10 @@ fieldset {
   }
 
   .airspace-toggles {
+    grid-template-columns: 1fr;
+  }
+
+  .sweep-colors {
     grid-template-columns: 1fr;
   }
 }

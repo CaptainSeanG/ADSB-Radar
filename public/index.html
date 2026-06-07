@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./styles.css?v=20260607-4" />
+    <link rel="stylesheet" href="./styles.css?v=20260607-6" />
   </head>
   <body>
     <main class="shell">
@@ -15,8 +15,13 @@
 
       <aside class="panel" aria-label="Radar controls and aircraft list">
         <header>
-          <p class="eyebrow">ADS-B Radar</p>
-          <h1>Local Airspace</h1>
+          <div class="panel-title-row">
+            <div>
+              <p class="eyebrow">ADS-B Radar</p>
+              <h1>Local Airspace</h1>
+            </div>
+            <button type="button" class="settings-button" id="settingsOpen">Settings</button>
+          </div>
           <p id="status">Radar sweep active. Updating aircraft every pass.</p>
         </header>
 
@@ -58,14 +63,6 @@
             </div>
           </fieldset>
 
-          <fieldset>
-            <legend>Airspace</legend>
-            <div class="airspace-toggles" id="airspaceToggles">
-              <label><input type="checkbox" data-class="B" /><span>Class B</span></label>
-              <label><input type="checkbox" data-class="C" /><span>Class C</span></label>
-              <label><input type="checkbox" data-class="D" /><span>Class D</span></label>
-            </div>
-          </fieldset>
         </form>
 
         <section class="metrics" aria-label="Radar metrics">
@@ -93,7 +90,42 @@
       </aside>
     </main>
 
-    <script src="./config.js?v=20260607-5"></script>
-    <script type="module" src="./app.js?v=20260607-5"></script>
+    <div class="modal-backdrop" id="settingsModal" hidden>
+      <section class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+        <header class="settings-header">
+          <h2 id="settingsTitle">Settings</h2>
+          <button type="button" class="icon-button" id="settingsClose" aria-label="Close settings">x</button>
+        </header>
+
+        <div class="settings-body">
+          <fieldset>
+            <legend>Airspace</legend>
+            <div class="airspace-toggles" id="airspaceToggles">
+              <label><input type="checkbox" data-class="B" /><span>Class B</span></label>
+              <label><input type="checkbox" data-class="C" /><span>Class C</span></label>
+              <label><input type="checkbox" data-class="D" /><span>Class D</span></label>
+            </div>
+          </fieldset>
+
+          <label class="settings-range">
+            <span>Breadcrumbs</span>
+            <input id="breadcrumbLength" type="range" min="2" max="30" step="1" value="12" />
+            <output id="breadcrumbReadout">12</output>
+          </label>
+
+          <fieldset>
+            <legend>Sweep color</legend>
+            <div class="sweep-colors" id="sweepColors">
+              <label><input type="radio" name="sweepColor" value="green" checked /><span>Green</span></label>
+              <label><input type="radio" name="sweepColor" value="yellow" /><span>Yellow</span></label>
+              <label><input type="radio" name="sweepColor" value="orange" /><span>Orange</span></label>
+            </div>
+          </fieldset>
+        </div>
+      </section>
+    </div>
+
+    <script src="./config.js?v=20260607-6"></script>
+    <script type="module" src="./app.js?v=20260607-6"></script>
   </body>
 </html>
