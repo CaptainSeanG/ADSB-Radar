@@ -554,7 +554,7 @@ rangeButtons.addEventListener("click", (event) => {
   if (running) fetchTraffic();
 });
 
-airportSelect.addEventListener("change", () => {
+function applySelectedAirport() {
   if (!airportSelect.value) return;
   const [lat, lon] = airportSelect.value.split(",").map(Number);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
@@ -563,7 +563,10 @@ airportSelect.addEventListener("change", () => {
   lonInput.value = lon.toFixed(4);
   center = { lat, lon };
   tracks.clear();
+}
 
+airportSelect.addEventListener("change", () => {
+  applySelectedAirport();
   if (running) fetchTraffic();
 });
 
@@ -590,12 +593,9 @@ form.addEventListener("submit", (event) => {
   fetchTraffic();
 });
 
-demoModeInput.addEventListener("change", () => {
-  if (running) fetchTraffic();
-});
-
 window.addEventListener("resize", resizeCanvas);
 
+applySelectedAirport();
 resizeCanvas();
 renderList();
 requestAnimationFrame(render);
