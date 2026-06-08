@@ -17,6 +17,7 @@ const breadcrumbReadout = document.querySelector("#breadcrumbReadout");
 const groundTrafficToggle = document.querySelector("#groundTrafficToggle");
 const radarDataToggle = document.querySelector("#radarDataToggle");
 const precipitationToggle = document.querySelector("#precipitationToggle");
+const radarSoundsToggle = document.querySelector("#radarSoundsToggle");
 const sweepColorToggle = document.querySelector("#sweepColorToggle");
 const aircraftModal = document.querySelector("#aircraftModal");
 const aircraftClose = document.querySelector("#aircraftClose");
@@ -66,6 +67,7 @@ let sweepColor = "orange";
 let showGroundTraffic = false;
 let showRadarData = true;
 let showPrecipitation = false;
+let radarSoundsEnabled = false;
 let aircraft = [];
 let airports = [];
 let airspaces = [];
@@ -85,6 +87,65 @@ let weatherMetaFetchedAt = 0;
 let weatherImage = null;
 let weatherImageKey = "";
 let weatherImageLoading = false;
+let audioCtx = null;
+let audioMaster = null;
+let lastContactSoundAt = 0;
+
+function ensureAudioContext() {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return null;
+
+  if (!audioCtx) {
+    audioCtx = new AudioContextClass();
+    audioMaster = audioCtx.createGain();
+    audioMaster.gain.value = 0.18;
+    audioMaster.connect(audioCtx.destination);
+  }
+
+  if (audioCtx.state === "suspended") {
+    audioCtx.resume().catch(() => {});
+  }
+
+  return audioCtx;
+}
+
+function playTone({ frequency, type = "sine", duration = 0.05, gain = 0.05, slideTo = null }) {
+  if (!radarSoundsEnabled) return;
+
+  const context = ensureAudioContext();
+  if (!context || !audioMaster) return;
+
+  const oscillator = context.createOscillator();
+  const envelope = context.createGain();
+  const now = context.currentTime;
+
+  oscillator.type = type;
+  oscillator.frequency.setValueAtTime(frequency, now);
+  if (slideTo) {
+    oscillator.frequency.exponentialRampToValueAtTime(slideTo, now + duration);
+  }
+
+  envelope.gain.setValueAtTime(0.0001, now);
+  envelope.gain.exponentialRampToValueAtTime(gain, now + 0.008);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, now + duration);
+
+  oscillator.connect(envelope);
+  envelope.connect(audioMaster);
+  oscillator.start(now);
+  oscillator.stop(now + duration + 0.02);
+}
+
+function playSweepTick() {
+  playTone({ frequency: 180, type: "triangle", duration: 0.035, gain: 0.035, slideTo: 90 });
+}
+
+function playContactBlip() {
+  const now = performance.now();
+  if (now - lastContactSoundAt < 70) return;
+
+  lastContactSoundAt = now;
+  playTone({ frequency: 920, type: "sine", duration: 0.055, gain: 0.06, slideTo: 1300 });
+}
 
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
@@ -429,6 +490,7 @@ function updateRadarBlipsForSweep(angle) {
     const snapshot = { ...plane, radarSeenAt: Date.now() };
     radarBlips.set(aircraftKey(plane), snapshot);
     appendTrackHistory(snapshot);
+    playContactBlip();
   }
 
   previousSweepAngle = currentSweepAngle;
@@ -961,6 +1023,7 @@ function render(now) {
 
   if (running && sweepBucket !== lastSweepBucket) {
     lastSweepBucket = sweepBucket;
+    playSweepTick();
     fetchTraffic();
   }
 
@@ -1153,6 +1216,11 @@ radarDataToggle.addEventListener("change", () => {
 precipitationToggle.addEventListener("change", () => {
   showPrecipitation = precipitationToggle.checked;
   if (showPrecipitation) ensureWeatherImage();
+});
+
+radarSoundsToggle.addEventListener("change", () => {
+  radarSoundsEnabled = radarSoundsToggle.checked;
+  if (radarSoundsEnabled) playSweepTick();
 });
 
 aircraftListEl.addEventListener("click", (event) => {
