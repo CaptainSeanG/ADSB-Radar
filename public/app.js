@@ -36,6 +36,7 @@ const adsbBaseUrl = "https://opendata.adsb.fi/api/v3";
 const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
 const airspaceQueryUrl =
   "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0/query";
+const aircraftLookupBaseUrl = "https://api.adsbdb.com/v0/aircraft";
 const proxyUrlFromQuery = new URLSearchParams(window.location.search).get("proxy");
 if (proxyUrlFromQuery) {
   window.localStorage.setItem("ADSB_RADAR_PROXY_URL", proxyUrlFromQuery);
@@ -47,6 +48,7 @@ const adsbProxyBaseUrl = (
   ""
 ).replace(/\/$/, "");
 const tracks = new Map();
+const aircraftTypeCache = new Map();
 
 let center = { lat: 33.7292, lon: -111.9918 };
 let radiusMiles = 15;
@@ -202,7 +204,7 @@ function project(lat, lon, scope) {
 function formatAltitude(value) {
   if (value === "ground") return "GROUND";
   const number = Number(value);
-  return Number.isFinite(number) ? `${Math.round(number).toLocaleString()} ft` : "ALT ?";
+  return Number.isFinite(number) ? `${Math.round(number).toLocaleString()}'` : "ALT ?";
 }
 
 function formatSpeed(value) {
@@ -235,6 +237,16 @@ function planeLabel(plane) {
   return plane.nNumber || plane.callsign || plane.hex || "Unknown";
 }
 
+function aircraftType(plane) {
+  return plane.type || plane.resolvedType || "";
+}
+
+function aircraftDisplayLabel(plane) {
+  const type = aircraftType(plane);
+  const ident = planeLabel(plane);
+  return type ? `${type} ${ident}` : ident;
+}
+
 function isGroundTraffic(plane) {
   return plane.altitude === "ground";
 }
@@ -245,6 +257,48 @@ function visibleAircraft() {
 
 function aircraftKey(plane) {
   return plane.hex || plane.nNumber || plane.callsign || `${plane.lat},${plane.lon}`;
+}
+
+function needsTypeLookup(plane) {
+  const type = aircraftType(plane).trim().toUpperCase();
+  return plane.nNumber && (!type || type === "TYPE ?" || type === "UNKNOWN");
+}
+
+async function lookupAircraftType(nNumber) {
+  const registration = nNumber.trim().toUpperCase();
+  if (!registration) return "";
+  if (aircraftTypeCache.has(registration)) return aircraftTypeCache.get(registration);
+
+  const lookupPromise = fetch(`${aircraftLookupBaseUrl}/${encodeURIComponent(registration)}`, {
+    headers: { accept: "application/json" }
+  })
+    .then((response) => (response.ok ? response.json() : null))
+    .then((payload) => {
+      const record = payload?.response?.aircraft || payload?.response || {};
+      return record.icao_type || record.type || "";
+    })
+    .catch(() => "");
+
+  aircraftTypeCache.set(registration, lookupPromise);
+  const resolvedType = await lookupPromise;
+  aircraftTypeCache.set(registration, resolvedType);
+  return resolvedType;
+}
+
+async function resolveMissingAircraftTypes(nextAircraft) {
+  const lookups = nextAircraft.filter(needsTypeLookup).map(async (plane) => {
+    const resolvedType = await lookupAircraftType(plane.nNumber);
+    if (resolvedType && needsTypeLookup(plane)) {
+      plane.resolvedType = resolvedType;
+      if (!plane.type || plane.type.trim().toUpperCase() === "UNKNOWN") {
+        plane.type = resolvedType;
+      }
+    }
+  });
+
+  if (!lookups.length) return;
+  await Promise.allSettled(lookups);
+  renderList();
 }
 
 function updateTrackHistory(nextAircraft) {
@@ -426,6 +480,7 @@ async function fetchTraffic() {
     airports = data.airports;
     lastDataSource = data.source;
     statusEl.textContent = `Live ADS-B feed active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
+    resolveMissingAircraftTypes(aircraft);
   } catch (error) {
     aircraft = [];
     airports = [];
@@ -458,8 +513,8 @@ function renderList() {
         <li>
           <button type="button" class="aircraft-row" data-aircraft-key="${escapeHtml(aircraftKey(plane))}">
           <div class="plane-head">
-            <span>${escapeHtml(planeLabel(plane))}</span>
-            <span>${escapeHtml(plane.type || "TYPE ?")}</span>
+            <span>${escapeHtml(aircraftDisplayLabel(plane))}</span>
+            <span>${escapeHtml(aircraftType(plane) || "TYPE ?")}</span>
           </div>
           <div class="plane-meta">
             <span>${formatAltitude(plane.altitude)}</span>
@@ -590,7 +645,7 @@ function drawTrack(scope, plane) {
   if (history.length < 2) return;
 
   ctx.save();
-  ctx.strokeStyle = "rgba(98, 213, 255, 0.45)";
+  ctx.strokeStyle = Number(plane.altitude) > 18000 ? "rgba(255, 80, 92, 0.7)" : "rgba(98, 213, 255, 0.45)";
   ctx.lineWidth = 2;
   ctx.beginPath();
 
@@ -631,7 +686,7 @@ function drawAircraft(scope) {
     ctx.translate(-point.x, -point.y);
 
     ctx.fillStyle = "rgba(233, 255, 243, 0.92)";
-    ctx.fillText(planeLabel(plane), point.x + 13, point.y - 11);
+    ctx.fillText(aircraftDisplayLabel(plane), point.x + 13, point.y - 11);
     ctx.fillStyle = "rgba(77, 255, 155, 0.86)";
     ctx.fillText(`${formatAltitude(plane.altitude)} ${formatSpeed(plane.speed)}`, point.x + 13, point.y + 4);
   }
@@ -747,9 +802,9 @@ function openAircraftDetails(plane) {
   const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
   const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
   aircraftDetail.innerHTML = `
-    <div class="detail-title">${escapeHtml(planeLabel(plane))}</div>
+    <div class="detail-title">${escapeHtml(aircraftDisplayLabel(plane))}</div>
     <dl>
-      <div><dt>Type</dt><dd>${escapeHtml(plane.type || "Unknown")}</dd></div>
+      <div><dt>Type</dt><dd>${escapeHtml(aircraftType(plane) || "Unknown")}</dd></div>
       <div><dt>Callsign</dt><dd>${escapeHtml(plane.callsign || "Unknown")}</dd></div>
       <div><dt>ICAO</dt><dd>${escapeHtml(plane.hex || "Unknown")}</dd></div>
       <div><dt>Altitude</dt><dd>${formatAltitude(plane.altitude)}</dd></div>
