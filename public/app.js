@@ -44,6 +44,7 @@ const sweepPalettes = {
 };
 const adsbBaseUrl = "https://opendata.adsb.fi/api/v3";
 const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
+const runwaysCsvUrl = "https://davidmegginson.github.io/ourairports-data/runways.csv";
 const weatherMapsUrl = "https://api.rainviewer.com/public/weather-maps.json";
 const airspaceQueryUrl =
   "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0/query";
@@ -228,6 +229,7 @@ let lastFetchAt = 0;
 let lastDataSource = "standby";
 let pixelRatio = window.devicePixelRatio || 1;
 let airportsCachePromise = null;
+let runwaysCachePromise = null;
 let lastAirspaceKey = "";
 let aircraftHitAreas = [];
 let gpsWatchId = null;
@@ -473,6 +475,41 @@ function parseAirportsCsv(csv) {
         elevationFt: parseNumber(row[index.elevation_ft]),
         municipality: row[index.municipality],
         iata: row[index.iata_code]
+      };
+    })
+    .filter(Boolean);
+}
+
+function parseRunwaysCsv(csv) {
+  const [headerLine, ...lines] = csv.split(/\r?\n/).filter(Boolean);
+  const headers = parseCsvLine(headerLine);
+  const index = Object.fromEntries(headers.map((header, i) => [header, i]));
+
+  return lines
+    .map((line) => {
+      const row = parseCsvLine(line);
+      const airportIdent = row[index.airport_ident];
+      const leLat = parseNumber(row[index.le_latitude_deg]);
+      const leLon = parseNumber(row[index.le_longitude_deg]);
+      const heLat = parseNumber(row[index.he_latitude_deg]);
+      const heLon = parseNumber(row[index.he_longitude_deg]);
+
+      if (!airportIdent || !Number.isFinite(leLat) || !Number.isFinite(leLon) || !Number.isFinite(heLat) || !Number.isFinite(heLon)) {
+        return null;
+      }
+
+      return {
+        airportIdent,
+        leIdent: row[index.le_ident],
+        heIdent: row[index.he_ident],
+        leLat,
+        leLon,
+        heLat,
+        heLon,
+        lengthFt: parseNumber(row[index.length_ft]),
+        widthFt: parseNumber(row[index.width_ft]),
+        leHeading: parseNumber(row[index.le_heading_degT]),
+        heHeading: parseNumber(row[index.he_heading_degT])
       };
     })
     .filter(Boolean);
@@ -821,6 +858,38 @@ async function loadAirportCache() {
   return airportsCachePromise;
 }
 
+async function loadRunwayCache() {
+  if (!runwaysCachePromise) {
+    runwaysCachePromise = fetch(runwaysCsvUrl)
+      .then((response) => {
+        if (!response.ok) throw new Error(`Runway data returned ${response.status}`);
+        return response.text();
+      })
+      .then(parseRunwaysCsv)
+      .catch((error) => {
+        console.warn("Unable to load runway data", error);
+        return [];
+      });
+  }
+
+  return runwaysCachePromise;
+}
+
+function attachRunwaysToAirports(airportRows, runwayRows) {
+  const runwaysByAirport = new Map();
+  for (const runway of runwayRows) {
+    if (!runwaysByAirport.has(runway.airportIdent)) runwaysByAirport.set(runway.airportIdent, []);
+    runwaysByAirport.get(runway.airportIdent).push(runway);
+  }
+
+  return airportRows.map((airport) => ({
+    ...airport,
+    runways: (runwaysByAirport.get(airport.ident) || [])
+      .sort((a, b) => (b.lengthFt || 0) - (a.lengthFt || 0))
+      .slice(0, 12)
+  }));
+}
+
 async function fetchStaticTraffic() {
   const radiusNm = Math.max(1, Math.min(250, milesToNauticalMiles(radiusMiles)));
   const adsbUrl = `${adsbBaseUrl}/lat/${center.lat}/lon/${center.lon}/dist/${radiusNm.toFixed(1)}`;
@@ -828,13 +897,14 @@ async function fetchStaticTraffic() {
     ? `${adsbProxyBaseUrl}/api/aircraft?lat=${center.lat}&lon=${center.lon}&radiusMiles=${radiusMiles}`
     : adsbUrl;
 
-  const [trafficResponse, airportRows] = await Promise.all([
+  const [trafficResponse, airportRows, runwayRows] = await Promise.all([
     fetch(aircraftUrl, {
       headers: {
         accept: "application/json"
       }
     }),
-    loadAirportCache()
+    loadAirportCache(),
+    loadRunwayCache()
   ]);
 
   if (!trafficResponse.ok) {
@@ -849,7 +919,7 @@ async function fetchStaticTraffic() {
         .filter(Boolean)
         .filter((plane) => milesBetween(center.lat, center.lon, plane.lat, plane.lon) <= radiusMiles + 1);
 
-  const airportMatches = airportRows
+  const airportMatches = attachRunwaysToAirports(airportRows, runwayRows)
     .map((airport) => ({
       ...airport,
       distanceMiles: milesBetween(center.lat, center.lon, airport.lat, airport.lon)
@@ -1116,6 +1186,52 @@ function drawGrid(scope) {
   ctx.restore();
 }
 
+function drawAirportRunways(airport, scope) {
+  if (radiusMiles > 5 || !airport.runways?.length) return;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.lineCap = "round";
+  for (const runway of airport.runways) {
+    const start = project(runway.leLat, runway.leLon, scope);
+    const end = project(runway.heLat, runway.heLon, scope);
+    const inScope = start.distance <= radiusMiles || end.distance <= radiusMiles;
+    if (!inScope) continue;
+
+    const width = Number.isFinite(runway.widthFt) ? Math.max(2.5, Math.min(7, runway.widthFt / 24)) : 3.5;
+    ctx.strokeStyle = "rgba(255, 240, 184, 0.82)";
+    ctx.lineWidth = width + 2;
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(3, 18, 12, 0.78)";
+    ctx.lineWidth = Math.max(1.5, width - 1);
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawAirportLabel(text, point, scope) {
+  const labelX = Math.min(scope.cx + scope.radius - 42, Math.max(scope.cx - scope.radius + 8, point.x + 10));
+  const labelY = Math.min(scope.cy + scope.radius - 8, Math.max(scope.cy - scope.radius + 15, point.y - 9));
+
+  ctx.save();
+  ctx.font = radiusMiles <= 5 ? "850 13px ui-monospace, SFMono-Regular, Consolas, monospace" : "700 11px ui-monospace, SFMono-Regular, Consolas, monospace";
+  ctx.lineWidth = radiusMiles <= 5 ? 5 : 3;
+  ctx.strokeStyle = "rgba(2, 5, 3, 0.92)";
+  ctx.fillStyle = "rgba(255, 232, 150, 0.96)";
+  ctx.strokeText(text, labelX, labelY);
+  ctx.fillText(text, labelX, labelY);
+  ctx.restore();
+}
+
 function drawAirports(scope) {
   ctx.save();
   ctx.font = "700 11px ui-monospace, SFMono-Regular, Consolas, monospace";
@@ -1123,9 +1239,11 @@ function drawAirports(scope) {
     const point = project(airport.lat, airport.lon, scope);
     if (point.distance > radiusMiles) continue;
 
+    drawAirportRunways(airport, scope);
+
     ctx.strokeStyle = airport.type === "large_airport" ? "rgba(255, 207, 106, 0.95)" : "rgba(255, 207, 106, 0.58)";
     ctx.fillStyle = ctx.strokeStyle;
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = radiusMiles <= 5 ? 2.2 : 1.5;
     ctx.beginPath();
     ctx.moveTo(point.x - 6, point.y);
     ctx.lineTo(point.x + 6, point.y);
@@ -1133,7 +1251,7 @@ function drawAirports(scope) {
     ctx.lineTo(point.x, point.y + 6);
     ctx.stroke();
     if (showRadarData) {
-      ctx.fillText(airport.ident || airport.iata, point.x + 9, point.y - 8);
+      drawAirportLabel(airport.ident || airport.iata, point, scope);
     }
   }
   ctx.restore();
