@@ -59,6 +59,127 @@ const adsbProxyBaseUrl = (
 const tracks = new Map();
 const aircraftTypeCache = new Map();
 const radarBlips = new Map();
+const aircraftTypeNames = new Map([
+  ["A109", "AgustaWestland AW109"],
+  ["A119", "AgustaWestland AW119"],
+  ["A139", "AgustaWestland AW139"],
+  ["A169", "AgustaWestland AW169"],
+  ["A189", "AgustaWestland AW189"],
+  ["A20N", "Airbus A320neo"],
+  ["A21N", "Airbus A321neo"],
+  ["A319", "Airbus A319"],
+  ["A320", "Airbus A320"],
+  ["A321", "Airbus A321"],
+  ["A332", "Airbus A330-200"],
+  ["A333", "Airbus A330-300"],
+  ["A359", "Airbus A350-900"],
+  ["A388", "Airbus A380"],
+  ["AS50", "Airbus AS350"],
+  ["AS55", "Airbus AS355"],
+  ["B06", "Bell 206"],
+  ["B407", "Bell 407"],
+  ["B429", "Bell 429"],
+  ["B505", "Bell 505"],
+  ["B06T", "Bell 206 TwinRanger"],
+  ["B06L", "Bell 206 LongRanger"],
+  ["B412", "Bell 412"],
+  ["B190", "Beech 1900"],
+  ["B350", "Beechcraft King Air 350"],
+  ["BE20", "Beechcraft King Air"],
+  ["BE30", "Beechcraft Super King Air"],
+  ["BE33", "Beechcraft Bonanza"],
+  ["BE35", "Beechcraft Bonanza"],
+  ["BE36", "Beechcraft Bonanza"],
+  ["BE40", "Beechcraft Premier"],
+  ["BE55", "Beechcraft Baron"],
+  ["BE58", "Beechcraft Baron"],
+  ["C150", "Cessna 150"],
+  ["C152", "Cessna 152"],
+  ["C172", "Cessna 172"],
+  ["C177", "Cessna Cardinal"],
+  ["C180", "Cessna 180"],
+  ["C182", "Cessna 182"],
+  ["C185", "Cessna 185"],
+  ["C206", "Cessna 206"],
+  ["C207", "Cessna 207"],
+  ["C208", "Cessna Caravan"],
+  ["C210", "Cessna 210"],
+  ["C25A", "Cessna Citation CJ2"],
+  ["C25B", "Cessna Citation CJ3"],
+  ["C25C", "Cessna Citation CJ4"],
+  ["C310", "Cessna 310"],
+  ["C340", "Cessna 340"],
+  ["C402", "Cessna 402"],
+  ["C414", "Cessna 414"],
+  ["C421", "Cessna 421"],
+  ["C510", "Cessna Citation Mustang"],
+  ["C525", "Cessna CitationJet"],
+  ["C550", "Cessna Citation II"],
+  ["C560", "Cessna Citation V"],
+  ["C680", "Cessna Citation Sovereign"],
+  ["C700", "Cessna Citation Longitude"],
+  ["CL30", "Bombardier Challenger 300"],
+  ["CL35", "Bombardier Challenger 350"],
+  ["CL60", "Bombardier Challenger 600"],
+  ["CRJ2", "Bombardier CRJ200"],
+  ["CRJ7", "Bombardier CRJ700"],
+  ["CRJ9", "Bombardier CRJ900"],
+  ["DA40", "Diamond DA40"],
+  ["DA42", "Diamond DA42"],
+  ["DA62", "Diamond DA62"],
+  ["E170", "Embraer 170"],
+  ["E175", "Embraer 175"],
+  ["E190", "Embraer 190"],
+  ["E50P", "Embraer Phenom 100"],
+  ["E55P", "Embraer Phenom 300"],
+  ["F2TH", "Dassault Falcon 2000"],
+  ["FA50", "Dassault Falcon 50"],
+  ["G150", "Gulfstream G150"],
+  ["G280", "Gulfstream G280"],
+  ["GLEX", "Bombardier Global Express"],
+  ["GLF4", "Gulfstream IV"],
+  ["GLF5", "Gulfstream V"],
+  ["GLF6", "Gulfstream G650"],
+  ["H25B", "Hawker 800"],
+  ["H500", "Hughes 500"],
+  ["H60", "Sikorsky UH-60 Black Hawk"],
+  ["LJ35", "Learjet 35"],
+  ["LJ45", "Learjet 45"],
+  ["LJ60", "Learjet 60"],
+  ["M20P", "Mooney M20"],
+  ["P28A", "Piper Cherokee"],
+  ["P28B", "Piper Cherokee"],
+  ["P28R", "Piper Arrow"],
+  ["P32R", "Piper Saratoga"],
+  ["PA27", "Piper Aztec"],
+  ["PA30", "Piper Twin Comanche"],
+  ["PA31", "Piper Navajo"],
+  ["PA34", "Piper Seneca"],
+  ["PA44", "Piper Seminole"],
+  ["PA46", "Piper Malibu/Mirage"],
+  ["PC12", "Pilatus PC-12"],
+  ["PC24", "Pilatus PC-24"],
+  ["R22", "Robinson R22"],
+  ["R44", "Robinson R44"],
+  ["R66", "Robinson R66"],
+  ["S22T", "Cirrus SR22T"],
+  ["SR20", "Cirrus SR20"],
+  ["SR22", "Cirrus SR22"],
+  ["TBM7", "Daher TBM 700"],
+  ["TBM8", "Daher TBM 850"],
+  ["TBM9", "Daher TBM 900"],
+  ["B737", "Boeing 737"],
+  ["B738", "Boeing 737-800"],
+  ["B739", "Boeing 737-900"],
+  ["B38M", "Boeing 737 MAX 8"],
+  ["B39M", "Boeing 737 MAX 9"],
+  ["B752", "Boeing 757-200"],
+  ["B763", "Boeing 767-300"],
+  ["B772", "Boeing 777-200"],
+  ["B77W", "Boeing 777-300ER"],
+  ["B788", "Boeing 787-8"],
+  ["B789", "Boeing 787-9"]
+]);
 const kdvtFallbackCenter = { lat: 33.6883, lon: -112.083 };
 
 let center = { lat: 33.7292, lon: -111.9918 };
@@ -400,6 +521,27 @@ function aircraftType(plane) {
   return plane.type || plane.resolvedType || "";
 }
 
+function aircraftTypeCode(plane) {
+  return aircraftType(plane).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function titleCaseAircraftText(value) {
+  return String(value)
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/\b([A-Z])([A-Z]{2,})\b/g, (word) => word.charAt(0) + word.slice(1).toLowerCase());
+}
+
+function friendlyAircraftType(plane) {
+  if (plane.friendlyType) return plane.friendlyType;
+
+  const type = aircraftType(plane).trim();
+  const code = aircraftTypeCode(plane);
+  if (aircraftTypeNames.has(code)) return aircraftTypeNames.get(code);
+  if (type && /\s/.test(type)) return titleCaseAircraftText(type);
+  return type || "";
+}
+
 function aircraftDisplayLabel(plane) {
   const type = aircraftType(plane);
   const ident = planeLabel(plane);
@@ -444,9 +586,11 @@ async function lookupAircraftType(nNumber) {
     .then((response) => (response.ok ? response.json() : null))
     .then((payload) => {
       const record = payload?.response?.aircraft || payload?.response || {};
-      return record.icao_type || record.type || "";
+      const code = record.icao_type || record.type || "";
+      const friendly = [record.manufacturer, record.model].filter(Boolean).join(" ").trim();
+      return { code, friendly };
     })
-    .catch(() => "");
+    .catch(() => ({ code: "", friendly: "" }));
 
   aircraftTypeCache.set(registration, lookupPromise);
   const resolvedType = await lookupPromise;
@@ -456,10 +600,13 @@ async function lookupAircraftType(nNumber) {
 
 async function resolveMissingAircraftTypes(nextAircraft) {
   const lookups = nextAircraft.filter(needsTypeLookup).map(async (plane) => {
-    const resolvedType = await lookupAircraftType(plane.nNumber);
-    if (resolvedType && needsTypeLookup(plane)) {
+    const resolved = await lookupAircraftType(plane.nNumber);
+    const resolvedType = typeof resolved === "string" ? resolved : resolved.code;
+    const friendlyType = typeof resolved === "string" ? "" : resolved.friendly;
+    if ((resolvedType || friendlyType) && needsTypeLookup(plane)) {
       plane.resolvedType = resolvedType;
-      if (!plane.type || plane.type.trim().toUpperCase() === "UNKNOWN") {
+      plane.friendlyType = friendlyType || aircraftTypeNames.get(String(resolvedType).toUpperCase()) || "";
+      if (!plane.type || ["TYPE ?", "UNKNOWN"].includes(plane.type.trim().toUpperCase())) {
         plane.type = resolvedType;
       }
     }
@@ -1160,10 +1307,11 @@ function openAircraftDetails(plane) {
   if (!plane) return;
   const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
   const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
+  const friendlyType = friendlyAircraftType(plane) || "Unknown aircraft type";
   aircraftDetail.innerHTML = `
-    <div class="detail-title">${escapeHtml(aircraftDisplayLabel(plane))}</div>
+    <div class="detail-title">${escapeHtml(friendlyType)}</div>
     <dl>
-      <div><dt>Type</dt><dd>${escapeHtml(aircraftType(plane) || "Unknown")}</dd></div>
+      <div><dt>Type</dt><dd>${escapeHtml(friendlyType)}</dd></div>
       <div><dt>Callsign</dt><dd>${escapeHtml(plane.callsign || "Unknown")}</dd></div>
       <div><dt>Altitude</dt><dd>${formatAltitude(plane.altitude)}</dd></div>
       <div><dt>Speed</dt><dd>${formatSpeed(plane.speed)}</dd></div>
