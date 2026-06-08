@@ -21,6 +21,7 @@ const precipitationToggle = document.querySelector("#precipitationToggle");
 const radarSoundsToggle = document.querySelector("#radarSoundsToggle");
 const sweepColorToggle = document.querySelector("#sweepColorToggle");
 const aircraftModal = document.querySelector("#aircraftModal");
+const aircraftTitle = document.querySelector("#aircraftTitle");
 const aircraftClose = document.querySelector("#aircraftClose");
 const aircraftDetail = document.querySelector("#aircraftDetail");
 const statusEl = document.querySelector("#status");
@@ -1308,10 +1309,10 @@ function openAircraftDetails(plane) {
   const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
   const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
   const friendlyType = friendlyAircraftType(plane) || "Unknown aircraft type";
+  aircraftTitle.textContent = plane.nNumber ? `Aircraft - ${plane.nNumber}` : "Aircraft";
   aircraftDetail.innerHTML = `
     <div class="detail-title">${escapeHtml(friendlyType)}</div>
     <dl>
-      <div><dt>Type</dt><dd>${escapeHtml(friendlyType)}</dd></div>
       <div><dt>Callsign</dt><dd>${escapeHtml(plane.callsign || "Unknown")}</dd></div>
       <div><dt>Altitude</dt><dd>${formatAltitude(plane.altitude)}</dd></div>
       <div><dt>Speed</dt><dd>${formatSpeed(plane.speed)}</dd></div>
@@ -1326,6 +1327,7 @@ function openAircraftDetails(plane) {
 
 function closeAircraftDetails() {
   aircraftModal.hidden = true;
+  aircraftTitle.textContent = "Aircraft";
 }
 
 function stopGpsTracking() {
