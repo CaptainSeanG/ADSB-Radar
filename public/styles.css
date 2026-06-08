@@ -155,6 +155,10 @@ h1 {
   gap: 10px;
 }
 
+.coord-row[hidden] {
+  display: none;
+}
+
 label,
 legend {
   color: var(--muted);

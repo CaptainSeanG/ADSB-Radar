@@ -2,6 +2,7 @@ const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
 const form = document.querySelector("#controls");
 const airportSelect = document.querySelector("#airportSelect");
+const coordRow = document.querySelector("#coordRow");
 const latInput = document.querySelector("#lat");
 const lonInput = document.querySelector("#lon");
 const rangeButtons = document.querySelector("#rangeButtons");
@@ -12,6 +13,7 @@ const settingsModal = document.querySelector("#settingsModal");
 const breadcrumbLengthInput = document.querySelector("#breadcrumbLength");
 const breadcrumbReadout = document.querySelector("#breadcrumbReadout");
 const groundTrafficToggle = document.querySelector("#groundTrafficToggle");
+const radarDataToggle = document.querySelector("#radarDataToggle");
 const sweepColorToggle = document.querySelector("#sweepColorToggle");
 const aircraftModal = document.querySelector("#aircraftModal");
 const aircraftClose = document.querySelector("#aircraftClose");
@@ -55,6 +57,7 @@ let radiusMiles = 15;
 let breadcrumbLimit = 12;
 let sweepColor = "green";
 let showGroundTraffic = true;
+let showRadarData = true;
 let aircraft = [];
 let airports = [];
 let airspaces = [];
@@ -598,7 +601,9 @@ function drawAirports(scope) {
     ctx.moveTo(point.x, point.y - 6);
     ctx.lineTo(point.x, point.y + 6);
     ctx.stroke();
-    ctx.fillText(airport.iata || airport.ident, point.x + 9, point.y - 8);
+    if (showRadarData) {
+      ctx.fillText(airport.iata || airport.ident, point.x + 9, point.y - 8);
+    }
   }
   ctx.restore();
 }
@@ -641,7 +646,7 @@ function drawAirspace(scope) {
     }
 
     const inScope = labelPoints.filter((point) => point.distance <= radiusMiles * 1.05);
-    if (inScope.length) {
+    if (showRadarData && inScope.length) {
       const labelPoint = inScope[Math.floor(inScope.length / 2)];
       ctx.setLineDash([]);
       ctx.fillStyle = style.stroke;
@@ -704,9 +709,11 @@ function drawAircraft(scope) {
     ctx.translate(-point.x, -point.y);
 
     ctx.fillStyle = "rgba(233, 255, 243, 0.92)";
-    ctx.fillText(aircraftDisplayLabel(plane), point.x + 13, point.y - 11);
-    ctx.fillStyle = "rgba(77, 255, 155, 0.86)";
-    ctx.fillText(`${formatAltitude(plane.altitude)} ${formatSpeed(plane.speed)}`, point.x + 13, point.y + 4);
+    if (showRadarData) {
+      ctx.fillText(aircraftDisplayLabel(plane), point.x + 13, point.y - 11);
+      ctx.fillStyle = "rgba(77, 255, 155, 0.86)";
+      ctx.fillText(`${formatAltitude(plane.altitude)} ${formatSpeed(plane.speed)}`, point.x + 13, point.y + 4);
+    }
   }
 
   ctx.restore();
@@ -783,7 +790,7 @@ function render(now) {
   drawAirports(scope);
   drawAircraft(scope);
   drawSweep(scope, angle);
-  drawHud(scope);
+  if (showRadarData) drawHud(scope);
 
   requestAnimationFrame(render);
 }
@@ -852,6 +859,7 @@ function stopGpsTracking() {
 function startGpsTracking() {
   if (!navigator.geolocation) {
     airportSelect.value = "";
+    updateCoordinateVisibility();
     statusEl.textContent = "GPS is not available in this browser.";
     return;
   }
@@ -882,6 +890,7 @@ function startGpsTracking() {
     (error) => {
       stopGpsTracking();
       airportSelect.value = "";
+      updateCoordinateVisibility();
       statusEl.textContent = `GPS unavailable: ${error.message}.`;
     },
     {
@@ -931,6 +940,10 @@ groundTrafficToggle.addEventListener("change", () => {
   renderList();
 });
 
+radarDataToggle.addEventListener("change", () => {
+  showRadarData = radarDataToggle.checked;
+});
+
 aircraftListEl.addEventListener("click", (event) => {
   const button = event.target.closest("[data-aircraft-key]");
   if (!button) return;
@@ -946,6 +959,7 @@ canvas.addEventListener("click", (event) => {
 });
 
 function applySelectedAirport() {
+  updateCoordinateVisibility();
   if (airportSelect.value === "gps") {
     startGpsTracking();
     return true;
@@ -971,6 +985,7 @@ for (const input of [latInput, lonInput]) {
   input.addEventListener("input", () => {
     stopGpsTracking();
     airportSelect.value = "";
+    updateCoordinateVisibility();
   });
 }
 
@@ -997,9 +1012,15 @@ for (const input of [latInput, lonInput]) {
   input.addEventListener("change", applyManualCoordinates);
 }
 
+function updateCoordinateVisibility() {
+  const managedCenter = Boolean(airportSelect.value);
+  coordRow.hidden = managedCenter;
+}
+
 window.addEventListener("resize", resizeCanvas);
 
 const initialCenterApplied = applySelectedAirport();
+updateCoordinateVisibility();
 resizeCanvas();
 renderList();
 if (!initialCenterApplied) {

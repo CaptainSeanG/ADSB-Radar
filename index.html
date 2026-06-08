@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./public/styles.css?v=20260607-10" />
+    <link rel="stylesheet" href="./public/styles.css?v=20260607-11" />
   </head>
   <body>
     <main class="shell">
@@ -40,7 +40,7 @@
               <option value="33.5350,-112.3830">KLUF - Luke AFB</option>
             </select>
           </label>
-          <div class="coord-row">
+          <div class="coord-row" id="coordRow">
             <label>
               Latitude
               <input id="lat" name="lat" inputmode="decimal" value="33.7292" required />
@@ -104,6 +104,11 @@
             <input id="groundTrafficToggle" type="checkbox" checked />
           </label>
 
+          <label class="switch-row">
+            <span>Radar data</span>
+            <input id="radarDataToggle" type="checkbox" checked />
+          </label>
+
           <fieldset>
             <legend>Sweep color</legend>
             <label class="switch-row color-switch">
@@ -126,7 +131,7 @@
       </section>
     </div>
 
-    <script src="./public/config.js?v=20260607-10"></script>
-    <script type="module" src="./public/app.js?v=20260607-10"></script>
+    <script src="./public/config.js?v=20260607-11"></script>
+    <script type="module" src="./public/app.js?v=20260607-11"></script>
   </body>
 </html>
