@@ -89,6 +89,7 @@ let weatherMetaFetchedAt = 0;
 let weatherImage = null;
 let weatherImageKey = "";
 let weatherImageLoading = false;
+let weatherImageZoom = null;
 let audioCtx = null;
 let audioMaster = null;
 let lastContactSoundAt = 0;
@@ -147,6 +148,12 @@ function queueRadarAudioUnlock() {
 
   window.addEventListener("pointerdown", retryUnlock, { once: true, passive: true });
   window.addEventListener("touchend", retryUnlock, { once: true, passive: true });
+}
+
+function resetWeatherImage() {
+  weatherImage = null;
+  weatherImageKey = "";
+  weatherImageZoom = null;
 }
 
 function playTone({ frequency, type = "sine", duration = 0.05, gain = 0.05, slideTo = null }) {
@@ -353,6 +360,17 @@ function formatSpeed(value) {
   return Number.isFinite(number) ? `${Math.round(number)} kt` : "SPD ?";
 }
 
+function aircraftSpeed(plane) {
+  const speed = Number(plane.speed);
+  return Number.isFinite(speed) ? Math.max(0, speed) : 0;
+}
+
+function breadcrumbLimitForAircraft(plane) {
+  const speed = aircraftSpeed(plane);
+  const speedFactor = speed <= 60 ? 0.45 : speed <= 160 ? 0.75 : speed <= 300 ? 1 : speed <= 450 ? 1.35 : 1.7;
+  return Math.max(2, Math.min(45, Math.round(breadcrumbLimit * speedFactor)));
+}
+
 function formatAirspaceAltitude(value, code) {
   if (code === "SFC" || Number(value) === 0) return "SFC";
   const number = Number(value);
@@ -466,7 +484,7 @@ function updateTrackHistory(nextAircraft) {
     if (!last || Math.abs(last.lat - plane.lat) > 0.0001 || Math.abs(last.lon - plane.lon) > 0.0001) {
       history.push({ lat: plane.lat, lon: plane.lon, at: now });
     }
-    tracks.set(key, history.slice(-breadcrumbLimit));
+    tracks.set(key, history.slice(-breadcrumbLimitForAircraft(plane)));
   }
 
   for (const [key, history] of tracks.entries()) {
@@ -486,7 +504,7 @@ function appendTrackHistory(plane) {
   if (!last || Math.abs(last.lat - plane.lat) > 0.0001 || Math.abs(last.lon - plane.lon) > 0.0001) {
     history.push({ lat: plane.lat, lon: plane.lon, at: Date.now() });
   }
-  tracks.set(key, history.slice(-breadcrumbLimit));
+  tracks.set(key, history.slice(-breadcrumbLimitForAircraft(plane)));
 }
 
 function pruneRadarBlips(nextAircraft) {
@@ -662,14 +680,20 @@ async function ensureWeatherImage() {
     if (key === weatherImageKey && weatherImage) return;
 
     weatherImageLoading = true;
+    weatherImageKey = key;
     const image = new Image();
     image.crossOrigin = "anonymous";
     image.onload = () => {
+      if (weatherImageKey !== key) {
+        weatherImageLoading = false;
+        return;
+      }
       weatherImage = image;
-      weatherImageKey = key;
+      weatherImageZoom = zoom;
       weatherImageLoading = false;
     };
     image.onerror = () => {
+      if (weatherImageKey === key) resetWeatherImage();
       weatherImageLoading = false;
     };
     image.src = `${meta.host}${frame.path}/512/${zoom}/${center.lat.toFixed(4)}/${center.lon.toFixed(4)}/2/1_1.png`;
@@ -682,9 +706,11 @@ async function ensureWeatherImage() {
 function drawPrecipitation(scope) {
   if (!showPrecipitation) return;
   ensureWeatherImage();
-  if (!weatherImage) return;
+  if (!weatherImage || weatherImageZoom === null) return;
 
-  const size = scope.radius * 2.18;
+  const earthMiles = 24901;
+  const imageSpanMiles = (earthMiles * Math.cos((center.lat * Math.PI) / 180) * 2) / 2 ** weatherImageZoom;
+  const size = Math.max(scope.radius * 2.05, (scope.radius * imageSpanMiles) / radiusMiles);
   ctx.save();
   ctx.beginPath();
   ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
@@ -704,7 +730,7 @@ function updateCenter(lat, lon, { clearTracks = true, source = "manual" } = {}) 
     previousSweepAngle = null;
   }
   lastAirspaceKey = "";
-  weatherImageKey = "";
+  resetWeatherImage();
   statusEl.textContent =
     source === "gps"
       ? `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
@@ -947,7 +973,9 @@ function drawAirspace(scope) {
 
 function drawTrack(scope, plane, alpha = 1) {
   const key = plane.hex || plane.nNumber || plane.callsign;
-  const history = (tracks.get(key) || []).filter((sample) => milesBetween(center.lat, center.lon, sample.lat, sample.lon) <= radiusMiles);
+  const history = (tracks.get(key) || [])
+    .slice(-breadcrumbLimitForAircraft(plane))
+    .filter((sample) => milesBetween(center.lat, center.lon, sample.lat, sample.lon) <= radiusMiles);
   if (history.length < 2) return;
 
   ctx.save();
@@ -1096,7 +1124,7 @@ function render(now) {
 
 function setRange(nextRange) {
   radiusMiles = allowedRanges.includes(nextRange) ? nextRange : 20;
-  weatherImageKey = "";
+  resetWeatherImage();
   for (const button of rangeButtons.querySelectorAll("button")) {
     button.classList.toggle("active", Number(button.dataset.range) === radiusMiles);
   }
@@ -1189,7 +1217,7 @@ function startGpsTracking() {
       latInput.value = lat.toFixed(4);
       lonInput.value = lon.toFixed(4);
       center = { lat, lon };
-      weatherImageKey = "";
+      resetWeatherImage();
       statusEl.textContent = `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
 
       if (shouldRefresh) {
@@ -1214,7 +1242,9 @@ function startGpsTracking() {
 
 function trimTrackHistories() {
   for (const [key, history] of tracks.entries()) {
-    tracks.set(key, history.slice(-breadcrumbLimit));
+    const plane = aircraft.find((candidate) => aircraftKey(candidate) === key) || radarBlips.get(key);
+    const limit = plane ? breadcrumbLimitForAircraft(plane) : breadcrumbLimit;
+    tracks.set(key, history.slice(-limit));
   }
 }
 
