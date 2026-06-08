@@ -99,6 +99,10 @@ select {
   transition: opacity 180ms ease, transform 220ms ease;
 }
 
+.panel > header {
+  padding-right: 42px;
+}
+
 .shell.panel-collapsed .panel {
   opacity: 0;
   pointer-events: none;
@@ -108,21 +112,36 @@ select {
 .panel-toggle {
   position: absolute;
   z-index: 4;
-  top: 28px;
-  right: 408px;
-  min-height: 38px;
-  border: 1px solid rgba(132, 255, 194, 0.28);
-  border-radius: 6px;
+  top: 32px;
+  right: 32px;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(233, 255, 243, 0.44);
+  border-radius: 7px;
   background: rgba(3, 8, 5, 0.82);
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
-  color: var(--green);
   cursor: pointer;
-  font-size: 0.72rem;
-  font-weight: 850;
-  letter-spacing: 0.06em;
-  padding: 0 11px;
-  text-transform: uppercase;
-  transition: right 220ms ease, background 160ms ease, border-color 160ms ease;
+  padding: 0;
+  transition: right 220ms ease, background 160ms ease, border-color 160ms ease, opacity 160ms ease;
+}
+
+.panel-toggle::before {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  border: 2px solid rgba(233, 255, 243, 0.62);
+  border-radius: 6px;
+}
+
+.panel-toggle::after {
+  content: "";
+  position: absolute;
+  top: 11px;
+  right: 12px;
+  width: 2px;
+  height: 12px;
+  border-radius: 2px;
+  background: rgba(233, 255, 243, 0.72);
 }
 
 .panel-toggle:hover {
@@ -132,6 +151,11 @@ select {
 
 .shell.panel-collapsed .panel-toggle {
   right: 28px;
+}
+
+.shell.panel-collapsed .panel-toggle::after {
+  right: auto;
+  left: 12px;
 }
 
 .eyebrow {
@@ -632,11 +656,10 @@ fieldset {
 
   .panel-toggle,
   .shell.panel-collapsed .panel-toggle {
-    position: sticky;
-    top: 10px;
-    right: auto;
+    position: fixed;
+    top: 16px;
+    right: 16px;
     order: -1;
-    width: 100%;
   }
 }
 

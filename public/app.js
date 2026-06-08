@@ -93,7 +93,7 @@ function resizeCanvas() {
 
 function updatePanelToggle() {
   const collapsed = shell.classList.contains("panel-collapsed");
-  panelToggle.textContent = collapsed ? "Show Panel" : "Hide Panel";
+  panelToggle.setAttribute("aria-label", collapsed ? "Show panel" : "Hide panel");
   panelToggle.setAttribute("aria-expanded", String(!collapsed));
 }
 
