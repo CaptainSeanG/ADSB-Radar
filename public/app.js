@@ -26,6 +26,7 @@ const lastUpdateEl = document.querySelector("#lastUpdate");
 const aircraftListEl = document.querySelector("#aircraftList");
 
 const sweepSeconds = 4.2;
+const radarFadeMs = sweepSeconds * 3 * 1000;
 const allowedRanges = [2, 5, 10, 15, 20, 50, 100];
 const sweepPalettes = {
   green: {
@@ -386,8 +387,23 @@ function pruneRadarBlips(nextAircraft) {
     const outOfRange =
       latestPlane && milesBetween(center.lat, center.lon, latestPlane.lat, latestPlane.lon) > radiusMiles;
     const stale = !latestKeys.has(key) && now - (plane.radarSeenAt || 0) > 10 * 60 * 1000;
+    const faded = now - (plane.radarSeenAt || 0) > radarFadeMs;
 
-    if (outOfRange || stale) {
+    if (outOfRange || stale || faded) {
+      radarBlips.delete(key);
+      tracks.delete(key);
+    }
+  }
+}
+
+function radarBlipAlpha(plane, now = Date.now()) {
+  const age = now - (plane.radarSeenAt || 0);
+  return Math.max(0, Math.min(1, 1 - age / radarFadeMs));
+}
+
+function pruneExpiredRadarBlips(now = Date.now()) {
+  for (const [key, plane] of radarBlips.entries()) {
+    if (radarBlipAlpha(plane, now) <= 0) {
       radarBlips.delete(key);
       tracks.delete(key);
     }
@@ -395,7 +411,10 @@ function pruneRadarBlips(nextAircraft) {
 }
 
 function visibleRadarAircraft() {
-  return Array.from(radarBlips.values()).filter((plane) => showGroundTraffic || !isGroundTraffic(plane));
+  const now = Date.now();
+  return Array.from(radarBlips.values()).filter(
+    (plane) => radarBlipAlpha(plane, now) > 0 && (showGroundTraffic || !isGroundTraffic(plane))
+  );
 }
 
 function updateRadarBlipsForSweep(angle) {
@@ -814,7 +833,7 @@ function drawAirspace(scope) {
   ctx.restore();
 }
 
-function drawTrack(scope, plane) {
+function drawTrack(scope, plane, alpha = 1) {
   const key = plane.hex || plane.nNumber || plane.callsign;
   const history = (tracks.get(key) || []).filter((sample) => milesBetween(center.lat, center.lon, sample.lat, sample.lon) <= radiusMiles);
   if (history.length < 2) return;
@@ -823,6 +842,7 @@ function drawTrack(scope, plane) {
   ctx.beginPath();
   ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
   ctx.clip();
+  ctx.globalAlpha = alpha;
   ctx.strokeStyle = Number(plane.altitude) > 18000 ? "rgba(255, 80, 92, 0.7)" : "rgba(98, 213, 255, 0.45)";
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -841,15 +861,21 @@ function drawAircraft(scope) {
   ctx.save();
   ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
   aircraftHitAreas = [];
+  const now = Date.now();
 
   for (const plane of visibleRadarAircraft()) {
     const point = project(plane.lat, plane.lon, scope);
     if (point.distance > radiusMiles) continue;
 
-    aircraftHitAreas.push({ key: aircraftKey(plane), x: point.x, y: point.y, plane });
-    drawTrack(scope, plane);
+    const alpha = radarBlipAlpha(plane, now);
+    if (alpha <= 0) continue;
+
+    if (alpha > 0.12) aircraftHitAreas.push({ key: aircraftKey(plane), x: point.x, y: point.y, plane });
+    drawTrack(scope, plane, alpha);
 
     const heading = Number.isFinite(Number(plane.track)) ? ((Number(plane.track) - 90) * Math.PI) / 180 : -Math.PI / 2;
+    ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.translate(point.x, point.y);
     ctx.rotate(heading);
     ctx.fillStyle = plane.emergency && plane.emergency !== "none" ? "#ff6a75" : "#e9fff3";
@@ -860,14 +886,16 @@ function drawAircraft(scope) {
     ctx.lineTo(-7, 5);
     ctx.closePath();
     ctx.fill();
-    ctx.rotate(-heading);
-    ctx.translate(-point.x, -point.y);
+    ctx.restore();
 
     ctx.fillStyle = "rgba(233, 255, 243, 0.92)";
     if (showRadarData) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
       ctx.fillText(aircraftDisplayLabel(plane), point.x + 13, point.y - 11);
       ctx.fillStyle = "rgba(77, 255, 155, 0.86)";
       ctx.fillText(`${formatAltitude(plane.altitude)} ${formatSpeed(plane.speed)}`, point.x + 13, point.y + 4);
+      ctx.restore();
     }
   }
 
@@ -940,6 +968,7 @@ function render(now) {
   ctx.fillStyle = "#020503";
   ctx.fillRect(0, 0, width, height);
 
+  pruneExpiredRadarBlips();
   updateRadarBlipsForSweep(angle);
   drawGrid(scope);
   drawPrecipitation(scope);
