@@ -259,18 +259,18 @@ function aircraftHighlightState(key, now) {
   }
 
   if (now < highlight.startsAt) {
-    return { scale: 1, colorMix: 0 };
+    return { scale: 1, highlightMix: 0 };
   }
 
   const elapsed = now - highlight.startsAt;
   const duration = highlight.endsAt - highlight.startsAt;
-  const colorMix = Math.max(0, 1 - elapsed / duration);
-  const pulseWindow = 2200;
+  const highlightMix = Math.max(0, 1 - elapsed / duration);
+  const pulseWindow = 3000;
   const pulseProgress = Math.min(1, elapsed / pulseWindow);
-  const pulseWave = Math.max(0, Math.sin(pulseProgress * Math.PI * 4));
-  const scale = 1 + pulseWave * 1.25;
+  const pulseWave = Math.max(0, Math.sin(pulseProgress * Math.PI));
+  const scale = 1 + pulseWave * 2;
 
-  return { scale, colorMix, active: true };
+  return { scale, highlightMix, active: true };
 }
 
 function ensureAudioContext() {
@@ -1212,7 +1212,7 @@ function drawTrack(scope, plane, alpha = 1) {
 }
 
 function drawAircraftContact({ plane, point, alpha, highlight }) {
-  const colorMix = highlight?.colorMix || 0;
+  const highlightMix = highlight?.highlightMix || 0;
   const heading = Number.isFinite(Number(plane.track)) ? ((Number(plane.track) - 90) * Math.PI) / 180 : -Math.PI / 2;
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -1222,8 +1222,8 @@ function drawAircraftContact({ plane, point, alpha, highlight }) {
   ctx.fillStyle =
     plane.emergency && plane.emergency !== "none"
       ? "#ff6a75"
-      : colorMix > 0
-        ? `rgba(255, 207, 106, ${0.42 + colorMix * 0.58})`
+      : highlightMix > 0
+        ? `rgba(255, 54, 72, ${0.42 + highlightMix * 0.58})`
         : "#e9fff3";
   ctx.beginPath();
   ctx.moveTo(10, 0);
