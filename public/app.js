@@ -55,6 +55,7 @@ const adsbProxyBaseUrl = (
 ).replace(/\/$/, "");
 const tracks = new Map();
 const aircraftTypeCache = new Map();
+const radarBlips = new Map();
 const kdvtFallbackCenter = { lat: 33.6883, lon: -112.083 };
 
 let center = { lat: 33.7292, lon: -111.9918 };
@@ -69,6 +70,7 @@ let airports = [];
 let airspaces = [];
 let running = true;
 let lastSweepBucket = -1;
+let previousSweepAngle = null;
 let lastFetchAt = 0;
 let lastDataSource = "standby";
 let pixelRatio = window.devicePixelRatio || 1;
@@ -223,6 +225,20 @@ function project(lat, lon, scope) {
   };
 }
 
+function normalizeRadians(value) {
+  return ((value % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+}
+
+function planeSweepAngle(plane) {
+  const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
+  return normalizeRadians(((bearing - 90) * Math.PI) / 180);
+}
+
+function sweepCrossedAngle(previous, current, target) {
+  if (previous === null) return false;
+  return current >= previous ? target > previous && target <= current : target > previous || target <= current;
+}
+
 function formatAltitude(value) {
   if (value === "ground") return "GROUND";
   const number = Number(value);
@@ -346,6 +362,51 @@ function updateTrackHistory(nextAircraft) {
       tracks.delete(key);
     }
   }
+}
+
+function appendTrackHistory(plane) {
+  const key = plane.hex || plane.nNumber || plane.callsign;
+  if (!key) return;
+
+  const history = tracks.get(key) || [];
+  const last = history.at(-1);
+  if (!last || Math.abs(last.lat - plane.lat) > 0.0001 || Math.abs(last.lon - plane.lon) > 0.0001) {
+    history.push({ lat: plane.lat, lon: plane.lon, at: Date.now() });
+  }
+  tracks.set(key, history.slice(-breadcrumbLimit));
+}
+
+function pruneRadarBlips(nextAircraft) {
+  const latestKeys = new Set(nextAircraft.map(aircraftKey));
+  const now = Date.now();
+
+  for (const [key, plane] of radarBlips.entries()) {
+    if (!latestKeys.has(key) && now - (plane.radarSeenAt || 0) > 10 * 60 * 1000) {
+      radarBlips.delete(key);
+      tracks.delete(key);
+    }
+  }
+}
+
+function visibleRadarAircraft() {
+  return Array.from(radarBlips.values()).filter((plane) => showGroundTraffic || !isGroundTraffic(plane));
+}
+
+function updateRadarBlipsForSweep(angle) {
+  const currentSweepAngle = normalizeRadians(angle);
+
+  for (const plane of aircraft) {
+    if (milesBetween(center.lat, center.lon, plane.lat, plane.lon) > radiusMiles + 1) continue;
+
+    const targetAngle = planeSweepAngle(plane);
+    if (!sweepCrossedAngle(previousSweepAngle, currentSweepAngle, targetAngle)) continue;
+
+    const snapshot = { ...plane, radarSeenAt: Date.now() };
+    radarBlips.set(aircraftKey(plane), snapshot);
+    appendTrackHistory(snapshot);
+  }
+
+  previousSweepAngle = currentSweepAngle;
 }
 
 async function getJson(url) {
@@ -500,7 +561,11 @@ function updateCenter(lat, lon, { clearTracks = true, source = "manual" } = {}) 
   center = { lat, lon };
   latInput.value = lat.toFixed(4);
   lonInput.value = lon.toFixed(4);
-  if (clearTracks) tracks.clear();
+  if (clearTracks) {
+    tracks.clear();
+    radarBlips.clear();
+    previousSweepAngle = null;
+  }
   lastAirspaceKey = "";
   weatherImageKey = "";
   statusEl.textContent =
@@ -591,7 +656,7 @@ async function fetchTraffic() {
     statusEl.textContent = `Live data unavailable: ${error.message}.${proxyHint}`;
   }
 
-  updateTrackHistory(aircraft);
+  pruneRadarBlips(aircraft);
   lastFetchAt = Date.now();
   renderList();
 }
@@ -768,7 +833,7 @@ function drawAircraft(scope) {
   ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
   aircraftHitAreas = [];
 
-  for (const plane of visibleAircraft()) {
+  for (const plane of visibleRadarAircraft()) {
     const point = project(plane.lat, plane.lon, scope);
     if (point.distance > radiusMiles) continue;
 
@@ -836,9 +901,9 @@ function drawHud(scope) {
   ctx.save();
   ctx.fillStyle = "rgba(233, 255, 243, 0.75)";
   ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
-  ctx.textAlign = "right";
-  ctx.fillText(`${visibleAircraft().length} TRACKS`, scope.width - 22, 28);
-  ctx.fillText(`${airports.length} AIRPORTS`, scope.width - 22, 48);
+  ctx.textAlign = "left";
+  ctx.fillText(`${visibleRadarAircraft().length} TRACKS`, 22, 28);
+  ctx.fillText(`${airports.length} AIRPORTS`, 22, 48);
   ctx.restore();
 }
 
@@ -866,6 +931,7 @@ function render(now) {
   ctx.fillStyle = "#020503";
   ctx.fillRect(0, 0, width, height);
 
+  updateRadarBlipsForSweep(angle);
   drawGrid(scope);
   drawPrecipitation(scope);
   drawAirspace(scope);
@@ -979,6 +1045,8 @@ function startGpsTracking() {
 
       if (shouldRefresh) {
         tracks.clear();
+        radarBlips.clear();
+        previousSweepAngle = null;
         lastAirspaceKey = "";
         fetchAirspace();
         fetchTraffic();
