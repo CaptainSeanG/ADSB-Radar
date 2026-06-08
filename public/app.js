@@ -166,6 +166,7 @@ const aircraftTypeNames = new Map([
   ["H25B", "Hawker 800"],
   ["H500", "Hughes 500"],
   ["H60", "Sikorsky UH-60 Black Hawk"],
+  ["LEG2", "Lancair Legacy 2000"],
   ["LJ35", "Learjet 35"],
   ["LJ45", "Learjet 45"],
   ["LJ60", "Learjet 60"],
