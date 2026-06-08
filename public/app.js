@@ -61,6 +61,7 @@ const adsbProxyBaseUrl = (
 const tracks = new Map();
 const aircraftTypeCache = new Map();
 const radarBlips = new Map();
+const aircraftHighlights = new Map();
 const aircraftTypeNames = new Map([
   ["A109", "AgustaWestland AW109"],
   ["A119", "AgustaWestland AW119"],
@@ -224,6 +225,37 @@ let audioCtx = null;
 let audioMaster = null;
 let lastContactSoundAt = 0;
 let audioUnlocked = false;
+
+function scheduleAircraftHighlight(key) {
+  if (!key) return;
+  const now = Date.now();
+  aircraftHighlights.set(key, {
+    startsAt: now + 1000,
+    endsAt: now + 11000
+  });
+}
+
+function aircraftHighlightState(key, now) {
+  const highlight = aircraftHighlights.get(key);
+  if (!highlight) return null;
+
+  if (now > highlight.endsAt) {
+    aircraftHighlights.delete(key);
+    return null;
+  }
+
+  if (now < highlight.startsAt) {
+    return { scale: 1, colorMix: 0 };
+  }
+
+  const elapsed = now - highlight.startsAt;
+  const duration = highlight.endsAt - highlight.startsAt;
+  const colorMix = Math.max(0, 1 - elapsed / duration);
+  const pulseProgress = Math.min(1, elapsed / 900);
+  const scale = 1 + Math.sin(pulseProgress * Math.PI) * 0.72;
+
+  return { scale, colorMix };
+}
 
 function ensureAudioContext() {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -1175,12 +1207,21 @@ function drawAircraft(scope) {
     if (alpha > 0.12) aircraftHitAreas.push({ key: aircraftKey(plane), x: point.x, y: point.y, plane });
     drawTrack(scope, plane, alpha);
 
+    const key = aircraftKey(plane);
+    const highlight = aircraftHighlightState(key, now);
+    const colorMix = highlight?.colorMix || 0;
     const heading = Number.isFinite(Number(plane.track)) ? ((Number(plane.track) - 90) * Math.PI) / 180 : -Math.PI / 2;
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.translate(point.x, point.y);
     ctx.rotate(heading);
-    ctx.fillStyle = plane.emergency && plane.emergency !== "none" ? "#ff6a75" : "#e9fff3";
+    ctx.scale(highlight?.scale || 1, highlight?.scale || 1);
+    ctx.fillStyle =
+      plane.emergency && plane.emergency !== "none"
+        ? "#ff6a75"
+        : colorMix > 0
+          ? `rgba(255, 207, 106, ${0.42 + colorMix * 0.58})`
+          : "#e9fff3";
     ctx.beginPath();
     ctx.moveTo(10, 0);
     ctx.lineTo(-7, -5);
@@ -1483,7 +1524,7 @@ radarSoundStyleSelect.addEventListener("change", () => {
 aircraftListEl.addEventListener("click", (event) => {
   const button = event.target.closest("[data-aircraft-key]");
   if (!button) return;
-  openAircraftDetails(visibleAircraft().find((plane) => aircraftKey(plane) === button.dataset.aircraftKey));
+  scheduleAircraftHighlight(button.dataset.aircraftKey);
 });
 
 canvas.addEventListener("click", (event) => {
