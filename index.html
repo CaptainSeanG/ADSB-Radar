@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./public/styles.css?v=20260607-11" />
+    <link rel="stylesheet" href="./public/styles.css?v=20260607-12" />
   </head>
   <body>
     <main class="shell">
@@ -27,8 +27,8 @@
             Airport
             <select id="airportSelect" name="airport">
               <option value="">Custom coordinates</option>
-              <option value="gps">Use GPS location</option>
-              <option value="33.7292,-111.9918" selected>Default position</option>
+              <option value="gps" selected>Use GPS location</option>
+              <option value="33.7292,-111.9918">Default position</option>
               <option value="33.6883,-112.0830">KDVT - Phoenix Deer Valley</option>
               <option value="33.4353,-112.0059">KPHX - Phoenix Sky Harbor</option>
               <option value="33.6229,-111.9110">KSDL - Scottsdale</option>
@@ -109,6 +109,11 @@
             <input id="radarDataToggle" type="checkbox" checked />
           </label>
 
+          <label class="switch-row">
+            <span>Precipitation</span>
+            <input id="precipitationToggle" type="checkbox" />
+          </label>
+
           <fieldset>
             <legend>Sweep color</legend>
             <label class="switch-row color-switch">
@@ -131,7 +136,7 @@
       </section>
     </div>
 
-    <script src="./public/config.js?v=20260607-11"></script>
-    <script type="module" src="./public/app.js?v=20260607-11"></script>
+    <script src="./public/config.js?v=20260607-12"></script>
+    <script type="module" src="./public/app.js?v=20260607-12"></script>
   </body>
 </html>

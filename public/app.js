@@ -14,6 +14,7 @@ const breadcrumbLengthInput = document.querySelector("#breadcrumbLength");
 const breadcrumbReadout = document.querySelector("#breadcrumbReadout");
 const groundTrafficToggle = document.querySelector("#groundTrafficToggle");
 const radarDataToggle = document.querySelector("#radarDataToggle");
+const precipitationToggle = document.querySelector("#precipitationToggle");
 const sweepColorToggle = document.querySelector("#sweepColorToggle");
 const aircraftModal = document.querySelector("#aircraftModal");
 const aircraftClose = document.querySelector("#aircraftClose");
@@ -36,6 +37,7 @@ const sweepPalettes = {
 };
 const adsbBaseUrl = "https://opendata.adsb.fi/api/v3";
 const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
+const weatherMapsUrl = "https://api.rainviewer.com/public/weather-maps.json";
 const airspaceQueryUrl =
   "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0/query";
 const aircraftLookupBaseUrl = "https://api.adsbdb.com/v0/aircraft";
@@ -51,6 +53,7 @@ const adsbProxyBaseUrl = (
 ).replace(/\/$/, "");
 const tracks = new Map();
 const aircraftTypeCache = new Map();
+const kdvtFallbackCenter = { lat: 33.6883, lon: -112.083 };
 
 let center = { lat: 33.7292, lon: -111.9918 };
 let radiusMiles = 15;
@@ -58,6 +61,7 @@ let breadcrumbLimit = 12;
 let sweepColor = "green";
 let showGroundTraffic = true;
 let showRadarData = true;
+let showPrecipitation = false;
 let aircraft = [];
 let airports = [];
 let airspaces = [];
@@ -71,6 +75,11 @@ let lastAirspaceKey = "";
 let aircraftHitAreas = [];
 let gpsWatchId = null;
 let gpsActive = false;
+let weatherMeta = null;
+let weatherMetaFetchedAt = 0;
+let weatherImage = null;
+let weatherImageKey = "";
+let weatherImageLoading = false;
 
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
@@ -416,12 +425,76 @@ function airspaceEnvelope() {
   return `${center.lon - lonPad},${center.lat - latPad},${center.lon + lonPad},${center.lat + latPad}`;
 }
 
+function weatherZoomLevel() {
+  const tileSpanMiles = Math.max(4, radiusMiles * 2.2);
+  const earthMiles = 24901;
+  const zoom = Math.round(Math.log2((earthMiles * Math.cos((center.lat * Math.PI) / 180)) / tileSpanMiles));
+  return Math.max(4, Math.min(10, zoom));
+}
+
+async function loadWeatherMeta() {
+  const now = Date.now();
+  if (weatherMeta && now - weatherMetaFetchedAt < 5 * 60 * 1000) return weatherMeta;
+
+  const response = await fetch(weatherMapsUrl);
+  if (!response.ok) throw new Error(`weather radar returned ${response.status}`);
+  weatherMeta = await response.json();
+  weatherMetaFetchedAt = now;
+  return weatherMeta;
+}
+
+async function ensureWeatherImage() {
+  if (!showPrecipitation || weatherImageLoading) return;
+
+  try {
+    const meta = await loadWeatherMeta();
+    const frame = meta.radar?.past?.at(-1);
+    if (!frame?.path || !meta.host) return;
+
+    const zoom = weatherZoomLevel();
+    const key = `${frame.path}:${zoom}:${center.lat.toFixed(3)}:${center.lon.toFixed(3)}`;
+    if (key === weatherImageKey && weatherImage) return;
+
+    weatherImageLoading = true;
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      weatherImage = image;
+      weatherImageKey = key;
+      weatherImageLoading = false;
+    };
+    image.onerror = () => {
+      weatherImageLoading = false;
+    };
+    image.src = `${meta.host}${frame.path}/512/${zoom}/${center.lat.toFixed(4)}/${center.lon.toFixed(4)}/2/1_1.png`;
+  } catch (error) {
+    weatherImageLoading = false;
+    console.warn("Unable to load precipitation layer", error);
+  }
+}
+
+function drawPrecipitation(scope) {
+  if (!showPrecipitation) return;
+  ensureWeatherImage();
+  if (!weatherImage) return;
+
+  const size = scope.radius * 2.18;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.globalAlpha = 0.55;
+  ctx.drawImage(weatherImage, scope.cx - size / 2, scope.cy - size / 2, size, size);
+  ctx.restore();
+}
+
 function updateCenter(lat, lon, { clearTracks = true, source = "manual" } = {}) {
   center = { lat, lon };
   latInput.value = lat.toFixed(4);
   lonInput.value = lon.toFixed(4);
   if (clearTracks) tracks.clear();
   lastAirspaceKey = "";
+  weatherImageKey = "";
   statusEl.textContent =
     source === "gps"
       ? `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
@@ -786,6 +859,7 @@ function render(now) {
   ctx.fillRect(0, 0, width, height);
 
   drawGrid(scope);
+  drawPrecipitation(scope);
   drawAirspace(scope);
   drawAirports(scope);
   drawAircraft(scope);
@@ -797,6 +871,7 @@ function render(now) {
 
 function setRange(nextRange) {
   radiusMiles = allowedRanges.includes(nextRange) ? nextRange : 20;
+  weatherImageKey = "";
   for (const button of rangeButtons.querySelectorAll("button")) {
     button.classList.toggle("active", Number(button.dataset.range) === radiusMiles);
   }
@@ -856,11 +931,17 @@ function stopGpsTracking() {
   gpsActive = false;
 }
 
+function fallbackToKdvt(message = "GPS unavailable. Using KDVT fallback.") {
+  stopGpsTracking();
+  airportSelect.value = `${kdvtFallbackCenter.lat},${kdvtFallbackCenter.lon}`;
+  updateCoordinateVisibility();
+  statusEl.textContent = message;
+  updateCenter(kdvtFallbackCenter.lat, kdvtFallbackCenter.lon);
+}
+
 function startGpsTracking() {
   if (!navigator.geolocation) {
-    airportSelect.value = "";
-    updateCoordinateVisibility();
-    statusEl.textContent = "GPS is not available in this browser.";
+    fallbackToKdvt("GPS is not available in this browser. Using KDVT fallback.");
     return;
   }
 
@@ -878,6 +959,7 @@ function startGpsTracking() {
       latInput.value = lat.toFixed(4);
       lonInput.value = lon.toFixed(4);
       center = { lat, lon };
+      weatherImageKey = "";
       statusEl.textContent = `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
 
       if (shouldRefresh) {
@@ -888,10 +970,7 @@ function startGpsTracking() {
       }
     },
     (error) => {
-      stopGpsTracking();
-      airportSelect.value = "";
-      updateCoordinateVisibility();
-      statusEl.textContent = `GPS unavailable: ${error.message}.`;
+      fallbackToKdvt(`GPS unavailable: ${error.message}. Using KDVT fallback.`);
     },
     {
       enableHighAccuracy: true,
@@ -942,6 +1021,11 @@ groundTrafficToggle.addEventListener("change", () => {
 
 radarDataToggle.addEventListener("change", () => {
   showRadarData = radarDataToggle.checked;
+});
+
+precipitationToggle.addEventListener("change", () => {
+  showPrecipitation = precipitationToggle.checked;
+  if (showPrecipitation) ensureWeatherImage();
 });
 
 aircraftListEl.addEventListener("click", (event) => {
