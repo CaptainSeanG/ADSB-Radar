@@ -886,7 +886,13 @@ rangeButtons.addEventListener("click", (event) => {
 });
 
 airspaceToggles.addEventListener("change", () => {
-  if (getVisibleAirspaceClasses().size && !airspaces.length) fetchAirspace();
+  if (!getVisibleAirspaceClasses().size) {
+    airspaces = [];
+    lastAirspaceKey = "";
+    return;
+  }
+
+  fetchAirspace();
 });
 
 function openSettings() {
@@ -954,7 +960,8 @@ function startGpsTracking() {
       const lat = position.coords.latitude;
       const lon = position.coords.longitude;
       const movedMiles = milesBetween(center.lat, center.lon, lat, lon);
-      const shouldRefresh = movedMiles > 0.05 || !lastFetchAt;
+      const needsAirspace = getVisibleAirspaceClasses().size && (!lastAirspaceKey || !airspaces.length);
+      const shouldRefresh = movedMiles > 0.05 || !lastFetchAt || needsAirspace;
 
       latInput.value = lat.toFixed(4);
       lonInput.value = lon.toFixed(4);
@@ -1107,6 +1114,9 @@ const initialCenterApplied = applySelectedAirport();
 updateCoordinateVisibility();
 resizeCanvas();
 renderList();
+if (airportSelect.value === "gps" && getVisibleAirspaceClasses().size) {
+  fetchAirspace();
+}
 if (!initialCenterApplied) {
   fetchAirspace();
   fetchTraffic();
