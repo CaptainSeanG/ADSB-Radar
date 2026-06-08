@@ -378,10 +378,16 @@ function appendTrackHistory(plane) {
 
 function pruneRadarBlips(nextAircraft) {
   const latestKeys = new Set(nextAircraft.map(aircraftKey));
+  const latestByKey = new Map(nextAircraft.map((plane) => [aircraftKey(plane), plane]));
   const now = Date.now();
 
   for (const [key, plane] of radarBlips.entries()) {
-    if (!latestKeys.has(key) && now - (plane.radarSeenAt || 0) > 10 * 60 * 1000) {
+    const latestPlane = latestByKey.get(key);
+    const outOfRange =
+      latestPlane && milesBetween(center.lat, center.lon, latestPlane.lat, latestPlane.lon) > radiusMiles;
+    const stale = !latestKeys.has(key) && now - (plane.radarSeenAt || 0) > 10 * 60 * 1000;
+
+    if (outOfRange || stale) {
       radarBlips.delete(key);
       tracks.delete(key);
     }
@@ -810,10 +816,13 @@ function drawAirspace(scope) {
 
 function drawTrack(scope, plane) {
   const key = plane.hex || plane.nNumber || plane.callsign;
-  const history = tracks.get(key) || [];
+  const history = (tracks.get(key) || []).filter((sample) => milesBetween(center.lat, center.lon, sample.lat, sample.lon) <= radiusMiles);
   if (history.length < 2) return;
 
   ctx.save();
+  ctx.beginPath();
+  ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
+  ctx.clip();
   ctx.strokeStyle = Number(plane.altitude) > 18000 ? "rgba(255, 80, 92, 0.7)" : "rgba(98, 213, 255, 0.45)";
   ctx.lineWidth = 2;
   ctx.beginPath();
