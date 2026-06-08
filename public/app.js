@@ -19,6 +19,7 @@ const flightLevelsToggle = document.querySelector("#flightLevelsToggle");
 const radarDataToggle = document.querySelector("#radarDataToggle");
 const precipitationToggle = document.querySelector("#precipitationToggle");
 const radarSoundsToggle = document.querySelector("#radarSoundsToggle");
+const radarSoundStyleSelect = document.querySelector("#radarSoundStyle");
 const sweepColorToggle = document.querySelector("#sweepColorToggle");
 const aircraftModal = document.querySelector("#aircraftModal");
 const aircraftTitle = document.querySelector("#aircraftTitle");
@@ -86,7 +87,10 @@ const aircraftTypeNames = new Map([
   ["B412", "Bell 412"],
   ["B190", "Beech 1900"],
   ["B350", "Beechcraft King Air 350"],
-  ["BE20", "Beechcraft King Air"],
+  ["BE9L", "Beechcraft King Air 90 Series"],
+  ["BE9T", "Beechcraft King Air F90"],
+  ["BE10", "Beechcraft King Air 100"],
+  ["BE20", "Beechcraft King Air 200"],
   ["BE30", "Beechcraft Super King Air"],
   ["BE33", "Beechcraft Bonanza"],
   ["BE35", "Beechcraft Bonanza"],
@@ -128,6 +132,9 @@ const aircraftTypeNames = new Map([
   ["DA40", "Diamond DA40"],
   ["DA42", "Diamond DA42"],
   ["DA62", "Diamond DA62"],
+  ["E135", "Embraer ERJ-135"],
+  ["E140", "Embraer ERJ-140"],
+  ["E145", "Embraer ERJ-145"],
   ["E170", "Embraer 170"],
   ["E175", "Embraer 175"],
   ["E190", "Embraer 190"],
@@ -192,6 +199,7 @@ let showFlightLevelsTraffic = true;
 let showRadarData = true;
 let showPrecipitation = false;
 let radarSoundsEnabled = false;
+let radarSoundStyle = "radar";
 let aircraft = [];
 let airports = [];
 let airspaces = [];
@@ -278,7 +286,7 @@ function resetWeatherImage() {
   weatherImageZoom = null;
 }
 
-function playTone({ frequency, type = "sine", duration = 0.05, gain = 0.05, slideTo = null }) {
+function playTone({ frequency, type = "sine", duration = 0.05, gain = 0.05, slideTo = null, delay = 0 }) {
   if (!radarSoundsEnabled) return;
 
   const context = ensureAudioContext();
@@ -287,7 +295,7 @@ function playTone({ frequency, type = "sine", duration = 0.05, gain = 0.05, slid
 
   const oscillator = context.createOscillator();
   const envelope = context.createGain();
-  const now = context.currentTime;
+  const now = context.currentTime + delay;
 
   oscillator.type = type;
   oscillator.frequency.setValueAtTime(frequency, now);
@@ -311,9 +319,15 @@ function playSweepTick() {
 
 function playContactBlip() {
   const now = performance.now();
-  if (now - lastContactSoundAt < 70) return;
+  if (now - lastContactSoundAt < (radarSoundStyle === "submarine" ? 170 : 70)) return;
 
   lastContactSoundAt = now;
+  if (radarSoundStyle === "submarine") {
+    playTone({ frequency: 620, type: "sine", duration: 0.28, gain: 0.075, slideTo: 900 });
+    playTone({ frequency: 900, type: "sine", duration: 0.18, gain: 0.035, slideTo: 520, delay: 0.16 });
+    return;
+  }
+
   playTone({ frequency: 920, type: "sine", duration: 0.055, gain: 0.06, slideTo: 1300 });
 }
 
@@ -1459,6 +1473,11 @@ radarSoundsToggle.addEventListener("change", async () => {
   } else if (radarSoundsEnabled) {
     queueRadarAudioUnlock();
   }
+});
+
+radarSoundStyleSelect.addEventListener("change", () => {
+  radarSoundStyle = radarSoundStyleSelect.value === "submarine" ? "submarine" : "radar";
+  if (radarSoundsEnabled) playContactBlip();
 });
 
 aircraftListEl.addEventListener("click", (event) => {
