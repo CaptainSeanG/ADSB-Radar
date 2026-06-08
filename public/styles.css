@@ -252,8 +252,19 @@ select {
   background:
     linear-gradient(45deg, transparent 50%, rgba(233, 255, 243, 0.78) 50%) right 17px center / 7px 7px no-repeat,
     linear-gradient(135deg, rgba(233, 255, 243, 0.78) 50%, transparent 50%) right 12px center / 7px 7px no-repeat,
-    rgba(0, 0, 0, 0.3);
+    #03120c;
+  color: var(--text);
   padding-right: 34px;
+}
+
+select option {
+  background: #03120c;
+  color: var(--text);
+}
+
+select option:checked {
+  background: rgba(77, 255, 155, 0.22);
+  color: #ffffff;
 }
 
 input:focus,

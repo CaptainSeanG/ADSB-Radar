@@ -148,6 +148,9 @@ const aircraftTypeNames = new Map([
   ["E145", "Embraer ERJ-145"],
   ["E170", "Embraer 170"],
   ["E175", "Embraer 175"],
+  ["E75", "Embraer 175"],
+  ["E75L", "Embraer 175"],
+  ["E75S", "Embraer 175"],
   ["E190", "Embraer 190"],
   ["E50P", "Embraer Phenom 100"],
   ["E55P", "Embraer Phenom 300"],
@@ -373,6 +376,11 @@ function playContactBlip() {
   if (radarSoundStyle === "submarine") {
     playTone({ frequency: 620, type: "sine", duration: 0.28, gain: 0.075, slideTo: 900 });
     playTone({ frequency: 900, type: "sine", duration: 0.18, gain: 0.035, slideTo: 520, delay: 0.16 });
+    return;
+  }
+
+  if (radarSoundStyle === "tick") {
+    playTone({ frequency: 240, type: "square", duration: 0.028, gain: 0.045, slideTo: 120 });
     return;
   }
 
@@ -1548,7 +1556,9 @@ radarSoundsToggle.addEventListener("change", async () => {
 });
 
 radarSoundStyleSelect.addEventListener("change", () => {
-  radarSoundStyle = radarSoundStyleSelect.value === "submarine" ? "submarine" : "radar";
+  radarSoundStyle = ["radar", "tick", "submarine"].includes(radarSoundStyleSelect.value)
+    ? radarSoundStyleSelect.value
+    : "radar";
   if (radarSoundsEnabled) playContactBlip();
 });
 
