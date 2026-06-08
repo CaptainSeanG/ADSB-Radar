@@ -15,6 +15,7 @@ const settingsModal = document.querySelector("#settingsModal");
 const breadcrumbLengthInput = document.querySelector("#breadcrumbLength");
 const breadcrumbReadout = document.querySelector("#breadcrumbReadout");
 const groundTrafficToggle = document.querySelector("#groundTrafficToggle");
+const flightLevelsToggle = document.querySelector("#flightLevelsToggle");
 const radarDataToggle = document.querySelector("#radarDataToggle");
 const precipitationToggle = document.querySelector("#precipitationToggle");
 const radarSoundsToggle = document.querySelector("#radarSoundsToggle");
@@ -65,6 +66,7 @@ let radiusMiles = 10;
 let breadcrumbLimit = 12;
 let sweepColor = "orange";
 let showGroundTraffic = false;
+let showFlightLevelsTraffic = true;
 let showRadarData = true;
 let showPrecipitation = false;
 let radarSoundsEnabled = false;
@@ -90,6 +92,7 @@ let weatherImageLoading = false;
 let audioCtx = null;
 let audioMaster = null;
 let lastContactSoundAt = 0;
+let audioUnlocked = false;
 
 function ensureAudioContext() {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -109,11 +112,49 @@ function ensureAudioContext() {
   return audioCtx;
 }
 
+async function unlockRadarAudio() {
+  const context = ensureAudioContext();
+  if (!context || !audioMaster) return false;
+
+  try {
+    if (context.state === "suspended") {
+      await context.resume();
+    }
+  } catch {
+    audioUnlocked = false;
+    return false;
+  }
+
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  const now = context.currentTime;
+  gain.gain.setValueAtTime(0.0001, now);
+  oscillator.frequency.setValueAtTime(1, now);
+  oscillator.connect(gain);
+  gain.connect(audioMaster);
+  oscillator.start(now);
+  oscillator.stop(now + 0.01);
+
+  audioUnlocked = context.state === "running";
+  return audioUnlocked;
+}
+
+function queueRadarAudioUnlock() {
+  const retryUnlock = async () => {
+    if (!radarSoundsEnabled || audioUnlocked) return;
+    if (await unlockRadarAudio()) playSweepTick();
+  };
+
+  window.addEventListener("pointerdown", retryUnlock, { once: true, passive: true });
+  window.addEventListener("touchend", retryUnlock, { once: true, passive: true });
+}
+
 function playTone({ frequency, type = "sine", duration = 0.05, gain = 0.05, slideTo = null }) {
   if (!radarSoundsEnabled) return;
 
   const context = ensureAudioContext();
   if (!context || !audioMaster) return;
+  if (context.state === "suspended") return;
 
   const oscillator = context.createOscillator();
   const envelope = context.createGain();
@@ -351,8 +392,18 @@ function isGroundTraffic(plane) {
   return plane.altitude === "ground";
 }
 
+function isFlightLevelTraffic(plane) {
+  return Number(plane.altitude) > 18000;
+}
+
+function isVisibleTraffic(plane) {
+  if (!showGroundTraffic && isGroundTraffic(plane)) return false;
+  if (!showFlightLevelsTraffic && isFlightLevelTraffic(plane)) return false;
+  return true;
+}
+
 function visibleAircraft() {
-  return showGroundTraffic ? aircraft : aircraft.filter((plane) => !isGroundTraffic(plane));
+  return aircraft.filter(isVisibleTraffic);
 }
 
 function aircraftKey(plane) {
@@ -473,15 +524,14 @@ function pruneExpiredRadarBlips(now = Date.now()) {
 
 function visibleRadarAircraft() {
   const now = Date.now();
-  return Array.from(radarBlips.values()).filter(
-    (plane) => radarBlipAlpha(plane, now) > 0 && (showGroundTraffic || !isGroundTraffic(plane))
-  );
+  return Array.from(radarBlips.values()).filter((plane) => radarBlipAlpha(plane, now) > 0 && isVisibleTraffic(plane));
 }
 
 function updateRadarBlipsForSweep(angle) {
   const currentSweepAngle = normalizeRadians(angle);
 
   for (const plane of aircraft) {
+    if (!isVisibleTraffic(plane)) continue;
     if (milesBetween(center.lat, center.lon, plane.lat, plane.lon) > radiusMiles + 1) continue;
 
     const targetAngle = planeSweepAngle(plane);
@@ -1087,14 +1137,12 @@ function openAircraftDetails(plane) {
     <dl>
       <div><dt>Type</dt><dd>${escapeHtml(aircraftType(plane) || "Unknown")}</dd></div>
       <div><dt>Callsign</dt><dd>${escapeHtml(plane.callsign || "Unknown")}</dd></div>
-      <div><dt>ICAO</dt><dd>${escapeHtml(plane.hex || "Unknown")}</dd></div>
       <div><dt>Altitude</dt><dd>${formatAltitude(plane.altitude)}</dd></div>
       <div><dt>Speed</dt><dd>${formatSpeed(plane.speed)}</dd></div>
       <div><dt>Track</dt><dd>${Number.isFinite(Number(plane.track)) ? `${Math.round(Number(plane.track))} deg` : "Unknown"}</dd></div>
       <div><dt>Distance</dt><dd>${distance.toFixed(1)} mi</dd></div>
       <div><dt>Bearing</dt><dd>${Math.round(bearing)} deg</dd></div>
       <div><dt>Vertical rate</dt><dd>${Number.isFinite(Number(plane.verticalRate)) ? `${Math.round(Number(plane.verticalRate))} fpm` : "Unknown"}</dd></div>
-      <div><dt>Position</dt><dd>${plane.lat.toFixed(4)}, ${plane.lon.toFixed(4)}</dd></div>
     </dl>
   `;
   aircraftModal.hidden = false;
@@ -1209,6 +1257,11 @@ groundTrafficToggle.addEventListener("change", () => {
   renderList();
 });
 
+flightLevelsToggle.addEventListener("change", () => {
+  showFlightLevelsTraffic = flightLevelsToggle.checked;
+  renderList();
+});
+
 radarDataToggle.addEventListener("change", () => {
   showRadarData = radarDataToggle.checked;
 });
@@ -1218,9 +1271,14 @@ precipitationToggle.addEventListener("change", () => {
   if (showPrecipitation) ensureWeatherImage();
 });
 
-radarSoundsToggle.addEventListener("change", () => {
+radarSoundsToggle.addEventListener("change", async () => {
   radarSoundsEnabled = radarSoundsToggle.checked;
-  if (radarSoundsEnabled) playSweepTick();
+  audioUnlocked = false;
+  if (radarSoundsEnabled && (await unlockRadarAudio())) {
+    playSweepTick();
+  } else if (radarSoundsEnabled) {
+    queueRadarAudioUnlock();
+  }
 });
 
 aircraftListEl.addEventListener("click", (event) => {
