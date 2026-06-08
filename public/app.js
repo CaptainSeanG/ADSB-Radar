@@ -106,13 +106,17 @@ const aircraftTypeNames = new Map([
   ["C180", "Cessna 180"],
   ["C182", "Cessna 182"],
   ["C185", "Cessna 185"],
+  ["C205", "Cessna 205"],
   ["C206", "Cessna 206"],
   ["C207", "Cessna 207"],
   ["C208", "Cessna Caravan"],
   ["C210", "Cessna 210"],
+  ["P210", "Cessna P210 Pressurized Centurion"],
+  ["T210", "Cessna Turbo 210"],
   ["C25A", "Cessna Citation CJ2"],
   ["C25B", "Cessna Citation CJ3"],
   ["C25C", "Cessna Citation CJ4"],
+  ["C27J", "Leonardo C-27J Spartan"],
   ["C310", "Cessna 310"],
   ["C340", "Cessna 340"],
   ["C402", "Cessna 402"],
@@ -120,10 +124,16 @@ const aircraftTypeNames = new Map([
   ["C421", "Cessna 421"],
   ["C510", "Cessna Citation Mustang"],
   ["C525", "Cessna CitationJet"],
+  ["C526", "Cessna CitationJet"],
   ["C550", "Cessna Citation II"],
   ["C560", "Cessna Citation V"],
+  ["C56X", "Cessna Citation Excel/XLS"],
+  ["C650", "Cessna Citation III/VI/VII"],
+  ["C68", "Cessna Citation 680 Series"],
+  ["C68A", "Cessna Citation Latitude"],
   ["C680", "Cessna Citation Sovereign"],
   ["C700", "Cessna Citation Longitude"],
+  ["COL4", "Cessna Corvalis TTx"],
   ["CL30", "Bombardier Challenger 300"],
   ["CL35", "Bombardier Challenger 350"],
   ["CL60", "Bombardier Challenger 600"],
@@ -159,18 +169,22 @@ const aircraftTypeNames = new Map([
   ["P28A", "Piper Cherokee"],
   ["P28B", "Piper Cherokee"],
   ["P28R", "Piper Arrow"],
+  ["P28T", "Piper Turbo Arrow"],
   ["P32R", "Piper Saratoga"],
+  ["P32T", "Piper Turbo Saratoga"],
   ["PA27", "Piper Aztec"],
   ["PA30", "Piper Twin Comanche"],
   ["PA31", "Piper Navajo"],
   ["PA34", "Piper Seneca"],
   ["PA44", "Piper Seminole"],
   ["PA46", "Piper Malibu/Mirage"],
+  ["P46T", "Piper Meridian/M500/M600"],
   ["PC12", "Pilatus PC-12"],
   ["PC24", "Pilatus PC-24"],
   ["R22", "Robinson R22"],
   ["R44", "Robinson R44"],
   ["R66", "Robinson R66"],
+  ["SF50", "Cirrus Vision Jet"],
   ["S22T", "Cirrus SR22T"],
   ["SR20", "Cirrus SR20"],
   ["SR22", "Cirrus SR22"],
@@ -619,7 +633,11 @@ function aircraftKey(plane) {
 
 function needsTypeLookup(plane) {
   const type = aircraftType(plane).trim().toUpperCase();
-  return plane.nNumber && (!type || type === "TYPE ?" || type === "UNKNOWN");
+  const code = aircraftTypeCode(plane);
+  return (
+    plane.nNumber &&
+    (!type || type === "TYPE ?" || type === "UNKNOWN" || (!plane.friendlyType && code && !aircraftTypeNames.has(code)))
+  );
 }
 
 async function lookupAircraftType(nNumber) {
