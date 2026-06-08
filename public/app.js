@@ -265,10 +265,12 @@ function aircraftHighlightState(key, now) {
   const elapsed = now - highlight.startsAt;
   const duration = highlight.endsAt - highlight.startsAt;
   const colorMix = Math.max(0, 1 - elapsed / duration);
-  const pulseProgress = Math.min(1, elapsed / 900);
-  const scale = 1 + Math.sin(pulseProgress * Math.PI) * 0.72;
+  const pulseWindow = 2200;
+  const pulseProgress = Math.min(1, elapsed / pulseWindow);
+  const pulseWave = Math.max(0, Math.sin(pulseProgress * Math.PI * 4));
+  const scale = 1 + pulseWave * 1.25;
 
-  return { scale, colorMix };
+  return { scale, colorMix, active: true };
 }
 
 function ensureAudioContext() {
@@ -1209,11 +1211,47 @@ function drawTrack(scope, plane, alpha = 1) {
   ctx.restore();
 }
 
+function drawAircraftContact({ plane, point, alpha, highlight }) {
+  const colorMix = highlight?.colorMix || 0;
+  const heading = Number.isFinite(Number(plane.track)) ? ((Number(plane.track) - 90) * Math.PI) / 180 : -Math.PI / 2;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.translate(point.x, point.y);
+  ctx.rotate(heading);
+  ctx.scale(highlight?.scale || 1, highlight?.scale || 1);
+  ctx.fillStyle =
+    plane.emergency && plane.emergency !== "none"
+      ? "#ff6a75"
+      : colorMix > 0
+        ? `rgba(255, 207, 106, ${0.42 + colorMix * 0.58})`
+        : "#e9fff3";
+  ctx.beginPath();
+  ctx.moveTo(10, 0);
+  ctx.lineTo(-7, -5);
+  ctx.lineTo(-4, 0);
+  ctx.lineTo(-7, 5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+
+  ctx.fillStyle = "rgba(233, 255, 243, 0.92)";
+  if (showRadarData) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillText(aircraftDisplayLabel(plane), point.x + 13, point.y - 11);
+    ctx.fillStyle = "rgba(77, 255, 155, 0.86)";
+    ctx.fillText(`${formatAltitude(plane.altitude)} ${formatSpeed(plane.speed)}`, point.x + 13, point.y + 4);
+    ctx.restore();
+  }
+}
+
 function drawAircraft(scope) {
   ctx.save();
   ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
   aircraftHitAreas = [];
   const now = Date.now();
+  const normalContacts = [];
+  const highlightedContacts = [];
 
   for (const plane of visibleRadarAircraft()) {
     const point = project(plane.lat, plane.lon, scope);
@@ -1227,38 +1265,13 @@ function drawAircraft(scope) {
 
     const key = aircraftKey(plane);
     const highlight = aircraftHighlightState(key, now);
-    const colorMix = highlight?.colorMix || 0;
-    const heading = Number.isFinite(Number(plane.track)) ? ((Number(plane.track) - 90) * Math.PI) / 180 : -Math.PI / 2;
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.translate(point.x, point.y);
-    ctx.rotate(heading);
-    ctx.scale(highlight?.scale || 1, highlight?.scale || 1);
-    ctx.fillStyle =
-      plane.emergency && plane.emergency !== "none"
-        ? "#ff6a75"
-        : colorMix > 0
-          ? `rgba(255, 207, 106, ${0.42 + colorMix * 0.58})`
-          : "#e9fff3";
-    ctx.beginPath();
-    ctx.moveTo(10, 0);
-    ctx.lineTo(-7, -5);
-    ctx.lineTo(-4, 0);
-    ctx.lineTo(-7, 5);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-
-    ctx.fillStyle = "rgba(233, 255, 243, 0.92)";
-    if (showRadarData) {
-      ctx.save();
-      ctx.globalAlpha = alpha;
-      ctx.fillText(aircraftDisplayLabel(plane), point.x + 13, point.y - 11);
-      ctx.fillStyle = "rgba(77, 255, 155, 0.86)";
-      ctx.fillText(`${formatAltitude(plane.altitude)} ${formatSpeed(plane.speed)}`, point.x + 13, point.y + 4);
-      ctx.restore();
-    }
+    const contact = { plane, point, alpha, highlight };
+    if (highlight?.active) highlightedContacts.push(contact);
+    else normalContacts.push(contact);
   }
+
+  for (const contact of normalContacts) drawAircraftContact(contact);
+  for (const contact of highlightedContacts) drawAircraftContact(contact);
 
   ctx.restore();
 }
