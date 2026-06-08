@@ -56,10 +56,10 @@ const aircraftTypeCache = new Map();
 const kdvtFallbackCenter = { lat: 33.6883, lon: -112.083 };
 
 let center = { lat: 33.7292, lon: -111.9918 };
-let radiusMiles = 15;
+let radiusMiles = 10;
 let breadcrumbLimit = 12;
-let sweepColor = "green";
-let showGroundTraffic = true;
+let sweepColor = "orange";
+let showGroundTraffic = false;
 let showRadarData = true;
 let showPrecipitation = false;
 let aircraft = [];
@@ -675,7 +675,7 @@ function drawAirports(scope) {
     ctx.lineTo(point.x, point.y + 6);
     ctx.stroke();
     if (showRadarData) {
-      ctx.fillText(airport.iata || airport.ident, point.x + 9, point.y - 8);
+      ctx.fillText(airport.ident || airport.iata, point.x + 9, point.y - 8);
     }
   }
   ctx.restore();

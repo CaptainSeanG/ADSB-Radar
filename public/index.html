@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./styles.css?v=20260607-12" />
+    <link rel="stylesheet" href="./styles.css?v=20260607-13" />
   </head>
   <body>
     <main class="shell">
@@ -56,8 +56,8 @@
             <div class="range-buttons" id="rangeButtons">
               <button type="button" data-range="2">2</button>
               <button type="button" data-range="5">5</button>
-              <button type="button" data-range="10">10</button>
-              <button type="button" data-range="15" class="active">15</button>
+              <button type="button" data-range="10" class="active">10</button>
+              <button type="button" data-range="15">15</button>
               <button type="button" data-range="20">20</button>
               <button type="button" data-range="50">50</button>
               <button type="button" data-range="100">100</button>
@@ -89,7 +89,7 @@
             <div class="airspace-toggles" id="airspaceToggles">
               <label><input type="checkbox" data-class="B" /><span>Class B</span></label>
               <label><input type="checkbox" data-class="C" /><span>Class C</span></label>
-              <label><input type="checkbox" data-class="D" /><span>Class D</span></label>
+              <label><input type="checkbox" data-class="D" checked /><span>Class D</span></label>
             </div>
           </fieldset>
 
@@ -101,7 +101,7 @@
 
           <label class="switch-row">
             <span>Ground traffic</span>
-            <input id="groundTrafficToggle" type="checkbox" checked />
+            <input id="groundTrafficToggle" type="checkbox" />
           </label>
 
           <label class="switch-row">
@@ -118,7 +118,7 @@
             <legend>Sweep color</legend>
             <label class="switch-row color-switch">
               <span>Green</span>
-              <input id="sweepColorToggle" type="checkbox" />
+              <input id="sweepColorToggle" type="checkbox" checked />
               <span>Orange</span>
             </label>
           </fieldset>
@@ -136,7 +136,7 @@
       </section>
     </div>
 
-    <script src="./config.js?v=20260607-12"></script>
-    <script type="module" src="./app.js?v=20260607-12"></script>
+    <script src="./config.js?v=20260607-13"></script>
+    <script type="module" src="./app.js?v=20260607-13"></script>
   </body>
 </html>
