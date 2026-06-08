@@ -378,6 +378,34 @@ fieldset {
   background: var(--green);
 }
 
+.color-switch {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+}
+
+.color-switch span:first-child {
+  color: var(--green);
+  text-align: right;
+}
+
+.color-switch span:last-child {
+  color: var(--amber);
+}
+
+.color-switch input {
+  border-color: rgba(255, 207, 106, 0.32);
+}
+
+.color-switch input:checked {
+  border-color: var(--amber);
+  background: rgba(255, 155, 64, 0.2);
+}
+
+.color-switch input:checked::after {
+  background: var(--amber);
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

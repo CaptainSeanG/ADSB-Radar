@@ -66,6 +66,8 @@ let pixelRatio = window.devicePixelRatio || 1;
 let airportsCachePromise = null;
 let lastAirspaceKey = "";
 let aircraftHitAreas = [];
+let gpsWatchId = null;
+let gpsActive = false;
 
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
@@ -411,6 +413,20 @@ function airspaceEnvelope() {
   return `${center.lon - lonPad},${center.lat - latPad},${center.lon + lonPad},${center.lat + latPad}`;
 }
 
+function updateCenter(lat, lon, { clearTracks = true, source = "manual" } = {}) {
+  center = { lat, lon };
+  latInput.value = lat.toFixed(4);
+  lonInput.value = lon.toFixed(4);
+  if (clearTracks) tracks.clear();
+  lastAirspaceKey = "";
+  statusEl.textContent =
+    source === "gps"
+      ? `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
+      : "Radar sweep active. Updating aircraft every pass.";
+  fetchAirspace();
+  fetchTraffic();
+}
+
 function normalizeAirspaceFeature(feature) {
   const attributes = feature.attributes || {};
   const rings = (feature.geometry?.rings || []).map((ring) => ring.map(([lon, lat]) => ({ lat, lon })));
@@ -479,7 +495,9 @@ async function fetchTraffic() {
     aircraft = data.aircraft;
     airports = data.airports;
     lastDataSource = data.source;
-    statusEl.textContent = `Live ADS-B feed active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
+    statusEl.textContent = gpsActive
+      ? `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
+      : `Live ADS-B feed active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
     resolveMissingAircraftTypes(aircraft);
   } catch (error) {
     aircraft = [];
@@ -823,6 +841,57 @@ function closeAircraftDetails() {
   aircraftModal.hidden = true;
 }
 
+function stopGpsTracking() {
+  if (gpsWatchId !== null && navigator.geolocation) {
+    navigator.geolocation.clearWatch(gpsWatchId);
+  }
+  gpsWatchId = null;
+  gpsActive = false;
+}
+
+function startGpsTracking() {
+  if (!navigator.geolocation) {
+    airportSelect.value = "";
+    statusEl.textContent = "GPS is not available in this browser.";
+    return;
+  }
+
+  stopGpsTracking();
+  gpsActive = true;
+  statusEl.textContent = "Requesting GPS position...";
+
+  gpsWatchId = navigator.geolocation.watchPosition(
+    (position) => {
+      const lat = position.coords.latitude;
+      const lon = position.coords.longitude;
+      const movedMiles = milesBetween(center.lat, center.lon, lat, lon);
+      const shouldRefresh = movedMiles > 0.05 || !lastFetchAt;
+
+      latInput.value = lat.toFixed(4);
+      lonInput.value = lon.toFixed(4);
+      center = { lat, lon };
+      statusEl.textContent = `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
+
+      if (shouldRefresh) {
+        tracks.clear();
+        lastAirspaceKey = "";
+        fetchAirspace();
+        fetchTraffic();
+      }
+    },
+    (error) => {
+      stopGpsTracking();
+      airportSelect.value = "";
+      statusEl.textContent = `GPS unavailable: ${error.message}.`;
+    },
+    {
+      enableHighAccuracy: true,
+      maximumAge: 8000,
+      timeout: 15000
+    }
+  );
+}
+
 function trimTrackHistories() {
   for (const [key, history] of tracks.entries()) {
     tracks.set(key, history.slice(-breadcrumbLimit));
@@ -877,25 +946,30 @@ canvas.addEventListener("click", (event) => {
 });
 
 function applySelectedAirport() {
-  if (!airportSelect.value) return;
-  const [lat, lon] = airportSelect.value.split(",").map(Number);
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  if (airportSelect.value === "gps") {
+    startGpsTracking();
+    return true;
+  }
 
-  latInput.value = lat.toFixed(4);
-  lonInput.value = lon.toFixed(4);
-  center = { lat, lon };
-  tracks.clear();
-  lastAirspaceKey = "";
+  if (!airportSelect.value) {
+    stopGpsTracking();
+    return false;
+  }
+  const [lat, lon] = airportSelect.value.split(",").map(Number);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+
+  stopGpsTracking();
+  updateCenter(lat, lon);
+  return true;
 }
 
 airportSelect.addEventListener("change", () => {
   applySelectedAirport();
-  fetchAirspace();
-  fetchTraffic();
 });
 
 for (const input of [latInput, lonInput]) {
   input.addEventListener("input", () => {
+    stopGpsTracking();
     airportSelect.value = "";
   });
 }
@@ -914,12 +988,8 @@ function applyManualCoordinates() {
     return false;
   }
 
-  center = { lat, lon };
-  tracks.clear();
-  lastAirspaceKey = "";
-  statusEl.textContent = "Radar sweep active. Updating aircraft every pass.";
-  fetchAirspace();
-  fetchTraffic();
+  stopGpsTracking();
+  updateCenter(lat, lon);
   return true;
 }
 
@@ -929,9 +999,11 @@ for (const input of [latInput, lonInput]) {
 
 window.addEventListener("resize", resizeCanvas);
 
-applySelectedAirport();
+const initialCenterApplied = applySelectedAirport();
 resizeCanvas();
 renderList();
-fetchAirspace();
-fetchTraffic();
+if (!initialCenterApplied) {
+  fetchAirspace();
+  fetchTraffic();
+}
 requestAnimationFrame(render);
