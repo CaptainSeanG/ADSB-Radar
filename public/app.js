@@ -1,6 +1,8 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
+const shell = document.querySelector(".shell");
 const form = document.querySelector("#controls");
+const panelToggle = document.querySelector("#panelToggle");
 const airportSelect = document.querySelector("#airportSelect");
 const coordRow = document.querySelector("#coordRow");
 const latInput = document.querySelector("#lat");
@@ -87,6 +89,12 @@ function resizeCanvas() {
   canvas.width = Math.max(1, Math.floor(rect.width * pixelRatio));
   canvas.height = Math.max(1, Math.floor(rect.height * pixelRatio));
   ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+}
+
+function updatePanelToggle() {
+  const collapsed = shell.classList.contains("panel-collapsed");
+  panelToggle.textContent = collapsed ? "Show Panel" : "Hide Panel";
+  panelToggle.setAttribute("aria-expanded", String(!collapsed));
 }
 
 function milesBetween(latA, lonA, latB, lonB) {
@@ -996,6 +1004,12 @@ function trimTrackHistories() {
 settingsOpen.addEventListener("click", openSettings);
 settingsClose.addEventListener("click", closeSettings);
 
+panelToggle.addEventListener("click", () => {
+  shell.classList.toggle("panel-collapsed");
+  updatePanelToggle();
+  window.setTimeout(resizeCanvas, 240);
+});
+
 settingsModal.addEventListener("click", (event) => {
   if (event.target === settingsModal) closeSettings();
 });
@@ -1112,6 +1126,7 @@ window.addEventListener("resize", resizeCanvas);
 
 const initialCenterApplied = applySelectedAirport();
 updateCoordinateVisibility();
+updatePanelToggle();
 resizeCanvas();
 renderList();
 if (airportSelect.value === "gps" && getVisibleAirspaceClasses().size) {

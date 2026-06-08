@@ -41,11 +41,18 @@ select {
 }
 
 .shell {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
   gap: 20px;
   height: 100vh;
   padding: 20px;
+  transition: grid-template-columns 220ms ease, gap 220ms ease;
+}
+
+.shell.panel-collapsed {
+  grid-template-columns: minmax(0, 1fr) 0;
+  gap: 0;
 }
 
 .radar-wrap {
@@ -89,6 +96,42 @@ select {
   box-shadow: 0 26px 70px var(--shadow);
   padding: 20px;
   backdrop-filter: blur(20px);
+  transition: opacity 180ms ease, transform 220ms ease;
+}
+
+.shell.panel-collapsed .panel {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(calc(100% + 20px));
+}
+
+.panel-toggle {
+  position: absolute;
+  z-index: 4;
+  top: 28px;
+  right: 408px;
+  min-height: 38px;
+  border: 1px solid rgba(132, 255, 194, 0.28);
+  border-radius: 6px;
+  background: rgba(3, 8, 5, 0.82);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
+  color: var(--green);
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  padding: 0 11px;
+  text-transform: uppercase;
+  transition: right 220ms ease, background 160ms ease, border-color 160ms ease;
+}
+
+.panel-toggle:hover {
+  border-color: var(--green);
+  background: rgba(77, 255, 155, 0.14);
+}
+
+.shell.panel-collapsed .panel-toggle {
+  right: 28px;
 }
 
 .eyebrow {
@@ -569,12 +612,31 @@ fieldset {
     min-height: 100vh;
   }
 
+  .shell.panel-collapsed {
+    grid-template-columns: 1fr;
+  }
+
+  .shell.panel-collapsed .panel {
+    max-height: 0;
+    overflow: hidden;
+    transform: translateX(0);
+  }
+
   .radar-wrap {
     min-height: min(92vw, 620px);
   }
 
   .panel {
     max-height: none;
+  }
+
+  .panel-toggle,
+  .shell.panel-collapsed .panel-toggle {
+    position: sticky;
+    top: 10px;
+    right: auto;
+    order: -1;
+    width: 100%;
   }
 }
 
