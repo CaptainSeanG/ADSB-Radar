@@ -335,6 +335,9 @@ function queueRadarAudioUnlock() {
     if (await unlockRadarAudio()) playSweepTick();
   };
 
+  window.setTimeout(retryUnlock, 0);
+  window.addEventListener("click", retryUnlock, { once: true, passive: true });
+  window.addEventListener("keydown", retryUnlock, { once: true, passive: true });
   window.addEventListener("pointerdown", retryUnlock, { once: true, passive: true });
   window.addEventListener("touchend", retryUnlock, { once: true, passive: true });
 }
@@ -1234,10 +1237,11 @@ function drawGrid(scope) {
 }
 
 function drawAirportRunways(airport, scope) {
-  if (radiusMiles > 15 || !airport.runways?.length) return;
+  if (radiusMiles > 15 || !airport.runways?.length) return false;
 
   ctx.save();
   ctx.lineCap = "round";
+  let drewRunway = false;
   for (const runway of airport.runways) {
     const start = project(runway.leLat, runway.leLon, scope);
     const end = project(runway.heLat, runway.heLon, scope);
@@ -1261,8 +1265,10 @@ function drawAirportRunways(airport, scope) {
     ctx.moveTo(start.x, start.y);
     ctx.lineTo(end.x, end.y);
     ctx.stroke();
+    drewRunway = true;
   }
   ctx.restore();
+  return drewRunway;
 }
 
 function drawAirportLabel(text, point, scope) {
@@ -1287,17 +1293,19 @@ function drawAirports(scope) {
     const margin = 36;
     if (point.x < -margin || point.x > scope.width + margin || point.y < -margin || point.y > scope.height + margin) continue;
 
-    drawAirportRunways(airport, scope);
+    const hasRunwayGraphic = drawAirportRunways(airport, scope);
 
-    ctx.strokeStyle = airport.type === "large_airport" ? "rgba(255, 207, 106, 0.95)" : "rgba(255, 207, 106, 0.58)";
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.lineWidth = radiusMiles <= 15 ? 2.2 : 1.5;
-    ctx.beginPath();
-    ctx.moveTo(point.x - 6, point.y);
-    ctx.lineTo(point.x + 6, point.y);
-    ctx.moveTo(point.x, point.y - 6);
-    ctx.lineTo(point.x, point.y + 6);
-    ctx.stroke();
+    if (!hasRunwayGraphic) {
+      ctx.strokeStyle = airport.type === "large_airport" ? "rgba(255, 207, 106, 0.95)" : "rgba(255, 207, 106, 0.58)";
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.lineWidth = radiusMiles <= 15 ? 2.2 : 1.5;
+      ctx.beginPath();
+      ctx.moveTo(point.x - 6, point.y);
+      ctx.lineTo(point.x + 6, point.y);
+      ctx.moveTo(point.x, point.y - 6);
+      ctx.lineTo(point.x, point.y + 6);
+      ctx.stroke();
+    }
     if (showRadarData) {
       drawAirportLabel(airport.ident || airport.iata, point, scope);
     }
@@ -1484,12 +1492,16 @@ function drawUserNavigation(scope) {
   ctx.strokeStyle = "rgba(2, 5, 3, 0.92)";
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(11, 0);
-  ctx.lineTo(-8, -6);
-  ctx.lineTo(-4, 0);
-  ctx.lineTo(-8, 6);
+  ctx.moveTo(14, 0);
+  ctx.quadraticCurveTo(1, -9, -8, -5);
+  ctx.quadraticCurveTo(-4, 0, -8, 5);
+  ctx.quadraticCurveTo(1, 9, 14, 0);
   ctx.closePath();
   ctx.stroke();
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(-1, 0, 2.6, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(2, 5, 3, 0.82)";
   ctx.fill();
   ctx.restore();
 
