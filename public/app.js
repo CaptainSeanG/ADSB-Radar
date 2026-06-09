@@ -20,6 +20,7 @@ const radarDataToggle = document.querySelector("#radarDataToggle");
 const precipitationToggle = document.querySelector("#precipitationToggle");
 const radarSoundsToggle = document.querySelector("#radarSoundsToggle");
 const radarSoundStyleSelect = document.querySelector("#radarSoundStyle");
+const orientationModeSelect = document.querySelector("#orientationMode");
 const sweepColorToggle = document.querySelector("#sweepColorToggle");
 const aircraftModal = document.querySelector("#aircraftModal");
 const aircraftTitle = document.querySelector("#aircraftTitle");
@@ -219,6 +220,7 @@ let showRadarData = true;
 let showPrecipitation = false;
 let radarSoundsEnabled = false;
 let radarSoundStyle = "radar";
+let orientationMode = "north";
 let aircraft = [];
 let airports = [];
 let airspaces = [];
@@ -237,6 +239,10 @@ let lastAirspaceKey = "";
 let aircraftHitAreas = [];
 let gpsWatchId = null;
 let gpsActive = false;
+let gpsTrackDegrees = null;
+let gpsSpeedKts = 0;
+let gpsTrail = [];
+let lastGpsTrailAt = 0;
 let weatherMeta = null;
 let weatherMetaFetchedAt = 0;
 let weatherImage = null;
@@ -564,10 +570,45 @@ function bearingDegrees(latA, lonA, latB, lonB) {
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
+function destinationPoint(lat, lon, bearing, distanceMiles) {
+  const earthMiles = 3958.7613;
+  const toRad = (value) => (value * Math.PI) / 180;
+  const toDeg = (value) => (value * 180) / Math.PI;
+  const angularDistance = distanceMiles / earthMiles;
+  const bearingRad = toRad(bearing);
+  const latRad = toRad(lat);
+  const lonRad = toRad(lon);
+  const destLat = Math.asin(
+    Math.sin(latRad) * Math.cos(angularDistance) +
+      Math.cos(latRad) * Math.sin(angularDistance) * Math.cos(bearingRad)
+  );
+  const destLon =
+    lonRad +
+    Math.atan2(
+      Math.sin(bearingRad) * Math.sin(angularDistance) * Math.cos(latRad),
+      Math.cos(angularDistance) - Math.sin(latRad) * Math.sin(destLat)
+    );
+
+  return {
+    lat: toDeg(destLat),
+    lon: ((toDeg(destLon) + 540) % 360) - 180
+  };
+}
+
+function radarRotationDegrees() {
+  return gpsActive && orientationMode === "track" && Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= 2
+    ? gpsTrackDegrees
+    : 0;
+}
+
+function screenAngleForBearing(bearing) {
+  return ((bearing - radarRotationDegrees() - 90) * Math.PI) / 180;
+}
+
 function project(lat, lon, scope) {
   const distance = milesBetween(center.lat, center.lon, lat, lon);
   const bearing = bearingDegrees(center.lat, center.lon, lat, lon);
-  const angle = ((bearing - 90) * Math.PI) / 180;
+  const angle = screenAngleForBearing(bearing);
   const radius = (distance / radiusMiles) * scope.radius;
 
   return {
@@ -584,7 +625,7 @@ function normalizeRadians(value) {
 
 function planeSweepAngle(plane) {
   const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
-  return normalizeRadians(((bearing - 90) * Math.PI) / 180);
+  return normalizeRadians(screenAngleForBearing(bearing));
 }
 
 function sweepCrossedAngle(previous, current, target) {
@@ -915,12 +956,13 @@ async function fetchStaticTraffic() {
 
   const aircraftRows = trafficData.aircraft || [];
 
+  const airportContextMiles = radiusMiles * 1.7;
   const airportMatches = attachRunwaysToAirports(airportRows, runwayRows)
     .map((airport) => ({
       ...airport,
       distanceMiles: milesBetween(center.lat, center.lon, airport.lat, airport.lon)
     }))
-    .filter((airport) => airport.distanceMiles <= radiusMiles)
+    .filter((airport) => airport.distanceMiles <= airportContextMiles)
     .sort((a, b) => a.distanceMiles - b.distanceMiles)
     .slice(0, 120);
 
@@ -1182,26 +1224,31 @@ function drawGrid(scope) {
   ctx.fillStyle = "rgba(233, 255, 243, 0.72)";
   ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.textAlign = "center";
-  ctx.fillText("N", 0, -scope.radius - 14);
-  ctx.fillText("S", 0, scope.radius + 24);
-  ctx.fillText("E", scope.radius + 18, 4);
-  ctx.fillText("W", -scope.radius - 18, 4);
+  for (const cardinal of [
+    { label: "N", bearing: 0 },
+    { label: "E", bearing: 90 },
+    { label: "S", bearing: 180 },
+    { label: "W", bearing: 270 }
+  ]) {
+    const angle = screenAngleForBearing(cardinal.bearing);
+    ctx.fillText(cardinal.label, Math.cos(angle) * (scope.radius + 18), Math.sin(angle) * (scope.radius + 18) + 4);
+  }
   ctx.restore();
 }
 
 function drawAirportRunways(airport, scope) {
-  if (radiusMiles > 5 || !airport.runways?.length) return;
+  if (radiusMiles > 15 || !airport.runways?.length) return;
 
   ctx.save();
-  ctx.beginPath();
-  ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
-  ctx.clip();
   ctx.lineCap = "round";
   for (const runway of airport.runways) {
     const start = project(runway.leLat, runway.leLon, scope);
     const end = project(runway.heLat, runway.heLon, scope);
-    const inScope = start.distance <= radiusMiles || end.distance <= radiusMiles;
-    if (!inScope) continue;
+    const margin = 70;
+    const visible =
+      (start.x >= -margin && start.x <= scope.width + margin && start.y >= -margin && start.y <= scope.height + margin) ||
+      (end.x >= -margin && end.x <= scope.width + margin && end.y >= -margin && end.y <= scope.height + margin);
+    if (!visible) continue;
 
     const width = Number.isFinite(runway.widthFt) ? Math.max(2.5, Math.min(7, runway.widthFt / 24)) : 3.5;
     ctx.strokeStyle = "rgba(255, 240, 184, 0.82)";
@@ -1222,12 +1269,12 @@ function drawAirportRunways(airport, scope) {
 }
 
 function drawAirportLabel(text, point, scope) {
-  const labelX = Math.min(scope.cx + scope.radius - 42, Math.max(scope.cx - scope.radius + 8, point.x + 10));
-  const labelY = Math.min(scope.cy + scope.radius - 8, Math.max(scope.cy - scope.radius + 15, point.y - 9));
+  const labelX = Math.min(scope.width - 52, Math.max(8, point.x + 10));
+  const labelY = Math.min(scope.height - 12, Math.max(15, point.y - 9));
 
   ctx.save();
-  ctx.font = radiusMiles <= 5 ? "850 13px ui-monospace, SFMono-Regular, Consolas, monospace" : "700 11px ui-monospace, SFMono-Regular, Consolas, monospace";
-  ctx.lineWidth = radiusMiles <= 5 ? 5 : 3;
+  ctx.font = radiusMiles <= 15 ? "850 13px ui-monospace, SFMono-Regular, Consolas, monospace" : "700 11px ui-monospace, SFMono-Regular, Consolas, monospace";
+  ctx.lineWidth = radiusMiles <= 15 ? 5 : 3;
   ctx.strokeStyle = "rgba(2, 5, 3, 0.92)";
   ctx.fillStyle = "rgba(255, 232, 150, 0.96)";
   ctx.strokeText(text, labelX, labelY);
@@ -1240,13 +1287,14 @@ function drawAirports(scope) {
   ctx.font = "700 11px ui-monospace, SFMono-Regular, Consolas, monospace";
   for (const airport of airports) {
     const point = project(airport.lat, airport.lon, scope);
-    if (point.distance > radiusMiles) continue;
+    const margin = 36;
+    if (point.x < -margin || point.x > scope.width + margin || point.y < -margin || point.y > scope.height + margin) continue;
 
     drawAirportRunways(airport, scope);
 
     ctx.strokeStyle = airport.type === "large_airport" ? "rgba(255, 207, 106, 0.95)" : "rgba(255, 207, 106, 0.58)";
     ctx.fillStyle = ctx.strokeStyle;
-    ctx.lineWidth = radiusMiles <= 5 ? 2.2 : 1.5;
+    ctx.lineWidth = radiusMiles <= 15 ? 2.2 : 1.5;
     ctx.beginPath();
     ctx.moveTo(point.x - 6, point.y);
     ctx.lineTo(point.x + 6, point.y);
@@ -1405,6 +1453,69 @@ function drawAircraft(scope) {
   ctx.restore();
 }
 
+function drawUserNavigation(scope) {
+  if (!gpsActive) return;
+
+  const visibleTrail = gpsTrail.filter((sample) => Date.now() - sample.at <= 30 * 60 * 1000);
+  gpsTrail = visibleTrail;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
+  ctx.clip();
+
+  if (visibleTrail.length >= 2) {
+    ctx.strokeStyle = "rgba(233, 255, 243, 0.72)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([2, 8]);
+    ctx.beginPath();
+    visibleTrail.forEach((sample, index) => {
+      const point = project(sample.lat, sample.lon, scope);
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  const heading = Number.isFinite(gpsTrackDegrees) ? gpsTrackDegrees : 0;
+  const headingAngle = screenAngleForBearing(heading);
+  ctx.save();
+  ctx.translate(scope.cx, scope.cy);
+  ctx.rotate(headingAngle);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
+  ctx.strokeStyle = "rgba(2, 5, 3, 0.92)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(11, 0);
+  ctx.lineTo(-8, -6);
+  ctx.lineTo(-4, 0);
+  ctx.lineTo(-8, 6);
+  ctx.closePath();
+  ctx.stroke();
+  ctx.fill();
+  ctx.restore();
+
+  if (gpsSpeedKts >= 2 && Number.isFinite(gpsTrackDegrees)) {
+    const projected = destinationPoint(center.lat, center.lon, gpsTrackDegrees, (gpsSpeedKts / 3600) * 30 * 1.15078);
+    const projectedPoint = project(projected.lat, projected.lon, scope);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.82)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([8, 6]);
+    ctx.beginPath();
+    ctx.moveTo(scope.cx, scope.cy);
+    ctx.lineTo(projectedPoint.x, projectedPoint.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.arc(projectedPoint.x, projectedPoint.y, 4, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
 function drawSweep(scope, angle) {
   const trailSegments = 28;
   const trailWidth = 1.35;
@@ -1482,6 +1593,7 @@ function render(now) {
   drawAirspace(scope);
   drawAirports(scope);
   drawAircraft(scope);
+  drawUserNavigation(scope);
   drawSweep(scope, angle);
   if (showRadarData) drawHud(scope);
 
@@ -1554,6 +1666,8 @@ function stopGpsTracking() {
   }
   gpsWatchId = null;
   gpsActive = false;
+  gpsTrackDegrees = null;
+  gpsSpeedKts = 0;
 }
 
 function fallbackToKdvt(message = "GPS unavailable. Using KDVT fallback.") {
@@ -1572,21 +1686,40 @@ function startGpsTracking() {
 
   stopGpsTracking();
   gpsActive = true;
+  gpsTrail = [];
+  lastGpsTrailAt = 0;
+  gpsTrackDegrees = null;
+  gpsSpeedKts = 0;
   statusEl.textContent = "Requesting GPS position...";
 
   gpsWatchId = navigator.geolocation.watchPosition(
     (position) => {
       const lat = position.coords.latitude;
       const lon = position.coords.longitude;
+      const previousCenter = { ...center };
       const movedMiles = milesBetween(center.lat, center.lon, lat, lon);
       const needsAirspace = getVisibleAirspaceClasses().size && (!lastAirspaceKey || !airspaces.length);
       const shouldRefresh = movedMiles > 0.05 || !lastFetchAt || needsAirspace;
+      const speedMps = Number(position.coords.speed);
+      const heading = Number(position.coords.heading);
+      gpsSpeedKts = Number.isFinite(speedMps) && speedMps >= 0 ? speedMps * 1.94384 : 0;
+      if (Number.isFinite(heading)) {
+        gpsTrackDegrees = heading;
+      } else if (movedMiles > 0.003) {
+        gpsTrackDegrees = bearingDegrees(previousCenter.lat, previousCenter.lon, lat, lon);
+      }
 
       latInput.value = lat.toFixed(4);
       lonInput.value = lon.toFixed(4);
       center = { lat, lon };
       resetWeatherImage();
       statusEl.textContent = `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
+      const now = Date.now();
+      if (!lastGpsTrailAt || now - lastGpsTrailAt >= 30000) {
+        gpsTrail.push({ lat, lon, at: now });
+        gpsTrail = gpsTrail.slice(-120);
+        lastGpsTrailAt = now;
+      }
 
       if (shouldRefresh) {
         tracks.clear();
@@ -1684,6 +1817,10 @@ radarSoundStyleSelect.addEventListener("change", () => {
     ? radarSoundStyleSelect.value
     : "radar";
   if (radarSoundsEnabled) playContactBlip();
+});
+
+orientationModeSelect.addEventListener("change", () => {
+  orientationMode = orientationModeSelect.value === "track" ? "track" : "north";
 });
 
 aircraftListEl.addEventListener("click", (event) => {
