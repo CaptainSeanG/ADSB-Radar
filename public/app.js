@@ -711,6 +711,41 @@ function aircraftDisplayLabel(plane) {
   return type ? `${type} ${ident}` : ident;
 }
 
+function aircraftCompactLabel(plane) {
+  return aircraftType(plane) || planeLabel(plane);
+}
+
+function aircraftLabelBox(contact, compact = false) {
+  const x = contact.point.x + 13;
+  const y = compact ? contact.point.y - 21 : contact.point.y - 23;
+  const label = compact ? aircraftCompactLabel(contact.plane) : aircraftDisplayLabel(contact.plane);
+  const data = `${formatAltitude(contact.plane.altitude)} ${formatSpeed(contact.plane.speed)}`;
+  const width = compact ? ctx.measureText(label).width : Math.max(ctx.measureText(label).width, ctx.measureText(data).width);
+  return {
+    x,
+    y,
+    width,
+    height: compact ? 16 : 31
+  };
+}
+
+function boxesIntersect(a, b) {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function markCompactAircraftLabels(contacts) {
+  if (!showRadarData) return;
+  const boxes = contacts.map((contact) => aircraftLabelBox(contact));
+
+  for (let index = 0; index < contacts.length; index += 1) {
+    for (let otherIndex = index + 1; otherIndex < contacts.length; otherIndex += 1) {
+      if (!boxesIntersect(boxes[index], boxes[otherIndex])) continue;
+      contacts[index].compactLabel = true;
+      contacts[otherIndex].compactLabel = true;
+    }
+  }
+}
+
 function isGroundTraffic(plane) {
   return plane.altitude === "ground";
 }
@@ -1393,7 +1428,7 @@ function drawTrack(scope, plane, alpha = 1) {
   ctx.restore();
 }
 
-function drawAircraftContact({ plane, point, alpha, highlight }) {
+function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   const highlightMix = highlight?.highlightMix || 0;
   const heading = Number.isFinite(Number(plane.track)) ? ((Number(plane.track) - 90) * Math.PI) / 180 : -Math.PI / 2;
   ctx.save();
@@ -1420,9 +1455,11 @@ function drawAircraftContact({ plane, point, alpha, highlight }) {
   if (showRadarData) {
     ctx.save();
     ctx.globalAlpha = alpha;
-    ctx.fillText(aircraftDisplayLabel(plane), point.x + 13, point.y - 11);
-    ctx.fillStyle = "rgba(77, 255, 155, 0.86)";
-    ctx.fillText(`${formatAltitude(plane.altitude)} ${formatSpeed(plane.speed)}`, point.x + 13, point.y + 4);
+    ctx.fillText(compactLabel ? aircraftCompactLabel(plane) : aircraftDisplayLabel(plane), point.x + 13, point.y - 11);
+    if (!compactLabel) {
+      ctx.fillStyle = "rgba(77, 255, 155, 0.86)";
+      ctx.fillText(`${formatAltitude(plane.altitude)} ${formatSpeed(plane.speed)}`, point.x + 13, point.y + 4);
+    }
     ctx.restore();
   }
 }
@@ -1451,6 +1488,8 @@ function drawAircraft(scope) {
     if (highlight?.active) highlightedContacts.push(contact);
     else normalContacts.push(contact);
   }
+
+  markCompactAircraftLabels([...normalContacts, ...highlightedContacts]);
 
   for (const contact of normalContacts) drawAircraftContact(contact);
   for (const contact of highlightedContacts) drawAircraftContact(contact);
@@ -1488,8 +1527,8 @@ function drawUserNavigation(scope) {
   ctx.save();
   ctx.translate(scope.cx, scope.cy);
   ctx.rotate(headingAngle);
-  ctx.fillStyle = "rgba(255, 255, 255, 0.96)";
-  ctx.strokeStyle = "rgba(2, 5, 3, 0.92)";
+  ctx.fillStyle = "rgba(5, 58, 38, 0.96)";
+  ctx.strokeStyle = "rgba(112, 255, 181, 0.9)";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(14, 0);
@@ -1501,7 +1540,7 @@ function drawUserNavigation(scope) {
   ctx.fill();
   ctx.beginPath();
   ctx.arc(-1, 0, 2.6, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(2, 5, 3, 0.82)";
+  ctx.fillStyle = "rgba(2, 18, 12, 0.9)";
   ctx.fill();
   ctx.restore();
 
