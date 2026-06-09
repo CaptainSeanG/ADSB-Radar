@@ -12,13 +12,10 @@ const airspaceToggles = document.querySelector("#airspaceToggles");
 const settingsOpen = document.querySelector("#settingsOpen");
 const settingsClose = document.querySelector("#settingsClose");
 const settingsModal = document.querySelector("#settingsModal");
-const breadcrumbLengthInput = document.querySelector("#breadcrumbLength");
-const breadcrumbReadout = document.querySelector("#breadcrumbReadout");
 const groundTrafficToggle = document.querySelector("#groundTrafficToggle");
 const flightLevelsToggle = document.querySelector("#flightLevelsToggle");
 const radarDataToggle = document.querySelector("#radarDataToggle");
 const precipitationToggle = document.querySelector("#precipitationToggle");
-const radarSoundsToggle = document.querySelector("#radarSoundsToggle");
 const radarSoundStyleSelect = document.querySelector("#radarSoundStyle");
 const orientationModeSelect = document.querySelector("#orientationMode");
 const sweepColorToggle = document.querySelector("#sweepColorToggle");
@@ -212,13 +209,13 @@ const kdvtFallbackCenter = { lat: 33.6883, lon: -112.083 };
 
 let center = { lat: 33.7292, lon: -111.9918 };
 let radiusMiles = 10;
-let breadcrumbLimit = 12;
+const breadcrumbBaseLimit = 12;
 let sweepColor = "orange";
 let showGroundTraffic = false;
 let showFlightLevelsTraffic = true;
 let showRadarData = true;
 let showPrecipitation = false;
-let radarSoundsEnabled = false;
+let radarSoundsEnabled = true;
 let radarSoundStyle = "radar";
 let orientationMode = "north";
 let aircraft = [];
@@ -652,7 +649,7 @@ function aircraftSpeed(plane) {
 function breadcrumbLimitForAircraft(plane) {
   const speed = aircraftSpeed(plane);
   const speedFactor = speed <= 60 ? 0.45 : speed <= 160 ? 0.75 : speed <= 300 ? 1 : speed <= 450 ? 1.35 : 1.7;
-  return Math.max(2, Math.min(45, Math.round(breadcrumbLimit * speedFactor)));
+  return Math.max(2, Math.min(45, Math.round(breadcrumbBaseLimit * speedFactor)));
 }
 
 function formatAirspaceAltitude(value, code) {
@@ -1744,7 +1741,7 @@ function startGpsTracking() {
 function trimTrackHistories() {
   for (const [key, history] of tracks.entries()) {
     const plane = aircraft.find((candidate) => aircraftKey(candidate) === key) || radarBlips.get(key);
-    const limit = plane ? breadcrumbLimitForAircraft(plane) : breadcrumbLimit;
+    const limit = plane ? breadcrumbLimitForAircraft(plane) : breadcrumbBaseLimit;
     tracks.set(key, history.slice(-limit));
   }
 }
@@ -1773,12 +1770,6 @@ window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !aircraftModal.hidden) closeAircraftDetails();
 });
 
-breadcrumbLengthInput.addEventListener("input", () => {
-  breadcrumbLimit = Math.max(2, Math.min(30, Number(breadcrumbLengthInput.value) || 12));
-  breadcrumbReadout.textContent = String(breadcrumbLimit);
-  trimTrackHistories();
-});
-
 sweepColorToggle.addEventListener("change", () => {
   sweepColor = sweepColorToggle.checked ? "orange" : "green";
 });
@@ -1802,21 +1793,22 @@ precipitationToggle.addEventListener("change", () => {
   if (showPrecipitation) ensureWeatherImage();
 });
 
-radarSoundsToggle.addEventListener("change", async () => {
-  radarSoundsEnabled = radarSoundsToggle.checked;
-  audioUnlocked = false;
-  if (radarSoundsEnabled && (await unlockRadarAudio())) {
-    playSweepTick();
-  } else if (radarSoundsEnabled) {
-    queueRadarAudioUnlock();
-  }
-});
+radarSoundStyleSelect.value = radarSoundStyle;
+queueRadarAudioUnlock();
 
-radarSoundStyleSelect.addEventListener("change", () => {
-  radarSoundStyle = ["radar", "tick", "submarine"].includes(radarSoundStyleSelect.value)
+radarSoundStyleSelect.addEventListener("change", async () => {
+  const selectedStyle = ["off", "radar", "tick", "submarine"].includes(radarSoundStyleSelect.value)
     ? radarSoundStyleSelect.value
     : "radar";
-  if (radarSoundsEnabled) playContactBlip();
+  radarSoundsEnabled = selectedStyle !== "off";
+  radarSoundStyle = radarSoundsEnabled ? selectedStyle : "radar";
+  audioUnlocked = false;
+  if (!radarSoundsEnabled) return;
+  if (await unlockRadarAudio()) {
+    playContactBlip();
+  } else {
+    queueRadarAudioUnlock();
+  }
 });
 
 orientationModeSelect.addEventListener("change", () => {
