@@ -42,7 +42,6 @@ const sweepPalettes = {
     line: "rgba(255, 180, 92, 0.96)"
   }
 };
-const adsbBaseUrl = "https://opendata.adsb.fi/api/v3";
 const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
 const runwaysCsvUrl = "https://davidmegginson.github.io/ourairports-data/runways.csv";
 const weatherMapsUrl = "https://api.rainviewer.com/public/weather-maps.json";
@@ -228,6 +227,9 @@ let lastSweepBucket = -1;
 let previousSweepAngle = null;
 let lastFetchAt = 0;
 let lastDataSource = "standby";
+let trafficFetchInFlight = false;
+let trafficBackoffMs = 0;
+let nextTrafficFetchAt = 0;
 let pixelRatio = window.devicePixelRatio || 1;
 let airportsCachePromise = null;
 let runwaysCachePromise = null;
@@ -340,6 +342,21 @@ function resetWeatherImage() {
   weatherImageZoom = null;
 }
 
+function randomJitter(minMs = 500, maxMs = 2000) {
+  return minMs + Math.random() * (maxMs - minMs);
+}
+
+function scheduleNextTrafficFetch({ failed = false } = {}) {
+  if (failed) {
+    trafficBackoffMs = trafficBackoffMs ? Math.min(60000, trafficBackoffMs * 2) : 5000;
+    nextTrafficFetchAt = Date.now() + trafficBackoffMs + randomJitter(750, 3000);
+    return;
+  }
+
+  trafficBackoffMs = 0;
+  nextTrafficFetchAt = Date.now() + 6500 + randomJitter(500, 2500);
+}
+
 function playTone({ frequency, type = "sine", duration = 0.05, gain = 0.05, slideTo = null, delay = 0 }) {
   if (!radarSoundsEnabled) return;
 
@@ -413,10 +430,6 @@ function milesBetween(latA, lonA, latB, lonB) {
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(latA)) * Math.cos(toRad(latB)) * Math.sin(dLon / 2) ** 2;
   return 2 * earthMiles * Math.asin(Math.sqrt(a));
-}
-
-function milesToNauticalMiles(miles) {
-  return miles * 0.868976;
 }
 
 function parseNumber(value, fallback = null) {
@@ -833,19 +846,6 @@ async function getJson(url) {
   return payload;
 }
 
-async function fetchLocalTraffic(params) {
-  const [trafficData, airportData] = await Promise.all([
-    getJson(`./api/aircraft?${params}`),
-    getJson(`./api/airports?${params}`)
-  ]);
-
-  return {
-    aircraft: trafficData.aircraft || [],
-    airports: airportData.airports || [],
-    source: "adsb.fi"
-  };
-}
-
 async function loadAirportCache() {
   if (!airportsCachePromise) {
     airportsCachePromise = fetch(airportsCsvUrl)
@@ -892,11 +892,11 @@ function attachRunwaysToAirports(airportRows, runwayRows) {
 }
 
 async function fetchStaticTraffic() {
-  const radiusNm = Math.max(1, Math.min(250, milesToNauticalMiles(radiusMiles)));
-  const adsbUrl = `${adsbBaseUrl}/lat/${center.lat}/lon/${center.lon}/dist/${radiusNm.toFixed(1)}`;
-  const aircraftUrl = adsbProxyBaseUrl
-    ? `${adsbProxyBaseUrl}/api/aircraft?lat=${center.lat}&lon=${center.lon}&radiusMiles=${radiusMiles}`
-    : adsbUrl;
+  if (!adsbProxyBaseUrl) {
+    throw new Error("Cloudflare Worker proxy is not configured");
+  }
+
+  const aircraftUrl = `${adsbProxyBaseUrl}/api/aircraft?lat=${center.lat}&lon=${center.lon}&radiusMiles=${radiusMiles}`;
 
   const [trafficResponse, airportRows, runwayRows] = await Promise.all([
     fetch(aircraftUrl, {
@@ -908,17 +908,12 @@ async function fetchStaticTraffic() {
     loadRunwayCache()
   ]);
 
+  const trafficData = await trafficResponse.json().catch(() => ({}));
   if (!trafficResponse.ok) {
-    throw new Error(`aircraft feed returned ${trafficResponse.status}`);
+    throw new Error(trafficData.error || trafficData.detail || `aircraft worker returned ${trafficResponse.status}`);
   }
 
-  const trafficData = await trafficResponse.json();
-  const aircraftRows = adsbProxyBaseUrl
-    ? trafficData.aircraft || []
-    : (trafficData.ac || [])
-        .map(normalizeAircraft)
-        .filter(Boolean)
-        .filter((plane) => milesBetween(center.lat, center.lon, plane.lat, plane.lon) <= radiusMiles + 1);
+  const aircraftRows = trafficData.aircraft || [];
 
   const airportMatches = attachRunwaysToAirports(airportRows, runwayRows)
     .map((airport) => ({
@@ -932,7 +927,10 @@ async function fetchStaticTraffic() {
   return {
     aircraft: aircraftRows,
     airports: airportMatches,
-    source: adsbProxyBaseUrl ? "adsb.fi proxy" : "adsb.fi web"
+    source: trafficData.source || "ADS-B Worker",
+    stale: Boolean(trafficData.stale),
+    ageSeconds: trafficData.ageSeconds ?? 0,
+    warning: trafficData.warning || ""
   };
 }
 
@@ -1029,7 +1027,7 @@ function updateCenter(lat, lon, { clearTracks = true, source = "manual" } = {}) 
       ? `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
       : "Radar sweep active. Updating aircraft every pass.";
   fetchAirspace();
-  fetchTraffic();
+  fetchTraffic({ force: true });
 }
 
 function normalizeAirspaceFeature(feature) {
@@ -1084,36 +1082,40 @@ async function fetchAirspace() {
   }
 }
 
-async function fetchTraffic() {
-  const params = new URLSearchParams({
-    lat: center.lat,
-    lon: center.lon,
-    radiusMiles
-  });
+async function fetchTraffic({ force = false } = {}) {
+  if (trafficFetchInFlight) return;
+  if (!force && Date.now() < nextTrafficFetchAt) return;
+
+  trafficFetchInFlight = true;
 
   try {
-    const localHostnames = new Set(["localhost", "127.0.0.1", "::1"]);
-    const data = localHostnames.has(window.location.hostname)
-      ? await fetchLocalTraffic(params).catch(() => fetchStaticTraffic())
-      : await fetchStaticTraffic();
+    const data = await fetchStaticTraffic();
 
     aircraft = data.aircraft;
     airports = data.airports;
     lastDataSource = data.source;
-    statusEl.textContent = gpsActive
-      ? `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
-      : `Live ADS-B feed active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
+    if (data.stale) {
+      const age = Number.isFinite(Number(data.ageSeconds)) ? `${Math.round(Number(data.ageSeconds))}s old` : "stale";
+      statusEl.textContent = `ADS-B upstream degraded. Showing cached aircraft data (${age}).`;
+    } else {
+      statusEl.textContent = gpsActive
+        ? `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
+        : `Live ADS-B feed active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
+    }
     resolveMissingAircraftTypes(aircraft);
+    pruneRadarBlips(aircraft);
+    lastFetchAt = Date.now();
+    scheduleNextTrafficFetch();
   } catch (error) {
-    aircraft = [];
-    airports = [];
     lastDataSource = "offline";
-    const proxyHint = adsbProxyBaseUrl ? "" : " A live web page needs the ADS-B proxy URL configured.";
-    statusEl.textContent = `Live data unavailable: ${error.message}.${proxyHint}`;
+    scheduleNextTrafficFetch({ failed: true });
+    const retrySeconds = Math.max(1, Math.round((nextTrafficFetchAt - Date.now()) / 1000));
+    const keepDataHint = aircraft.length ? " Keeping last radar picture." : "";
+    statusEl.textContent = `ADS-B feed unavailable: ${error.message}. Retrying in ${retrySeconds}s.${keepDataHint}`;
+  } finally {
+    trafficFetchInFlight = false;
   }
 
-  pruneRadarBlips(aircraft);
-  lastFetchAt = Date.now();
   renderList();
 }
 
@@ -1463,6 +1465,9 @@ function render(now) {
   if (running && sweepBucket !== lastSweepBucket) {
     lastSweepBucket = sweepBucket;
     playSweepTick();
+  }
+
+  if (running && Date.now() >= nextTrafficFetchAt) {
     fetchTraffic();
   }
 
@@ -1496,7 +1501,7 @@ rangeButtons.addEventListener("click", (event) => {
   if (!button) return;
   setRange(Number(button.dataset.range));
   fetchAirspace();
-  fetchTraffic();
+  fetchTraffic({ force: true });
 });
 
 airspaceToggles.addEventListener("change", () => {
@@ -1589,7 +1594,7 @@ function startGpsTracking() {
         previousSweepAngle = null;
         lastAirspaceKey = "";
         fetchAirspace();
-        fetchTraffic();
+        fetchTraffic({ force: true });
       }
     },
     (error) => {
@@ -1766,6 +1771,6 @@ if (airportSelect.value === "gps" && getVisibleAirspaceClasses().size) {
 }
 if (!initialCenterApplied) {
   fetchAirspace();
-  fetchTraffic();
+  fetchTraffic({ force: true });
 }
 requestAnimationFrame(render);

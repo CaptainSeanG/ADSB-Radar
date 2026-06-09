@@ -1,5 +1,9 @@
 const SOURCES = ["https://api.adsb.lol/v2", "https://opendata.adsb.fi/api/v3"];
-const VERSION = "2026-06-07-short-worker-v1";
+const VERSION = "2026-06-09-cache-worker-v2";
+const FRESH_TTL_SECONDS = 7;
+const UPSTREAM_TIMEOUT_MS = 6500;
+const aircraftCache = new Map();
+
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, OPTIONS",
@@ -31,6 +35,24 @@ function miles(aLat, aLon, bLat, bLon) {
   return 2 * earth * Math.asin(Math.sqrt(a));
 }
 
+function cacheKey(lat, lon, radiusMiles) {
+  return `${lat.toFixed(3)}:${lon.toFixed(3)}:${Math.round(radiusMiles * 10) / 10}`;
+}
+
+function ageSeconds(entry) {
+  return Math.max(0, Math.round((Date.now() - entry.cachedAt) / 1000));
+}
+
+function withCacheMetadata(entry, stale) {
+  return {
+    ...entry.payload,
+    stale,
+    ageSeconds: ageSeconds(entry),
+    cacheTtlSeconds: FRESH_TTL_SECONDS,
+    workerVersion: VERSION
+  };
+}
+
 function aircraft(raw) {
   const lat = num(raw.lat);
   const lon = num(raw.lon);
@@ -52,32 +74,82 @@ function aircraft(raw) {
   };
 }
 
+async function fetchUpstream(base, lat, lon, radiusMiles) {
+  const radiusNm = Math.max(1, Math.min(250, nm(radiusMiles))).toFixed(1);
+  const endpoint = `${base}/lat/${lat}/lon/${lon}/dist/${radiusNm}`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort("timeout"), UPSTREAM_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(endpoint, {
+      headers: { accept: "application/json", "user-agent": "ADSB Radar Worker/2.0" },
+      signal: controller.signal
+    });
+    console.log(`ADS-B upstream ${base} status ${response.status}`);
+
+    if (!response.ok) {
+      return { ok: false, status: response.status, detail: `${base}: HTTP ${response.status}` };
+    }
+
+    const data = await response.json();
+    const list = (data.ac || [])
+      .map(aircraft)
+      .filter(Boolean)
+      .filter((plane) => miles(lat, lon, plane.lat, plane.lon) <= radiusMiles + 1);
+
+    return {
+      ok: true,
+      payload: {
+        source: base,
+        now: data.now || Date.now() / 1000,
+        aircraft: list,
+        total: list.length
+      }
+    };
+  } catch (error) {
+    const detail = error?.name === "AbortError" ? `${base}: timeout` : `${base}: ${error?.message || error}`;
+    console.log(`ADS-B upstream ${base} error ${detail}`);
+    return { ok: false, status: "timeout", detail };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function handleAircraft(url) {
   const lat = num(url.searchParams.get("lat"));
   const lon = num(url.searchParams.get("lon"));
   const radiusMiles = num(url.searchParams.get("radiusMiles"), 15);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return json({ error: "lat and lon are required" }, 400);
 
+  const key = cacheKey(lat, lon, radiusMiles);
+  const cached = aircraftCache.get(key);
+  if (cached && ageSeconds(cached) <= FRESH_TTL_SECONDS) {
+    return json(withCacheMetadata(cached, false));
+  }
+
   const failures = [];
   for (const base of SOURCES) {
-    const endpoint = `${base}/lat/${lat}/lon/${lon}/dist/${Math.max(1, Math.min(250, nm(radiusMiles))).toFixed(1)}`;
-    try {
-      const response = await fetch(endpoint, { headers: { accept: "application/json" } });
-      if (!response.ok) {
-        failures.push(`${base}: HTTP ${response.status}`);
-        continue;
-      }
-      const data = await response.json();
-      const list = (data.ac || [])
-        .map(aircraft)
-        .filter(Boolean)
-        .filter((plane) => miles(lat, lon, plane.lat, plane.lon) <= radiusMiles + 1);
-      return json({ source: base, workerVersion: VERSION, now: data.now || Date.now() / 1000, aircraft: list, total: list.length });
-    } catch (error) {
-      failures.push(`${base}: ${error.message}`);
+    const result = await fetchUpstream(base, lat, lon, radiusMiles);
+    if (!result.ok) {
+      failures.push(result.detail);
+      continue;
     }
+
+    const entry = { payload: result.payload, cachedAt: Date.now() };
+    aircraftCache.set(key, entry);
+    return json(withCacheMetadata(entry, false));
   }
-  return json({ error: "All ADS-B upstreams failed", detail: failures, workerVersion: VERSION }, 502);
+
+  if (cached) {
+    console.log(`ADS-B serving stale cache for ${key}; failures: ${failures.join(" | ")}`);
+    return json({
+      ...withCacheMetadata(cached, true),
+      warning: "ADS-B upstream unavailable; serving stale cached aircraft data.",
+      upstreamFailures: failures
+    });
+  }
+
+  return json({ error: "All ADS-B upstreams failed", detail: failures, stale: false, ageSeconds: null, workerVersion: VERSION }, 502);
 }
 
 export default {
