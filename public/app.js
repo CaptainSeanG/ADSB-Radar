@@ -986,6 +986,21 @@ async function loadRunwayCache() {
   return runwaysCachePromise;
 }
 
+function airportSizeScore(airport) {
+  const typeScore = airport.type === "large_airport" ? 3 : airport.type === "medium_airport" ? 2 : 1;
+  const longestRunway = Math.max(0, ...(airport.runways || []).map((runway) => Number(runway.lengthFt) || 0));
+  return typeScore * 100000 + longestRunway;
+}
+
+function pruneLargeRangeAirports(airportMatches) {
+  if (radiusMiles < 50) return airportMatches;
+
+  return [...airportMatches]
+    .sort((a, b) => airportSizeScore(b) - airportSizeScore(a) || a.distanceMiles - b.distanceMiles)
+    .slice(0, 25)
+    .sort((a, b) => a.distanceMiles - b.distanceMiles);
+}
+
 function attachRunwaysToAirports(airportRows, runwayRows) {
   const runwaysByAirport = new Map();
   for (const runway of runwayRows) {
@@ -1026,14 +1041,16 @@ async function fetchStaticTraffic() {
   const aircraftRows = trafficData.aircraft || [];
 
   const airportContextMiles = radiusMiles * 1.7;
-  const airportMatches = attachRunwaysToAirports(airportRows, runwayRows)
+  const airportMatches = pruneLargeRangeAirports(
+    attachRunwaysToAirports(airportRows, runwayRows)
     .map((airport) => ({
       ...airport,
       distanceMiles: milesBetween(center.lat, center.lon, airport.lat, airport.lon)
     }))
     .filter((airport) => airport.distanceMiles <= airportContextMiles)
     .sort((a, b) => a.distanceMiles - b.distanceMiles)
-    .slice(0, 120);
+    .slice(0, 120)
+  );
 
   return {
     aircraft: aircraftRows,
