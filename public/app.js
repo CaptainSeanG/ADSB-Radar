@@ -561,8 +561,8 @@ function normalizeAircraft(raw) {
 
   return {
     hex: raw.hex || raw.icao || "",
-    nNumber: (raw.r || raw.reg || raw.registration || "").trim(),
-    callsign: (raw.flight || raw.call || "").trim(),
+    nNumber: (raw.nNumber || raw.r || raw.reg || raw.registration || "").trim(),
+    callsign: (raw.callsign || raw.flight || raw.call || "").trim(),
     type: (raw.t || raw.type || "").trim(),
     lat,
     lon,
@@ -1041,7 +1041,7 @@ async function fetchStaticTraffic() {
     throw new Error(trafficData.error || trafficData.detail || `aircraft worker returned ${trafficResponse.status}`);
   }
 
-  const aircraftRows = trafficData.aircraft || [];
+  const aircraftRows = (trafficData.aircraft || trafficData.ac || []).map(normalizeAircraft).filter(Boolean);
 
   const airportContextMiles = radiusMiles * 1.7;
   const airportMatches = pruneLargeRangeAirports(
@@ -1286,7 +1286,9 @@ async function fetchTraffic({ force = false } = {}) {
     } else {
       statusEl.textContent = gpsActive
         ? `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
-        : `ADS-B active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
+        : aircraft.length
+          ? `ADS-B active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
+          : `ADS-B active; no aircraft returned for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
     }
     resolveMissingAircraftTypes(aircraft);
     pruneRadarBlips(aircraft);

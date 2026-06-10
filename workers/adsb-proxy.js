@@ -1,5 +1,5 @@
-const SOURCES = ["https://api.adsb.lol/v2", "https://opendata.adsb.fi/api/v3"];
-const VERSION = "2026-06-09-cache-worker-v2";
+const SOURCES = ["https://api.airplanes.live/v2", "https://api.adsb.lol/v2", "https://opendata.adsb.fi/api/v3"];
+const VERSION = "2026-06-10-empty-fallback-worker-v3";
 const FRESH_TTL_SECONDS = 7;
 const UPSTREAM_TIMEOUT_MS = 6500;
 const aircraftCache = new Map();
@@ -128,6 +128,7 @@ async function handleAircraft(url) {
   }
 
   const failures = [];
+  let emptyResult = null;
   for (const base of SOURCES) {
     const result = await fetchUpstream(base, lat, lon, radiusMiles);
     if (!result.ok) {
@@ -135,7 +136,19 @@ async function handleAircraft(url) {
       continue;
     }
 
+    if (!result.payload.aircraft.length) {
+      failures.push(`${base}: zero aircraft`);
+      emptyResult = emptyResult || result;
+      continue;
+    }
+
     const entry = { payload: result.payload, cachedAt: Date.now() };
+    aircraftCache.set(key, entry);
+    return json(withCacheMetadata(entry, false));
+  }
+
+  if (emptyResult) {
+    const entry = { payload: { ...emptyResult.payload, upstreamFailures: failures }, cachedAt: Date.now() };
     aircraftCache.set(key, entry);
     return json(withCacheMetadata(entry, false));
   }
