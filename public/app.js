@@ -398,12 +398,30 @@ function playSweepTick() {
 
 function playContactBlip() {
   const now = performance.now();
-  if (now - lastContactSoundAt < (radarSoundStyle === "submarine" ? 170 : 70)) return;
+  const soundSpacing = radarSoundStyle === "submarine" || radarSoundStyle === "sonar" ? 170 : 70;
+  if (now - lastContactSoundAt < soundSpacing) return;
 
   lastContactSoundAt = now;
   if (radarSoundStyle === "submarine") {
     playTone({ frequency: 620, type: "sine", duration: 0.28, gain: 0.075, slideTo: 900 });
     playTone({ frequency: 900, type: "sine", duration: 0.18, gain: 0.035, slideTo: 520, delay: 0.16 });
+    return;
+  }
+
+  if (radarSoundStyle === "chirp") {
+    playTone({ frequency: 740, type: "sawtooth", duration: 0.075, gain: 0.038, slideTo: 1680 });
+    return;
+  }
+
+  if (radarSoundStyle === "double") {
+    playTone({ frequency: 660, type: "sine", duration: 0.045, gain: 0.052, slideTo: 900 });
+    playTone({ frequency: 920, type: "sine", duration: 0.055, gain: 0.044, slideTo: 1180, delay: 0.075 });
+    return;
+  }
+
+  if (radarSoundStyle === "sonar") {
+    playTone({ frequency: 360, type: "triangle", duration: 0.22, gain: 0.06, slideTo: 780 });
+    playTone({ frequency: 720, type: "sine", duration: 0.18, gain: 0.028, slideTo: 420, delay: 0.18 });
     return;
   }
 
@@ -684,7 +702,8 @@ function planeLabel(plane) {
 }
 
 function aircraftType(plane) {
-  return plane.type || plane.resolvedType || "";
+  const type = String(plane.type || plane.resolvedType || "").trim();
+  return type.toLowerCase() === "adsb_icao" ? "Pvt" : type;
 }
 
 function aircraftTypeCode(plane) {
@@ -1927,7 +1946,7 @@ radarSoundStyleSelect.value = radarSoundStyle;
 queueRadarAudioUnlock();
 
 radarSoundStyleSelect.addEventListener("change", async () => {
-  const selectedStyle = ["off", "radar", "tick", "submarine"].includes(radarSoundStyleSelect.value)
+  const selectedStyle = ["off", "radar", "tick", "submarine", "chirp", "double", "sonar"].includes(radarSoundStyleSelect.value)
     ? radarSoundStyleSelect.value
     : "radar";
   radarSoundsEnabled = selectedStyle !== "off";
