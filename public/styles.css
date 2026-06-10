@@ -684,7 +684,15 @@ fieldset {
   }
 
   .airspace-toggles {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+  }
+
+  .airspace-toggles label {
+    min-height: 30px;
+    gap: 4px;
+    font-size: 0.72rem;
+    padding: 0 2px;
   }
 
   .coord-row,

@@ -216,7 +216,7 @@ let showFlightLevelsTraffic = true;
 let showRadarData = true;
 let showPrecipitation = false;
 let radarSoundsEnabled = true;
-let radarSoundStyle = "radar";
+let radarSoundStyle = "tick";
 let orientationMode = "north";
 let aircraft = [];
 let airports = [];
@@ -412,12 +412,6 @@ function playContactBlip() {
     return;
   }
 
-  if (radarSoundStyle === "double") {
-    playTone({ frequency: 660, type: "sine", duration: 0.045, gain: 0.052, slideTo: 900 });
-    playTone({ frequency: 920, type: "sine", duration: 0.055, gain: 0.044, slideTo: 1180, delay: 0.075 });
-    return;
-  }
-
   if (radarSoundStyle === "sonar") {
     playTone({ frequency: 360, type: "triangle", duration: 0.22, gain: 0.06, slideTo: 780 });
     playTone({ frequency: 720, type: "sine", duration: 0.18, gain: 0.028, slideTo: 420, delay: 0.18 });
@@ -502,7 +496,7 @@ function parseAirportsCsv(csv) {
       const type = row[index.type];
       const ident = row[index.ident];
 
-      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !usefulTypes.has(type) || ident?.startsWith("US")) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !usefulTypes.has(type) || ident?.startsWith("US") || ident?.startsWith("AZ")) {
         return null;
       }
 
@@ -2000,11 +1994,11 @@ radarSoundStyleSelect.value = radarSoundStyle;
 queueRadarAudioUnlock();
 
 radarSoundStyleSelect.addEventListener("change", async () => {
-  const selectedStyle = ["off", "radar", "tick", "submarine", "chirp", "double", "sonar"].includes(radarSoundStyleSelect.value)
+  const selectedStyle = ["off", "radar", "tick", "submarine", "chirp", "sonar"].includes(radarSoundStyleSelect.value)
     ? radarSoundStyleSelect.value
-    : "radar";
+    : "tick";
   radarSoundsEnabled = selectedStyle !== "off";
-  radarSoundStyle = radarSoundsEnabled ? selectedStyle : "radar";
+  radarSoundStyle = radarSoundsEnabled ? selectedStyle : "tick";
   audioUnlocked = false;
   if (!radarSoundsEnabled) return;
   if (await unlockRadarAudio()) {
