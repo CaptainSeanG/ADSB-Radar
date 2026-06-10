@@ -1059,7 +1059,7 @@ function weatherZoomLevel() {
   const tileSpanMiles = Math.max(2.5, radiusMiles * 1.4);
   const earthMiles = 24901;
   const zoom = Math.round(Math.log2((earthMiles * Math.cos((center.lat * Math.PI) / 180)) / tileSpanMiles));
-  return Math.max(4, Math.min(10, zoom));
+  return Math.max(4, Math.min(7, zoom));
 }
 
 function latLonToWeatherTile(lat, lon, zoom) {
