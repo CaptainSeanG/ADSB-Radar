@@ -131,6 +131,7 @@ const aircraftTypeNames = new Map([
   ["C68A", "Cessna Citation Latitude"],
   ["C680", "Cessna Citation Sovereign"],
   ["C700", "Cessna Citation Longitude"],
+  ["C750", "Cessna Citation X"],
   ["COL4", "Cessna Corvalis TTx"],
   ["CL30", "Bombardier Challenger 300"],
   ["CL35", "Bombardier Challenger 350"],
@@ -198,6 +199,7 @@ const aircraftTypeNames = new Map([
   ["B739", "Boeing 737-900"],
   ["B38M", "Boeing 737 MAX 8"],
   ["B39M", "Boeing 737 MAX 9"],
+  ["BCS3", "Airbus A220-300"],
   ["B752", "Boeing 757-200"],
   ["B763", "Boeing 767-300"],
   ["B772", "Boeing 777-200"],
@@ -1264,7 +1266,7 @@ async function fetchTraffic({ force = false } = {}) {
     } else {
       statusEl.textContent = gpsActive
         ? `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
-        : `Live ADS-B feed active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
+        : `ADS-B active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
     }
     resolveMissingAircraftTypes(aircraft);
     pruneRadarBlips(aircraft);
