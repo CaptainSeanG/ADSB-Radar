@@ -244,10 +244,9 @@ let gpsTrail = [];
 let lastGpsTrailAt = 0;
 let weatherMeta = null;
 let weatherMetaFetchedAt = 0;
-let weatherImage = null;
+let weatherTiles = [];
 let weatherImageKey = "";
 let weatherImageLoading = false;
-let weatherImageZoom = null;
 let audioCtx = null;
 let audioMaster = null;
 let lastContactSoundAt = 0;
@@ -345,9 +344,9 @@ function queueRadarAudioUnlock() {
 }
 
 function resetWeatherImage() {
-  weatherImage = null;
+  weatherTiles = [];
   weatherImageKey = "";
-  weatherImageZoom = null;
+  weatherImageLoading = false;
 }
 
 function randomJitter(minMs = 500, maxMs = 2000) {
@@ -1057,10 +1056,62 @@ function airspaceEnvelope() {
 }
 
 function weatherZoomLevel() {
-  const tileSpanMiles = Math.max(4, radiusMiles * 2.2);
+  const tileSpanMiles = Math.max(2.5, radiusMiles * 1.4);
   const earthMiles = 24901;
   const zoom = Math.round(Math.log2((earthMiles * Math.cos((center.lat * Math.PI) / 180)) / tileSpanMiles));
   return Math.max(4, Math.min(10, zoom));
+}
+
+function latLonToWeatherTile(lat, lon, zoom) {
+  const latRad = (lat * Math.PI) / 180;
+  const scale = 2 ** zoom;
+  return {
+    x: Math.floor(((lon + 180) / 360) * scale),
+    y: Math.floor(((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2) * scale)
+  };
+}
+
+function weatherTileToLatLon(x, y, zoom) {
+  const scale = 2 ** zoom;
+  const lon = (x / scale) * 360 - 180;
+  const n = Math.PI - (2 * Math.PI * y) / scale;
+  const lat = (Math.atan(Math.sinh(n)) * 180) / Math.PI;
+  return { lat, lon };
+}
+
+function weatherTileEnvelope(zoom) {
+  const latPad = radiusMiles / 69;
+  const lonPad = radiusMiles / (69 * Math.max(0.2, Math.cos((center.lat * Math.PI) / 180)));
+  const north = Math.min(85, center.lat + latPad);
+  const south = Math.max(-85, center.lat - latPad);
+  const west = center.lon - lonPad;
+  const east = center.lon + lonPad;
+  const northwest = latLonToWeatherTile(north, west, zoom);
+  const southeast = latLonToWeatherTile(south, east, zoom);
+  const maxTile = 2 ** zoom - 1;
+  const minX = Math.max(0, Math.min(northwest.x, southeast.x) - 1);
+  const maxX = Math.min(maxTile, Math.max(northwest.x, southeast.x) + 1);
+  const minY = Math.max(0, Math.min(northwest.y, southeast.y) - 1);
+  const maxY = Math.min(maxTile, Math.max(northwest.y, southeast.y) + 1);
+  const tiles = [];
+
+  for (let x = minX; x <= maxX; x += 1) {
+    for (let y = minY; y <= maxY; y += 1) {
+      tiles.push({ x, y, zoom });
+    }
+  }
+
+  return tiles.slice(0, 64);
+}
+
+function loadWeatherTile(url, tile) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => resolve({ ...tile, image });
+    image.onerror = reject;
+    image.src = url;
+  });
 }
 
 async function loadWeatherMeta() {
@@ -1083,27 +1134,22 @@ async function ensureWeatherImage() {
     if (!frame?.path || !meta.host) return;
 
     const zoom = weatherZoomLevel();
-    const key = `${frame.path}:${zoom}:${center.lat.toFixed(3)}:${center.lon.toFixed(3)}`;
-    if (key === weatherImageKey && weatherImage) return;
+    const tileSpecs = weatherTileEnvelope(zoom);
+    const key = `${frame.path}:${zoom}:${center.lat.toFixed(3)}:${center.lon.toFixed(3)}:${radiusMiles}`;
+    if (key === weatherImageKey && weatherTiles.length) return;
 
     weatherImageLoading = true;
     weatherImageKey = key;
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    image.onload = () => {
-      if (weatherImageKey !== key) {
-        weatherImageLoading = false;
-        return;
-      }
-      weatherImage = image;
-      weatherImageZoom = zoom;
-      weatherImageLoading = false;
-    };
-    image.onerror = () => {
-      if (weatherImageKey === key) resetWeatherImage();
-      weatherImageLoading = false;
-    };
-    image.src = `${meta.host}${frame.path}/512/${zoom}/${center.lat.toFixed(4)}/${center.lon.toFixed(4)}/2/1_1.png`;
+    const tileResults = await Promise.allSettled(
+      tileSpecs.map((tile) => loadWeatherTile(`${meta.host}${frame.path}/512/${zoom}/${tile.x}/${tile.y}/2/1_1.png`, tile))
+    );
+    const loadedTiles = tileResults
+      .filter((result) => result.status === "fulfilled")
+      .map((result) => result.value);
+    if (weatherImageKey === key) {
+      weatherTiles = loadedTiles;
+    }
+    weatherImageLoading = false;
   } catch (error) {
     weatherImageLoading = false;
     console.warn("Unable to load precipitation layer", error);
@@ -1113,17 +1159,25 @@ async function ensureWeatherImage() {
 function drawPrecipitation(scope) {
   if (!showPrecipitation) return;
   ensureWeatherImage();
-  if (!weatherImage || weatherImageZoom === null) return;
+  if (!weatherTiles.length) return;
 
-  const earthMiles = 24901;
-  const imageSpanMiles = (earthMiles * Math.cos((center.lat * Math.PI) / 180) * 2) / 2 ** weatherImageZoom;
-  const size = Math.max(scope.radius * 2.05, (scope.radius * imageSpanMiles) / radiusMiles);
   ctx.save();
   ctx.beginPath();
   ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
   ctx.clip();
-  ctx.globalAlpha = 0.55;
-  ctx.drawImage(weatherImage, scope.cx - size / 2, scope.cy - size / 2, size, size);
+  ctx.globalAlpha = 0.58;
+  for (const tile of weatherTiles) {
+    const nw = weatherTileToLatLon(tile.x, tile.y, tile.zoom);
+    const se = weatherTileToLatLon(tile.x + 1, tile.y + 1, tile.zoom);
+    const nwPoint = project(nw.lat, nw.lon, scope);
+    const sePoint = project(se.lat, se.lon, scope);
+    const x = Math.min(nwPoint.x, sePoint.x);
+    const y = Math.min(nwPoint.y, sePoint.y);
+    const width = Math.abs(sePoint.x - nwPoint.x);
+    const height = Math.abs(sePoint.y - nwPoint.y);
+    if (width <= 0 || height <= 0) continue;
+    ctx.drawImage(tile.image, x, y, width, height);
+  }
   ctx.restore();
 }
 
