@@ -234,6 +234,8 @@ let airportsCachePromise = null;
 let runwaysCachePromise = null;
 let lastAirspaceKey = "";
 let aircraftHitAreas = [];
+let currentAircraftContacts = [];
+let aircraftTextObstacles = [];
 let gpsWatchId = null;
 let gpsActive = false;
 let gpsTrackDegrees = null;
@@ -481,13 +483,14 @@ function parseAirportsCsv(csv) {
       const lat = parseNumber(row[index.latitude_deg]);
       const lon = parseNumber(row[index.longitude_deg]);
       const type = row[index.type];
+      const ident = row[index.ident];
 
-      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !usefulTypes.has(type)) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !usefulTypes.has(type) || ident?.startsWith("US")) {
         return null;
       }
 
       return {
-        ident: row[index.ident],
+        ident,
         name: row[index.name],
         type,
         lat,
@@ -729,8 +732,21 @@ function aircraftLabelBox(contact, compact = false) {
   };
 }
 
+function textBox(x, baselineY, text, height = 15) {
+  return {
+    x,
+    y: baselineY - height,
+    width: ctx.measureText(text).width,
+    height
+  };
+}
+
 function boxesIntersect(a, b) {
   return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y;
+}
+
+function intersectsAircraftText(box) {
+  return aircraftTextObstacles.some((obstacle) => boxesIntersect(box, obstacle));
 }
 
 function markCompactAircraftLabels(contacts) {
@@ -744,6 +760,10 @@ function markCompactAircraftLabels(contacts) {
       contacts[otherIndex].compactLabel = true;
     }
   }
+}
+
+function updateAircraftTextObstacles(contacts) {
+  aircraftTextObstacles = showRadarData ? contacts.map((contact) => aircraftLabelBox(contact, Boolean(contact.compactLabel))) : [];
 }
 
 function isGroundTraffic(plane) {
@@ -1306,17 +1326,56 @@ function drawAirportRunways(airport, scope) {
   return drewRunway;
 }
 
-function drawAirportLabel(text, point, scope) {
-  const labelX = Math.min(scope.width - 52, Math.max(8, point.x + 10));
-  const labelY = Math.min(scope.height - 12, Math.max(15, point.y - 9));
+function longestRunwayLabelPoint(airport, scope) {
+  const runway = [...(airport.runways || [])].sort((a, b) => (b.lengthFt || 0) - (a.lengthFt || 0))[0];
+  if (!runway) return null;
+  const start = project(runway.leLat, runway.leLon, scope);
+  const end = project(runway.heLat, runway.heLon, scope);
+  return {
+    x: Math.max(start.x, end.x) + 10,
+    y: Math.max(start.y, end.y) + 16
+  };
+}
+
+function airportLabelPosition(airport, text, point, scope) {
+  const width = ctx.measureText(text).width;
+  let labelX = point.x + 10;
+  let labelY = point.y - 9;
+
+  if (airport.ident === "KSDL") {
+    const runwayPoint = longestRunwayLabelPoint(airport, scope);
+    if (runwayPoint) {
+      labelX = runwayPoint.x;
+      labelY = runwayPoint.y;
+    }
+  } else if (airport.ident === "KDVT" || airport.ident === "18AZ") {
+    labelX = point.x - width / 2;
+    labelY = point.y - 17;
+  }
+
+  return {
+    x: Math.min(scope.width - width - 8, Math.max(8, labelX)),
+    y: Math.min(scope.height - 12, Math.max(15, labelY))
+  };
+}
+
+function drawAirportLabel(airport, point, scope) {
+  const text = airport.ident || airport.iata;
+  if (!text) return;
 
   ctx.save();
   ctx.font = radiusMiles <= 15 ? "850 13px ui-monospace, SFMono-Regular, Consolas, monospace" : "700 11px ui-monospace, SFMono-Regular, Consolas, monospace";
+  const label = airportLabelPosition(airport, text, point, scope);
+  const height = radiusMiles <= 15 ? 16 : 14;
+  if (intersectsAircraftText(textBox(label.x, label.y, text, height))) {
+    ctx.restore();
+    return;
+  }
   ctx.lineWidth = radiusMiles <= 15 ? 5 : 3;
   ctx.strokeStyle = "rgba(2, 5, 3, 0.92)";
   ctx.fillStyle = "rgba(255, 232, 150, 0.96)";
-  ctx.strokeText(text, labelX, labelY);
-  ctx.fillText(text, labelX, labelY);
+  ctx.strokeText(text, label.x, label.y);
+  ctx.fillText(text, label.x, label.y);
   ctx.restore();
 }
 
@@ -1342,7 +1401,7 @@ function drawAirports(scope) {
       ctx.stroke();
     }
     if (showRadarData) {
-      drawAirportLabel(airport.ident || airport.iata, point, scope);
+      drawAirportLabel(airport, point, scope);
     }
   }
   ctx.restore();
@@ -1388,13 +1447,13 @@ function drawAirspace(scope) {
     const inScope = labelPoints.filter((point) => point.distance <= radiusMiles * 1.05);
     if (showRadarData && inScope.length) {
       const labelPoint = inScope[Math.floor(inScope.length / 2)];
+      const label = `${airspace.classCode} ${airspace.lower}/${airspace.upper}`;
+      const labelX = Math.min(scope.width - 76, Math.max(8, labelPoint.x + 5));
+      const labelY = Math.min(scope.height - 12, Math.max(18, labelPoint.y - 5));
+      if (intersectsAircraftText(textBox(labelX, labelY, label, 14))) continue;
       ctx.setLineDash([]);
       ctx.fillStyle = style.stroke;
-      ctx.fillText(
-        `${airspace.classCode} ${airspace.lower}/${airspace.upper}`,
-        Math.min(scope.width - 76, Math.max(8, labelPoint.x + 5)),
-        Math.min(scope.height - 12, Math.max(18, labelPoint.y - 5))
-      );
+      ctx.fillText(label, labelX, labelY);
     }
   }
 
@@ -1464,11 +1523,7 @@ function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   }
 }
 
-function drawAircraft(scope) {
-  ctx.save();
-  ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
-  aircraftHitAreas = [];
-  const now = Date.now();
+function collectAircraftContacts(scope, now) {
   const normalContacts = [];
   const highlightedContacts = [];
 
@@ -1479,9 +1534,6 @@ function drawAircraft(scope) {
     const alpha = radarBlipAlpha(plane, now);
     if (alpha <= 0) continue;
 
-    if (alpha > 0.12) aircraftHitAreas.push({ key: aircraftKey(plane), x: point.x, y: point.y, plane });
-    drawTrack(scope, plane, alpha);
-
     const key = aircraftKey(plane);
     const highlight = aircraftHighlightState(key, now);
     const contact = { plane, point, alpha, highlight };
@@ -1489,7 +1541,33 @@ function drawAircraft(scope) {
     else normalContacts.push(contact);
   }
 
-  markCompactAircraftLabels([...normalContacts, ...highlightedContacts]);
+  return [...normalContacts, ...highlightedContacts];
+}
+
+function prepareAircraftLabels(scope, now) {
+  ctx.save();
+  ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
+  currentAircraftContacts = collectAircraftContacts(scope, now);
+  markCompactAircraftLabels(currentAircraftContacts);
+  updateAircraftTextObstacles(currentAircraftContacts);
+  ctx.restore();
+}
+
+function drawAircraft(scope) {
+  ctx.save();
+  ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
+  aircraftHitAreas = [];
+  const normalContacts = [];
+  const highlightedContacts = [];
+
+  for (const contact of currentAircraftContacts) {
+    if (contact.alpha > 0.12) {
+      aircraftHitAreas.push({ key: aircraftKey(contact.plane), x: contact.point.x, y: contact.point.y, plane: contact.plane });
+    }
+    drawTrack(scope, contact.plane, contact.alpha);
+    if (contact.highlight?.active) highlightedContacts.push(contact);
+    else normalContacts.push(contact);
+  }
 
   for (const contact of normalContacts) drawAircraftContact(contact);
   for (const contact of highlightedContacts) drawAircraftContact(contact);
@@ -1636,6 +1714,7 @@ function render(now) {
 
   pruneExpiredRadarBlips();
   updateRadarBlipsForSweep(angle);
+  prepareAircraftLabels(scope, Date.now());
   drawGrid(scope);
   drawPrecipitation(scope);
   drawAirspace(scope);
