@@ -1510,6 +1510,8 @@ function drawGrid(scope) {
   ctx.arc(0, 0, scope.radius, 0, Math.PI * 2);
   ctx.stroke();
 
+  drawHeadingTicks(scope);
+
   ctx.fillStyle = "rgba(233, 255, 243, 0.72)";
   ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.textAlign = "center";
@@ -1522,6 +1524,38 @@ function drawGrid(scope) {
     const angle = screenAngleForBearing(cardinal.bearing);
     ctx.fillText(cardinal.label, Math.cos(angle) * (scope.radius + 18), Math.sin(angle) * (scope.radius + 18) + 4);
   }
+  ctx.restore();
+}
+
+function drawHeadingTicks(scope) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(233, 255, 243, 0.42)";
+  ctx.fillStyle = "rgba(233, 255, 243, 0.64)";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  for (let bearing = 0; bearing < 360; bearing += 10) {
+    const angle = screenAngleForBearing(bearing);
+    const isCardinal = bearing % 90 === 0;
+    const isLabeled = bearing % 30 === 0 && !isCardinal;
+    const length = isLabeled ? 13 : 7;
+    const outer = scope.radius - 3;
+    const inner = outer - length;
+
+    ctx.lineWidth = isLabeled ? 1.6 : 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
+    ctx.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer);
+    ctx.stroke();
+
+    if (isLabeled) {
+      const label = String(bearing).padStart(3, "0");
+      const labelRadius = scope.radius + 18;
+      ctx.font = "700 11px ui-monospace, SFMono-Regular, Consolas, monospace";
+      ctx.fillText(label, Math.cos(angle) * labelRadius, Math.sin(angle) * labelRadius);
+    }
+  }
+
   ctx.restore();
 }
 
