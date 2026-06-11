@@ -96,7 +96,8 @@ const aircraftTypeNames = new Map([
   ["BE33", "Beechcraft Bonanza"],
   ["BE35", "Beechcraft Bonanza"],
   ["BE36", "Beechcraft Bonanza"],
-  ["BE40", "Beechcraft Premier"],
+  ["B36T", "Beechcraft Bonanza Turbo"],
+  ["BE40", "Hawker 400"],
   ["BE55", "Beechcraft Baron"],
   ["BE58", "Beechcraft Baron"],
   ["C150", "Cessna 150"],
@@ -108,6 +109,7 @@ const aircraftTypeNames = new Map([
   ["C185", "Cessna 185"],
   ["C205", "Cessna 205"],
   ["C206", "Cessna 206"],
+  ["T206", "Cessna Turbo Stationair"],
   ["C207", "Cessna 207"],
   ["C208", "Cessna Caravan"],
   ["C210", "Cessna 210"],
@@ -134,6 +136,7 @@ const aircraftTypeNames = new Map([
   ["C680", "Cessna Citation Sovereign"],
   ["C700", "Cessna Citation Longitude"],
   ["C750", "Cessna Citation X"],
+  ["C82R", "Cessna R182 Skylane RG"],
   ["CH7B", "Heli-Sport CH-7 Kompress"],
   ["COL4", "Cessna Corvalis TTx"],
   ["CL30", "Bombardier Challenger 300"],
@@ -1728,7 +1731,9 @@ function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
       ? "#ff6a75"
       : highlightMix > 0
         ? `rgba(255, 54, 72, ${0.42 + highlightMix * 0.58})`
-        : "#e9fff3";
+        : Number(plane.altitude) > 10000
+          ? "#ff9d35"
+          : "#e9fff3";
   ctx.beginPath();
   ctx.moveTo(10, 0);
   ctx.lineTo(-7, -5);
