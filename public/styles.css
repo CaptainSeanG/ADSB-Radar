@@ -27,11 +27,29 @@ body {
   margin: 0;
   overflow: hidden;
   background:
-    radial-gradient(circle at 36% 45%, rgba(30, 120, 80, 0.18), transparent 34rem),
-    linear-gradient(125deg, #020503 0%, #07100d 47%, #0a1115 100%);
+    radial-gradient(circle at 48% 44%, rgba(16, 82, 46, 0.2), transparent 28rem),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px) 0 0 / 42px 42px,
+    linear-gradient(rgba(255, 255, 255, 0.014) 1px, transparent 1px) 0 0 / 42px 42px,
+    linear-gradient(125deg, #020503 0%, #090d0d 46%, #111412 100%);
   color: var(--text);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body::before {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 10% 12%, rgba(255, 255, 255, 0.08) 0 2px, transparent 3px),
+    radial-gradient(circle at 91% 13%, rgba(255, 255, 255, 0.07) 0 2px, transparent 3px),
+    radial-gradient(circle at 11% 88%, rgba(255, 255, 255, 0.06) 0 2px, transparent 3px),
+    radial-gradient(circle at 90% 89%, rgba(255, 255, 255, 0.06) 0 2px, transparent 3px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 10%, transparent 88%, rgba(0, 0, 0, 0.28)),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.018) 0 1px, transparent 1px 5px);
+  opacity: 0.55;
 }
 
 button,
@@ -42,6 +60,7 @@ select {
 
 .shell {
   position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 380px;
   gap: 20px;
@@ -60,15 +79,41 @@ select {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid rgba(108, 255, 181, 0.28);
-  border-radius: 8px;
-  background: radial-gradient(circle at center, rgba(12, 74, 45, 0.94), #020503 68%);
-  box-shadow: 0 26px 70px var(--shadow), inset 0 0 70px rgba(88, 255, 160, 0.08);
+  border: 1px solid rgba(15, 17, 15, 0.95);
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(60, 66, 60, 0.42), rgba(5, 7, 6, 0.92)),
+    radial-gradient(circle at center, rgba(12, 74, 45, 0.94), #020503 68%);
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.68),
+    inset 0 0 0 12px rgba(23, 25, 23, 0.9),
+    inset 0 0 0 15px rgba(111, 103, 84, 0.18),
+    inset 0 0 90px rgba(88, 255, 160, 0.08);
+}
+
+.radar-wrap::after {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 18px 18px, rgba(0, 0, 0, 0.92) 0 4px, rgba(140, 148, 132, 0.28) 4px 6px, transparent 7px),
+    radial-gradient(circle at calc(100% - 18px) 18px, rgba(0, 0, 0, 0.92) 0 4px, rgba(140, 148, 132, 0.28) 4px 6px, transparent 7px),
+    radial-gradient(circle at 18px calc(100% - 18px), rgba(0, 0, 0, 0.92) 0 4px, rgba(140, 148, 132, 0.28) 4px 6px, transparent 7px),
+    radial-gradient(circle at calc(100% - 18px) calc(100% - 18px), rgba(0, 0, 0, 0.92) 0 4px, rgba(140, 148, 132, 0.28) 4px 6px, transparent 7px),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.14), transparent 14%, transparent 84%, rgba(0, 0, 0, 0.42));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 248, 210, 0.08),
+    inset 0 0 0 18px rgba(0, 0, 0, 0.24),
+    inset 0 0 52px rgba(0, 0, 0, 0.56);
 }
 
 #radar {
   position: absolute;
   inset: 0;
+  z-index: 1;
   width: 100%;
   height: 100%;
 }
@@ -77,7 +122,9 @@ select {
   pointer-events: none;
   position: absolute;
   inset: 0;
+  z-index: 3;
   background:
+    radial-gradient(circle at 50% 46%, transparent 52%, rgba(0, 0, 0, 0.28) 72%, rgba(0, 0, 0, 0.58) 100%),
     linear-gradient(rgba(255, 255, 255, 0.025) 50%, rgba(0, 0, 0, 0.025) 50%) 0 0 / 100% 4px,
     radial-gradient(circle at center, transparent 58%, rgba(0, 0, 0, 0.38) 100%);
   mix-blend-mode: screen;
