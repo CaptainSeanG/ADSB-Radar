@@ -182,6 +182,7 @@ const aircraftTypeNames = new Map([
   ["LJ45", "Learjet 45"],
   ["LJ60", "Learjet 60"],
   ["M20P", "Mooney M20"],
+  ["MRF1", "Dassault Mirage F1"],
   ["PA18", "Piper Super Cub"],
   ["PA24", "Piper Comanche"],
   ["P28A", "Piper Cherokee"],
@@ -241,7 +242,7 @@ let showFlightLevelsTraffic = true;
 let showRadarData = true;
 let showPrecipitation = false;
 let radarSoundsEnabled = true;
-let radarSoundStyle = "tick";
+let radarSoundStyle = "softTick";
 let orientationMode = "north";
 let aircraft = [];
 let airports = [];
@@ -931,6 +932,8 @@ function friendlyAircraftType(plane) {
   const type = aircraftType(plane).trim();
   const code = aircraftTypeCode(plane);
   if (aircraftTypeNames.has(code)) return aircraftTypeNames.get(code);
+  const codeToken = type.toUpperCase().split(/\s+/).find((token) => aircraftTypeNames.has(token));
+  if (codeToken) return aircraftTypeNames.get(codeToken);
   if (type && /\s/.test(type)) return titleCaseAircraftText(type);
   return type || "";
 }
@@ -999,6 +1002,26 @@ function isGroundTraffic(plane) {
 
 function isFlightLevelTraffic(plane) {
   return Number(plane.altitude) > 18000;
+}
+
+function altitudeColorStyle(plane) {
+  const altitude = Number(plane.altitude);
+  if (Number.isFinite(altitude) && altitude >= 18000) {
+    return {
+      target: "#ff505c",
+      trail: "rgba(255, 80, 92, 0.7)"
+    };
+  }
+  if (Number.isFinite(altitude) && altitude >= 10000) {
+    return {
+      target: "#ff9d35",
+      trail: "rgba(255, 157, 53, 0.66)"
+    };
+  }
+  return {
+    target: "#e9fff3",
+    trail: "rgba(98, 213, 255, 0.45)"
+  };
 }
 
 function isVisibleTraffic(plane) {
@@ -1841,7 +1864,7 @@ function drawTrack(scope, plane, alpha = 1) {
   ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
   ctx.clip();
   ctx.globalAlpha = alpha;
-  ctx.strokeStyle = Number(plane.altitude) > 18000 ? "rgba(255, 80, 92, 0.7)" : "rgba(98, 213, 255, 0.45)";
+  ctx.strokeStyle = altitudeColorStyle(plane).trail;
   ctx.lineWidth = 2;
   ctx.beginPath();
 
@@ -1870,9 +1893,7 @@ function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
       ? "#ff6a75"
       : highlightMix > 0
         ? `rgba(255, 54, 72, ${0.42 + highlightMix * 0.58})`
-        : Number(plane.altitude) > 10000
-          ? "#ff9d35"
-          : "#e9fff3";
+        : altitudeColorStyle(plane).target;
   ctx.beginPath();
   ctx.moveTo(10, 0);
   ctx.lineTo(-7, -5);
@@ -2338,9 +2359,9 @@ radarSoundStyleSelect.addEventListener("change", async () => {
     "sonar"
   ].includes(radarSoundStyleSelect.value)
     ? radarSoundStyleSelect.value
-    : "tick";
+    : "softTick";
   radarSoundsEnabled = selectedStyle !== "off";
-  radarSoundStyle = radarSoundsEnabled ? selectedStyle : "tick";
+  radarSoundStyle = radarSoundsEnabled ? selectedStyle : "softTick";
   audioUnlocked = false;
   if (!radarSoundsEnabled) return;
   if (await unlockRadarAudio()) {

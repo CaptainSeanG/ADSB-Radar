@@ -527,6 +527,11 @@ fieldset {
   box-shadow: 0 0 14px rgba(255, 157, 53, 0.34);
 }
 
+.legend-aircraft-red {
+  background: #ff505c;
+  box-shadow: 0 0 14px rgba(255, 80, 92, 0.36);
+}
+
 .legend-line {
   display: block;
   width: 34px;
@@ -537,6 +542,10 @@ fieldset {
 
 .legend-line-blue {
   border-color: rgba(98, 213, 255, 0.7);
+}
+
+.legend-line-orange {
+  border-color: rgba(255, 157, 53, 0.76);
 }
 
 .legend-line-red {

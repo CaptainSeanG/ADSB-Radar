@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./public/styles.css?v=20260611-3" />
+    <link rel="stylesheet" href="./public/styles.css?v=20260611-4" />
   </head>
   <body>
     <main class="shell">
@@ -172,19 +172,27 @@
         <div class="legend-list">
           <div class="legend-item">
             <span class="legend-aircraft legend-aircraft-white"></span>
-            <div><strong>White target</strong><span>Aircraft at or below 10,000'.</span></div>
+            <div><strong>White target</strong><span>Aircraft below 10,000'.</span></div>
           </div>
           <div class="legend-item">
             <span class="legend-aircraft legend-aircraft-orange"></span>
-            <div><strong>Orange target</strong><span>Aircraft above 10,000'.</span></div>
+            <div><strong>Orange target</strong><span>Aircraft from 10,000' to 17,999'.</span></div>
+          </div>
+          <div class="legend-item">
+            <span class="legend-aircraft legend-aircraft-red"></span>
+            <div><strong>Red target</strong><span>Aircraft at or above 18,000'.</span></div>
           </div>
           <div class="legend-item">
             <span class="legend-line legend-line-blue"></span>
-            <div><strong>Blue trail</strong><span>Recent aircraft path.</span></div>
+            <div><strong>Blue trail</strong><span>Recent path below 10,000'.</span></div>
+          </div>
+          <div class="legend-item">
+            <span class="legend-line legend-line-orange"></span>
+            <div><strong>Orange trail</strong><span>Recent path from 10,000' to 17,999'.</span></div>
           </div>
           <div class="legend-item">
             <span class="legend-line legend-line-red"></span>
-            <div><strong>Red trail</strong><span>Aircraft above 18,000'.</span></div>
+            <div><strong>Red trail</strong><span>Recent path at or above 18,000'.</span></div>
           </div>
           <div class="legend-item">
             <span class="legend-airspace"></span>
@@ -199,6 +207,6 @@
     </div>
 
     <script src="./public/config.js?v=20260608-5"></script>
-    <script type="module" src="./public/app.js?v=20260611-8"></script>
+    <script type="module" src="./public/app.js?v=20260611-9"></script>
   </body>
 </html>
