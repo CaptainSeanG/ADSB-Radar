@@ -152,6 +152,7 @@ const aircraftTypeNames = new Map([
   ["DA40", "Diamond DA40"],
   ["DA42", "Diamond DA42"],
   ["DA62", "Diamond DA62"],
+  ["EC45", "Eurocopter 145"],
   ["E135", "Embraer ERJ-135"],
   ["E140", "Embraer ERJ-140"],
   ["E145", "Embraer ERJ-145"],
