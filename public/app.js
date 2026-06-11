@@ -12,6 +12,9 @@ const airspaceToggles = document.querySelector("#airspaceToggles");
 const settingsOpen = document.querySelector("#settingsOpen");
 const settingsClose = document.querySelector("#settingsClose");
 const settingsModal = document.querySelector("#settingsModal");
+const legendOpen = document.querySelector("#legendOpen");
+const legendClose = document.querySelector("#legendClose");
+const legendModal = document.querySelector("#legendModal");
 const groundTrafficToggle = document.querySelector("#groundTrafficToggle");
 const flightLevelsToggle = document.querySelector("#flightLevelsToggle");
 const radarDataToggle = document.querySelector("#radarDataToggle");
@@ -1994,6 +1997,14 @@ function closeSettings() {
   settingsModal.hidden = true;
 }
 
+function openLegend() {
+  legendModal.hidden = false;
+}
+
+function closeLegend() {
+  legendModal.hidden = true;
+}
+
 function openAircraftDetails(plane) {
   if (!plane) return;
   const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
@@ -2120,6 +2131,8 @@ function trimTrackHistories() {
 
 settingsOpen.addEventListener("click", openSettings);
 settingsClose.addEventListener("click", closeSettings);
+legendOpen.addEventListener("click", openLegend);
+legendClose.addEventListener("click", closeLegend);
 
 panelToggle.addEventListener("click", () => {
   shell.classList.toggle("panel-collapsed");
@@ -2131,6 +2144,10 @@ settingsModal.addEventListener("click", (event) => {
   if (event.target === settingsModal) closeSettings();
 });
 
+legendModal.addEventListener("click", (event) => {
+  if (event.target === legendModal) closeLegend();
+});
+
 aircraftClose.addEventListener("click", closeAircraftDetails);
 
 aircraftModal.addEventListener("click", (event) => {
@@ -2139,6 +2156,7 @@ aircraftModal.addEventListener("click", (event) => {
 
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !settingsModal.hidden) closeSettings();
+  if (event.key === "Escape" && !legendModal.hidden) closeLegend();
   if (event.key === "Escape" && !aircraftModal.hidden) closeAircraftDetails();
 });
 

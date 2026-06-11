@@ -130,6 +130,29 @@ select {
   mix-blend-mode: screen;
 }
 
+.legend-button {
+  position: absolute;
+  top: 66px;
+  left: 22px;
+  z-index: 4;
+  min-height: 28px;
+  border: 1px solid rgba(132, 255, 194, 0.34);
+  border-radius: 6px;
+  background: rgba(3, 8, 5, 0.74);
+  color: rgba(233, 255, 243, 0.82);
+  cursor: pointer;
+  font: 850 0.68rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.08em;
+  padding: 0 10px;
+  text-transform: uppercase;
+}
+
+.legend-button:hover {
+  border-color: var(--green);
+  background: rgba(77, 255, 155, 0.14);
+  color: var(--text);
+}
+
 .proximity-alert {
   display: none;
 }
@@ -447,6 +470,95 @@ fieldset {
 .settings-body {
   display: grid;
   gap: 12px;
+}
+
+.legend-modal {
+  width: min(460px, 100%);
+}
+
+.legend-list {
+  display: grid;
+  gap: 10px;
+}
+
+.legend-item {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(132, 255, 194, 0.15);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 11px 12px;
+}
+
+.legend-item strong,
+.legend-item span {
+  display: block;
+}
+
+.legend-item strong {
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.legend-item div span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.legend-aircraft {
+  display: block;
+  width: 30px;
+  height: 18px;
+  margin-left: 4px;
+  clip-path: polygon(100% 50%, 0 12%, 20% 50%, 0 88%);
+}
+
+.legend-aircraft-white {
+  background: #e9fff3;
+  box-shadow: 0 0 12px rgba(233, 255, 243, 0.28);
+}
+
+.legend-aircraft-orange {
+  background: #ff9d35;
+  box-shadow: 0 0 14px rgba(255, 157, 53, 0.34);
+}
+
+.legend-line {
+  display: block;
+  width: 34px;
+  height: 0;
+  border-top: 3px solid;
+  border-radius: 999px;
+}
+
+.legend-line-blue {
+  border-color: rgba(98, 213, 255, 0.7);
+}
+
+.legend-line-red {
+  border-color: rgba(255, 80, 92, 0.76);
+}
+
+.legend-airspace {
+  display: block;
+  width: 34px;
+  height: 22px;
+  border: 2px dashed rgba(150, 166, 255, 0.94);
+  border-radius: 50%;
+}
+
+.legend-runway {
+  display: block;
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 207, 106, 0.95);
+  box-shadow: 0 0 10px rgba(255, 207, 106, 0.32);
+  transform: rotate(-18deg);
 }
 
 .settings-range {

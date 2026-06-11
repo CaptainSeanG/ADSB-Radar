@@ -4,13 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./styles.css?v=20260611-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260611-2" />
   </head>
   <body>
     <main class="shell">
       <section class="radar-wrap" aria-label="ADS-B radar display">
         <canvas id="radar" aria-label="Radar screen"></canvas>
         <div class="scope-glass"></div>
+        <button type="button" class="legend-button" id="legendOpen">Legend</button>
       </section>
       <div class="proximity-alert" id="proximityAlert" aria-live="polite" hidden></div>
 
@@ -157,7 +158,42 @@
       </section>
     </div>
 
+    <div class="modal-backdrop" id="legendModal" hidden>
+      <section class="settings-modal legend-modal" role="dialog" aria-modal="true" aria-labelledby="legendTitle">
+        <header class="settings-header">
+          <h2 id="legendTitle">Radar Legend</h2>
+          <button type="button" class="icon-button" id="legendClose" aria-label="Close legend">x</button>
+        </header>
+        <div class="legend-list">
+          <div class="legend-item">
+            <span class="legend-aircraft legend-aircraft-white"></span>
+            <div><strong>White target</strong><span>Aircraft at or below 10,000'.</span></div>
+          </div>
+          <div class="legend-item">
+            <span class="legend-aircraft legend-aircraft-orange"></span>
+            <div><strong>Orange target</strong><span>Aircraft above 10,000'.</span></div>
+          </div>
+          <div class="legend-item">
+            <span class="legend-line legend-line-blue"></span>
+            <div><strong>Blue trail</strong><span>Recent aircraft path.</span></div>
+          </div>
+          <div class="legend-item">
+            <span class="legend-line legend-line-red"></span>
+            <div><strong>Red trail</strong><span>Aircraft above 18,000'.</span></div>
+          </div>
+          <div class="legend-item">
+            <span class="legend-airspace"></span>
+            <div><strong>Dashed blue outline</strong><span>Controlled airspace boundary.</span></div>
+          </div>
+          <div class="legend-item">
+            <span class="legend-runway"></span>
+            <div><strong>Amber runway</strong><span>Airport runway reference at close ranges.</span></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
     <script src="./config.js?v=20260608-5"></script>
-    <script type="module" src="./app.js?v=20260611-2"></script>
+    <script type="module" src="./app.js?v=20260611-3"></script>
   </body>
 </html>
