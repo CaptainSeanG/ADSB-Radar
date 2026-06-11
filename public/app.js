@@ -624,10 +624,10 @@ function normalizeAircraft(raw) {
     type: (raw.t || raw.type || "").trim(),
     lat,
     lon,
-    altitude: raw.alt_baro ?? raw.alt_geom ?? raw.altitude ?? null,
-    speed: raw.gs ?? raw.tas ?? raw.ias ?? null,
+    altitude: raw.altitude ?? raw.alt_baro ?? raw.alt_geom ?? null,
+    speed: raw.speed ?? raw.gs ?? raw.tas ?? raw.ias ?? null,
     track: raw.track ?? raw.true_heading ?? raw.nav_heading ?? null,
-    verticalRate: raw.baro_rate ?? raw.geom_rate ?? null,
+    verticalRate: raw.verticalRate ?? raw.baro_rate ?? raw.geom_rate ?? null,
     seen: raw.seen ?? null,
     emergency: raw.emergency || null,
     category: raw.category || null
