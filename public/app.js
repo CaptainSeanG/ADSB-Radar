@@ -1,5 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
+const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
 const form = document.querySelector("#controls");
 const panelToggle = document.querySelector("#panelToggle");
@@ -1790,6 +1791,9 @@ function drawAirspace(scope) {
   };
 
   ctx.save();
+  ctx.beginPath();
+  ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
+  ctx.clip();
   ctx.font = "800 11px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.lineWidth = 2;
   ctx.lineCap = "round";
@@ -2463,6 +2467,13 @@ function updateCoordinateVisibility() {
 
 window.addEventListener("resize", resizeCanvas);
 window.addEventListener("resize", updateProximityAlert);
+if ("ResizeObserver" in window && radarWrap) {
+  const radarResizeObserver = new ResizeObserver(() => {
+    resizeCanvas();
+    updateProximityAlert();
+  });
+  radarResizeObserver.observe(radarWrap);
+}
 
 const initialCenterApplied = applySelectedAirport();
 updateCoordinateVisibility();
