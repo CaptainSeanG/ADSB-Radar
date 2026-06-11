@@ -905,7 +905,17 @@ function planeLabel(plane) {
   return plane.nNumber || plane.callsign || plane.hex || "Unknown";
 }
 
+function isAsiArcher(plane) {
+  return /^ASI\d+/i.test(String(plane.callsign || "").trim());
+}
+
+function isScaCessna172(plane) {
+  return /^SCA\d+/i.test(String(plane.callsign || "").trim());
+}
+
 function aircraftType(plane) {
+  if (isAsiArcher(plane)) return "PA28";
+  if (isScaCessna172(plane)) return "C172";
   const type = String(plane.type || plane.resolvedType || "").trim();
   return type.toLowerCase() === "adsb_icao" ? "Pvt" : type;
 }
@@ -928,6 +938,8 @@ function titleCaseAircraftText(value) {
 
 function friendlyAircraftType(plane) {
   if (plane.friendlyType) return plane.friendlyType;
+  if (isAsiArcher(plane)) return "Piper Archer";
+  if (isScaCessna172(plane)) return "Cessna 172";
 
   const type = aircraftType(plane).trim();
   const code = aircraftTypeCode(plane);
@@ -1562,7 +1574,7 @@ function renderList() {
           <button type="button" class="aircraft-row" data-aircraft-key="${escapeHtml(aircraftKey(plane))}">
           <div class="plane-head">
             <span>${escapeHtml(aircraftDisplayLabel(plane))}</span>
-            <span>${escapeHtml(aircraftType(plane) || "TYPE ?")}</span>
+            <span>${escapeHtml(friendlyAircraftType(plane) || aircraftType(plane) || "TYPE ?")}</span>
           </div>
           <div class="plane-meta">
             <span>${formatAltitude(plane.altitude)}</span>
