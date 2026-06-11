@@ -914,9 +914,14 @@ function isScaCessna172(plane) {
   return /^SCA\d+/i.test(String(plane.callsign || "").trim());
 }
 
+function isVarCirrusSr20(plane) {
+  return /^VAR\d*/i.test(String(plane.callsign || "").trim());
+}
+
 function aircraftType(plane) {
   if (isAsiArcher(plane)) return "PA28";
   if (isScaCessna172(plane)) return "C172";
+  if (isVarCirrusSr20(plane)) return "SR20";
   const type = String(plane.type || plane.resolvedType || "").trim();
   return type.toLowerCase() === "adsb_icao" ? "Pvt" : type;
 }
@@ -941,6 +946,7 @@ function friendlyAircraftType(plane) {
   if (plane.friendlyType) return plane.friendlyType;
   if (isAsiArcher(plane)) return "Piper Archer";
   if (isScaCessna172(plane)) return "Cessna 172";
+  if (isVarCirrusSr20(plane)) return "Cirrus SR20";
 
   const type = aircraftType(plane).trim();
   const code = aircraftTypeCode(plane);
