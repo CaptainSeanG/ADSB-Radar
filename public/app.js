@@ -1648,12 +1648,14 @@ function drawAirspace(scope) {
   const styles = {
     B: { stroke: "rgba(87, 185, 255, 0.92)", fill: "rgba(87, 185, 255, 0.06)", dash: [] },
     C: { stroke: "rgba(105, 224, 255, 0.78)", fill: "rgba(105, 224, 255, 0.045)", dash: [10, 7] },
-    D: { stroke: "rgba(151, 166, 255, 0.82)", fill: "rgba(151, 166, 255, 0.04)", dash: [4, 7] }
+    D: { stroke: "rgba(35, 96, 202, 0.92)", fill: "rgba(35, 96, 202, 0.045)", dash: [10, 13] }
   };
 
   ctx.save();
   ctx.font = "800 11px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.lineWidth = 2;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
 
   for (const airspace of airspaces) {
     if (!visibleClasses.has(airspace.classCode)) continue;
@@ -1666,14 +1668,9 @@ function drawAirspace(scope) {
 
     for (const ring of airspace.rings) {
       if (ring.length < 2) continue;
-      ctx.beginPath();
-      ring.forEach((point, index) => {
-        const projected = project(point.lat, point.lon, scope);
-        labelPoints.push(projected);
-        if (index === 0) ctx.moveTo(projected.x, projected.y);
-        else ctx.lineTo(projected.x, projected.y);
-      });
-      ctx.closePath();
+      const projectedRing = ring.map((point) => project(point.lat, point.lon, scope));
+      labelPoints.push(...projectedRing);
+      drawAirspaceRingPath(projectedRing, airspace.classCode === "D");
       ctx.fill();
       ctx.stroke();
     }
@@ -1693,6 +1690,40 @@ function drawAirspace(scope) {
 
   ctx.setLineDash([]);
   ctx.restore();
+}
+
+function drawAirspaceRingPath(points, smooth = false) {
+  ctx.beginPath();
+  const cleanPoints = points.slice();
+  const firstPoint = cleanPoints[0];
+  const lastPoint = cleanPoints[cleanPoints.length - 1];
+  if (firstPoint && lastPoint && Math.hypot(firstPoint.x - lastPoint.x, firstPoint.y - lastPoint.y) < 0.5) {
+    cleanPoints.pop();
+  }
+
+  if (!smooth || cleanPoints.length < 4) {
+    cleanPoints.forEach((point, index) => {
+      if (index === 0) ctx.moveTo(point.x, point.y);
+      else ctx.lineTo(point.x, point.y);
+    });
+    ctx.closePath();
+    return;
+  }
+
+  const midpoint = (a, b) => ({
+    x: (a.x + b.x) / 2,
+    y: (a.y + b.y) / 2
+  });
+  const last = cleanPoints[cleanPoints.length - 1];
+  const first = cleanPoints[0];
+  const start = midpoint(last, first);
+  ctx.moveTo(start.x, start.y);
+  cleanPoints.forEach((point, index) => {
+    const next = cleanPoints[(index + 1) % cleanPoints.length];
+    const mid = midpoint(point, next);
+    ctx.quadraticCurveTo(point.x, point.y, mid.x, mid.y);
+  });
+  ctx.closePath();
 }
 
 function drawTrack(scope, plane, alpha = 1) {
