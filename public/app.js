@@ -257,6 +257,8 @@ let gpsWatchId = null;
 let gpsActive = false;
 let gpsTrackDegrees = null;
 let gpsSpeedKts = 0;
+let compassHeadingDegrees = null;
+let compassPermissionRequested = false;
 let gpsTrail = [];
 let lastGpsTrailAt = 0;
 let weatherMeta = null;
@@ -358,6 +360,50 @@ function queueRadarAudioUnlock() {
   window.addEventListener("keydown", retryUnlock, { once: true, passive: true });
   window.addEventListener("pointerdown", retryUnlock, { once: true, passive: true });
   window.addEventListener("touchend", retryUnlock, { once: true, passive: true });
+}
+
+function handleDeviceOrientation(event) {
+  const webkitHeading = Number(event.webkitCompassHeading);
+  if (Number.isFinite(webkitHeading)) {
+    compassHeadingDegrees = (webkitHeading + 360) % 360;
+    return;
+  }
+
+  const alpha = Number(event.alpha);
+  if (Number.isFinite(alpha)) {
+    compassHeadingDegrees = (360 - alpha + 360) % 360;
+  }
+}
+
+async function enableCompassHeading() {
+  if (compassPermissionRequested) return;
+
+  try {
+    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
+      const permission = await DeviceOrientationEvent.requestPermission();
+      if (permission !== "granted") return;
+    }
+    compassPermissionRequested = true;
+    window.addEventListener("deviceorientationabsolute", handleDeviceOrientation, true);
+    window.addEventListener("deviceorientation", handleDeviceOrientation, true);
+  } catch (error) {
+    console.warn("Unable to enable compass heading", error);
+  }
+}
+
+function queueCompassHeadingEnable() {
+  if (!gpsActive || compassPermissionRequested) return;
+
+  const requestCompass = () => {
+    if (gpsActive && orientationMode === "track") enableCompassHeading();
+  };
+
+  if (typeof DeviceOrientationEvent === "undefined" || typeof DeviceOrientationEvent.requestPermission !== "function") {
+    window.setTimeout(requestCompass, 0);
+  }
+  window.addEventListener("click", requestCompass, { once: true, passive: true });
+  window.addEventListener("pointerdown", requestCompass, { once: true, passive: true });
+  window.addEventListener("touchend", requestCompass, { once: true, passive: true });
 }
 
 function resetWeatherImage() {
@@ -626,10 +672,15 @@ function destinationPoint(lat, lon, bearing, distanceMiles) {
   };
 }
 
+function activeTrackHeadingDegrees() {
+  if (!gpsActive || orientationMode !== "track") return null;
+  if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= 0.8) return gpsTrackDegrees;
+  if (Number.isFinite(compassHeadingDegrees)) return compassHeadingDegrees;
+  return null;
+}
+
 function radarRotationDegrees() {
-  return gpsActive && orientationMode === "track" && Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= 2
-    ? gpsTrackDegrees
-    : 0;
+  return activeTrackHeadingDegrees() ?? 0;
 }
 
 function screenAngleForBearing(bearing) {
@@ -1708,8 +1759,8 @@ function drawUserNavigation(scope) {
     ctx.setLineDash([]);
   }
 
-  const heading = Number.isFinite(gpsTrackDegrees) ? gpsTrackDegrees : 0;
-  const headingAngle = radarRotationDegrees() ? -Math.PI / 2 : screenAngleForBearing(heading);
+  const heading = activeTrackHeadingDegrees() ?? gpsTrackDegrees ?? compassHeadingDegrees ?? 0;
+  const headingAngle = activeTrackHeadingDegrees() !== null ? -Math.PI / 2 : screenAngleForBearing(heading);
   ctx.save();
   ctx.translate(scope.cx, scope.cy);
   ctx.rotate(headingAngle);
@@ -1905,6 +1956,7 @@ function stopGpsTracking() {
   gpsActive = false;
   gpsTrackDegrees = null;
   gpsSpeedKts = 0;
+  compassHeadingDegrees = null;
 }
 
 function fallbackToKdvt(message = "GPS unavailable. Using KDVT fallback.") {
@@ -1928,6 +1980,7 @@ function startGpsTracking() {
   gpsTrackDegrees = null;
   gpsSpeedKts = 0;
   statusEl.textContent = "Requesting GPS position...";
+  queueCompassHeadingEnable();
 
   gpsWatchId = navigator.geolocation.watchPosition(
     (position) => {
@@ -2053,6 +2106,7 @@ radarSoundStyleSelect.addEventListener("change", async () => {
 
 orientationModeSelect.addEventListener("change", () => {
   orientationMode = orientationModeSelect.value === "track" ? "track" : "north";
+  if (orientationMode === "track") queueCompassHeadingEnable();
 });
 
 aircraftListEl.addEventListener("click", (event) => {
