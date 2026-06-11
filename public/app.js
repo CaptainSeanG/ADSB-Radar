@@ -51,14 +51,25 @@ const weatherMapsUrl = "https://api.rainviewer.com/public/weather-maps.json";
 const airspaceQueryUrl =
   "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0/query";
 const aircraftLookupBaseUrl = "https://api.adsbdb.com/v0/aircraft";
-const proxyUrlFromQuery = new URLSearchParams(window.location.search).get("proxy");
+const queryParams = new URLSearchParams(window.location.search);
+const proxyUrlFromQuery = queryParams.get("proxy");
 if (proxyUrlFromQuery) {
   window.localStorage.setItem("ADSB_RADAR_PROXY_URL", proxyUrlFromQuery);
+}
+const stratusUrlFromQuery = queryParams.get("stratus");
+if (stratusUrlFromQuery) {
+  window.localStorage.setItem("ADSB_RADAR_STRATUS_URL", stratusUrlFromQuery);
 }
 const adsbProxyBaseUrl = (
   proxyUrlFromQuery ||
   window.localStorage.getItem("ADSB_RADAR_PROXY_URL") ||
   window.ADSB_RADAR_PROXY_URL ||
+  ""
+).replace(/\/$/, "");
+const stratusBridgeBaseUrl = (
+  stratusUrlFromQuery ||
+  window.localStorage.getItem("ADSB_RADAR_STRATUS_URL") ||
+  window.ADSB_RADAR_STRATUS_URL ||
   ""
 ).replace(/\/$/, "");
 const tracks = new Map();
@@ -1274,26 +1285,11 @@ function attachRunwaysToAirports(airportRows, runwayRows) {
 }
 
 async function fetchStaticTraffic() {
-  if (!adsbProxyBaseUrl) {
-    throw new Error("Cloudflare Worker proxy is not configured");
-  }
-
-  const aircraftUrl = `${adsbProxyBaseUrl}/api/aircraft?lat=${center.lat}&lon=${center.lon}&radiusMiles=${radiusMiles}`;
-
-  const [trafficResponse, airportRows, runwayRows] = await Promise.all([
-    fetch(aircraftUrl, {
-      headers: {
-        accept: "application/json"
-      }
-    }),
+  const [trafficData, airportRows, runwayRows] = await Promise.all([
+    fetchPreferredAircraftFeed(),
     loadAirportCache(),
     loadRunwayCache()
   ]);
-
-  const trafficData = await trafficResponse.json().catch(() => ({}));
-  if (!trafficResponse.ok) {
-    throw new Error(trafficData.error || trafficData.detail || `aircraft worker returned ${trafficResponse.status}`);
-  }
 
   const aircraftRows = (trafficData.aircraft || trafficData.ac || []).map(normalizeAircraft).filter(Boolean);
 
@@ -1312,11 +1308,60 @@ async function fetchStaticTraffic() {
   return {
     aircraft: aircraftRows,
     airports: airportMatches,
-    source: trafficData.source || "ADS-B Worker",
+    source: trafficData.displaySource || trafficData.source || "Cellular",
     stale: Boolean(trafficData.stale),
     ageSeconds: trafficData.ageSeconds ?? 0,
     warning: trafficData.warning || ""
   };
+}
+
+async function fetchAircraftFeed(baseUrl, { displaySource, timeoutMs = 6500 } = {}) {
+  if (!baseUrl) throw new Error("Aircraft source is not configured");
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  const aircraftUrl = `${baseUrl}/api/aircraft?lat=${center.lat}&lon=${center.lon}&radiusMiles=${radiusMiles}`;
+
+  try {
+    const response = await fetch(aircraftUrl, {
+      signal: controller.signal,
+      headers: {
+        accept: "application/json"
+      }
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || data.detail || `${displaySource || "aircraft source"} returned ${response.status}`);
+    }
+    return {
+      ...data,
+      displaySource
+    };
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function fetchPreferredAircraftFeed() {
+  if (stratusBridgeBaseUrl) {
+    try {
+      return await fetchAircraftFeed(stratusBridgeBaseUrl, {
+        displaySource: "Stratus",
+        timeoutMs: 1600
+      });
+    } catch (error) {
+      console.warn("Stratus traffic source unavailable; falling back to cellular source", error);
+    }
+  }
+
+  if (!adsbProxyBaseUrl) {
+    throw new Error("Cloudflare Worker proxy is not configured");
+  }
+
+  return fetchAircraftFeed(adsbProxyBaseUrl, {
+    displaySource: "Cellular",
+    timeoutMs: 6500
+  });
 }
 
 function airspaceEnvelope() {
@@ -1536,13 +1581,13 @@ async function fetchTraffic({ force = false } = {}) {
     lastDataSource = data.source;
     if (data.stale) {
       const age = Number.isFinite(Number(data.ageSeconds)) ? `${Math.round(Number(data.ageSeconds))}s old` : "stale";
-      statusEl.textContent = `ADS-B upstream degraded. Showing cached aircraft data (${age}).`;
+      statusEl.textContent = `${lastDataSource} traffic source degraded. Showing cached aircraft data (${age}).`;
     } else {
       statusEl.textContent = gpsActive
-        ? `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
+        ? `${lastDataSource} traffic active. GPS center at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
         : aircraft.length
-          ? `ADS-B ${lastDataSource} active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
-          : `ADS-B ${lastDataSource} returned no aircraft for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
+          ? `${lastDataSource} traffic active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
+          : `${lastDataSource} traffic returned no aircraft for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
     }
     resolveMissingAircraftTypes(aircraft);
     pruneRadarBlips(aircraft);

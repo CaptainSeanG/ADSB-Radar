@@ -88,3 +88,23 @@ https://captainseang.github.io/ADSB-Radar/?proxy=https://your-worker-name.your-a
 ```
 
 The app remembers that proxy URL in the browser after the first visit.
+
+## Traffic Source Priority
+
+The browser app can use a local Stratus bridge when one is available, then fall back to the Cloudflare Worker internet feed.
+
+Set the bridge URL in `public/config.js`:
+
+```js
+window.ADSB_RADAR_STRATUS_URL = "http://127.0.0.1:8787";
+```
+
+Or test it without editing files:
+
+```text
+https://captainseang.github.io/ADSB-Radar/?stratus=http://127.0.0.1:8787
+```
+
+When the bridge responds, the app labels traffic source as `Stratus`. If it does not respond, the radar falls back to the Worker and labels traffic source as `Cellular`.
+
+A normal browser page cannot listen directly to Stratus WiFi/UDP traffic, so the Stratus bridge must run locally on the laptop or Raspberry Pi and expose compatible `/api/aircraft` JSON.
