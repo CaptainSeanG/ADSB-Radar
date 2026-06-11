@@ -157,6 +157,20 @@ select {
   display: none;
 }
 
+@keyframes traffic-alert-flash {
+  0%,
+  48% {
+    opacity: 1;
+    filter: saturate(1.25);
+  }
+
+  49%,
+  100% {
+    opacity: 0.42;
+    filter: saturate(0.8);
+  }
+}
+
 .panel {
   display: flex;
   min-width: 0;
@@ -863,19 +877,21 @@ fieldset {
 
   .shell.panel-collapsed .proximity-alert:not([hidden]) {
     display: flex;
-    min-height: 48px;
+    min-height: 58px;
     align-items: center;
     justify-content: center;
-    border: 1px solid rgba(255, 207, 106, 0.52);
+    border: 2px solid rgba(255, 235, 80, 0.95);
     border-radius: 8px;
-    background: rgba(27, 16, 3, 0.86);
-    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.36), inset 0 0 28px rgba(255, 155, 64, 0.08);
-    color: #ffe59d;
-    font: 900 1rem ui-monospace, SFMono-Regular, Consolas, monospace;
-    letter-spacing: 0.03em;
+    background: rgba(158, 0, 16, 0.94);
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.42), inset 0 0 26px rgba(255, 235, 80, 0.14);
+    color: #fff04a;
+    font: 950 1.18rem ui-monospace, SFMono-Regular, Consolas, monospace;
+    letter-spacing: 0.04em;
     text-align: center;
+    text-shadow: 0 0 12px rgba(255, 240, 74, 0.7);
     text-transform: uppercase;
-    padding: 10px 12px;
+    padding: 12px 14px;
+    animation: traffic-alert-flash 360ms steps(2, end) infinite;
   }
 
   .range-buttons {

@@ -787,7 +787,7 @@ function updateProximityAlert() {
     return;
   }
 
-  proximityAlertEl.textContent = `Traffic ${clockDirection(alert.relativeBearing)} O'Clock${altitudeRelation(alert.plane.altitude)}`;
+  proximityAlertEl.textContent = `Traffic ${clockDirection(alert.relativeBearing)} O'Clock${altitudeRelation(alert.plane.altitude)} ${formatAltitude(alert.plane.altitude)}`;
   proximityAlertEl.hidden = false;
 }
 
