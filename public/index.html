@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./styles.css?v=20260610-4" />
+    <link rel="stylesheet" href="./styles.css?v=20260610-7" />
   </head>
   <body>
     <main class="shell">
@@ -12,6 +12,7 @@
         <canvas id="radar" aria-label="Radar screen"></canvas>
         <div class="scope-glass"></div>
       </section>
+      <div class="proximity-alert" id="proximityAlert" aria-live="polite" hidden></div>
 
       <aside class="panel" aria-label="Radar controls and aircraft list">
         <header>
@@ -157,6 +158,6 @@
     </div>
 
     <script src="./config.js?v=20260608-5"></script>
-    <script type="module" src="./app.js?v=20260610-6"></script>
+    <script type="module" src="./app.js?v=20260610-7"></script>
   </body>
 </html>

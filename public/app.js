@@ -26,6 +26,7 @@ const aircraftDetail = document.querySelector("#aircraftDetail");
 const statusEl = document.querySelector("#status");
 const lastUpdateEl = document.querySelector("#lastUpdate");
 const aircraftListEl = document.querySelector("#aircraftList");
+const proximityAlertEl = document.querySelector("#proximityAlert");
 
 const sweepSeconds = 4.2;
 const radarFadeMs = sweepSeconds * 3 * 1000;
@@ -257,6 +258,7 @@ let gpsWatchId = null;
 let gpsActive = false;
 let gpsTrackDegrees = null;
 let gpsSpeedKts = 0;
+let gpsAltitudeFt = null;
 let compassHeadingDegrees = null;
 let compassPermissionRequested = false;
 let gpsTrail = [];
@@ -501,6 +503,7 @@ function updatePanelToggle() {
   const collapsed = shell.classList.contains("panel-collapsed");
   panelToggle.setAttribute("aria-label", collapsed ? "Show panel" : "Hide panel");
   panelToggle.setAttribute("aria-expanded", String(!collapsed));
+  updateProximityAlert();
 }
 
 function milesBetween(latA, lonA, latB, lonB) {
@@ -645,6 +648,75 @@ function bearingDegrees(latA, lonA, latB, lonB) {
     Math.cos(phiA) * Math.sin(phiB) -
     Math.sin(phiA) * Math.cos(phiB) * Math.cos(lambda);
   return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+function normalizedDegrees(value) {
+  return ((value % 360) + 360) % 360;
+}
+
+function relativeBearingDegrees(bearing) {
+  const heading = activeTrackHeadingDegrees() ?? 0;
+  return normalizedDegrees(bearing - heading);
+}
+
+function clockDirection(relativeBearing) {
+  const hour = Math.round(relativeBearing / 30) || 12;
+  return hour > 12 ? hour - 12 : hour;
+}
+
+function altitudeRelation(planeAltitude) {
+  const ownAltitude = Number(gpsAltitudeFt);
+  const targetAltitude = Number(planeAltitude);
+  if (!Number.isFinite(ownAltitude) || !Number.isFinite(targetAltitude)) return "";
+
+  const difference = targetAltitude - ownAltitude;
+  if (Math.abs(difference) <= 300) return " Same Altitude";
+  return difference > 0 ? " High" : " Low";
+}
+
+function proximityCandidate(plane) {
+  if (isGroundTraffic(plane)) return null;
+
+  const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
+  if (distance > 3) return null;
+
+  const ownAltitude = Number(gpsAltitudeFt);
+  const targetAltitude = Number(plane.altitude);
+  if (Number.isFinite(ownAltitude) && Number.isFinite(targetAltitude) && Math.abs(targetAltitude - ownAltitude) > 2000) {
+    return null;
+  }
+
+  const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
+  return {
+    plane,
+    distance,
+    relativeBearing: relativeBearingDegrees(bearing)
+  };
+}
+
+function updateProximityAlert() {
+  if (!proximityAlertEl) return;
+  const panelHidden = shell.classList.contains("panel-collapsed");
+  const mobile = window.matchMedia("(max-width: 520px)").matches;
+  if (!gpsActive || !panelHidden || !mobile) {
+    proximityAlertEl.hidden = true;
+    proximityAlertEl.textContent = "";
+    return;
+  }
+
+  const alert = visibleAircraft()
+    .map(proximityCandidate)
+    .filter(Boolean)
+    .sort((a, b) => a.distance - b.distance)[0];
+
+  if (!alert) {
+    proximityAlertEl.hidden = true;
+    proximityAlertEl.textContent = "";
+    return;
+  }
+
+  proximityAlertEl.textContent = `Traffic ${clockDirection(alert.relativeBearing)} O'Clock${altitudeRelation(alert.plane.altitude)}`;
+  proximityAlertEl.hidden = false;
 }
 
 function destinationPoint(lat, lon, bearing, distanceMiles) {
@@ -922,6 +994,7 @@ async function resolveMissingAircraftTypes(nextAircraft) {
   if (!lookups.length) return;
   await Promise.allSettled(lookups);
   renderList();
+  updateProximityAlert();
 }
 
 function updateTrackHistory(nextAircraft) {
@@ -1373,6 +1446,7 @@ async function fetchTraffic({ force = false } = {}) {
   }
 
   renderList();
+  updateProximityAlert();
 }
 
 function renderList() {
@@ -1956,6 +2030,7 @@ function stopGpsTracking() {
   gpsActive = false;
   gpsTrackDegrees = null;
   gpsSpeedKts = 0;
+  gpsAltitudeFt = null;
   compassHeadingDegrees = null;
 }
 
@@ -1979,6 +2054,7 @@ function startGpsTracking() {
   lastGpsTrailAt = 0;
   gpsTrackDegrees = null;
   gpsSpeedKts = 0;
+  gpsAltitudeFt = null;
   statusEl.textContent = "Requesting GPS position...";
   queueCompassHeadingEnable();
 
@@ -1992,7 +2068,9 @@ function startGpsTracking() {
       const shouldRefresh = movedMiles > 0.05 || !lastFetchAt || needsAirspace;
       const speedMps = Number(position.coords.speed);
       const heading = Number(position.coords.heading);
+      const altitudeMeters = Number(position.coords.altitude);
       gpsSpeedKts = Number.isFinite(speedMps) && speedMps >= 0 ? speedMps * 1.94384 : 0;
+      gpsAltitudeFt = Number.isFinite(altitudeMeters) ? altitudeMeters * 3.28084 : null;
       if (Number.isFinite(heading)) {
         gpsTrackDegrees = heading;
       } else if (movedMiles > 0.003) {
@@ -2010,6 +2088,7 @@ function startGpsTracking() {
         gpsTrail = gpsTrail.slice(-120);
         lastGpsTrailAt = now;
       }
+      updateProximityAlert();
 
       if (shouldRefresh) {
         tracks.clear();
@@ -2183,6 +2262,7 @@ function updateCoordinateVisibility() {
 }
 
 window.addEventListener("resize", resizeCanvas);
+window.addEventListener("resize", updateProximityAlert);
 
 const initialCenterApplied = applySelectedAirport();
 updateCoordinateVisibility();

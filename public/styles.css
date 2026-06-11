@@ -83,6 +83,10 @@ select {
   mix-blend-mode: screen;
 }
 
+.proximity-alert {
+  display: none;
+}
+
 .panel {
   display: flex;
   min-width: 0;
@@ -687,6 +691,23 @@ fieldset {
 @media (max-width: 520px) {
   .shell {
     padding: 10px;
+  }
+
+  .shell.panel-collapsed .proximity-alert:not([hidden]) {
+    display: flex;
+    min-height: 48px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255, 207, 106, 0.52);
+    border-radius: 8px;
+    background: rgba(27, 16, 3, 0.86);
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.36), inset 0 0 28px rgba(255, 155, 64, 0.08);
+    color: #ffe59d;
+    font: 900 1rem ui-monospace, SFMono-Regular, Consolas, monospace;
+    letter-spacing: 0.03em;
+    text-align: center;
+    text-transform: uppercase;
+    padding: 10px 12px;
   }
 
   .range-buttons {
