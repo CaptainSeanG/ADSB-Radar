@@ -549,6 +549,16 @@ function playContactBlip() {
     return;
   }
 
+  if (radarSoundStyle === "geigerClick") {
+    playTone({ frequency: 1450, type: "square", duration: 0.014, gain: 0.075, slideTo: 310 });
+    return;
+  }
+
+  if (radarSoundStyle === "lowTick") {
+    playTone({ frequency: 165, type: "triangle", duration: 0.045, gain: 0.12, slideTo: 95 });
+    return;
+  }
+
   if (radarSoundStyle === "glassPing") {
     playTone({ frequency: 1180, type: "sine", duration: 0.11, gain: 0.09, slideTo: 920 });
     return;
@@ -2320,6 +2330,8 @@ radarSoundStyleSelect.addEventListener("change", async () => {
     "tick",
     "softTick",
     "sharpTick",
+    "geigerClick",
+    "lowTick",
     "glassPing",
     "submarine",
     "chirp",
