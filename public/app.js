@@ -680,12 +680,6 @@ function proximityCandidate(plane) {
   const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
   if (distance > 3) return null;
 
-  const ownAltitude = Number(gpsAltitudeFt);
-  const targetAltitude = Number(plane.altitude);
-  if (Number.isFinite(ownAltitude) && Number.isFinite(targetAltitude) && Math.abs(targetAltitude - ownAltitude) > 2000) {
-    return null;
-  }
-
   const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
   return {
     plane,
