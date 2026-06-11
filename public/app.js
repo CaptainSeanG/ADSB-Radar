@@ -277,6 +277,7 @@ let weatherImageKey = "";
 let weatherImageLoading = false;
 let audioCtx = null;
 let audioMaster = null;
+let audioLimiter = null;
 let lastContactSoundAt = 0;
 let audioUnlocked = false;
 
@@ -320,11 +321,18 @@ function ensureAudioContext() {
   if (!audioCtx) {
     audioCtx = new AudioContextClass();
     audioMaster = audioCtx.createGain();
-    audioMaster.gain.value = 0.18;
-    audioMaster.connect(audioCtx.destination);
+    audioLimiter = audioCtx.createDynamicsCompressor();
+    audioMaster.gain.value = 0.42;
+    audioLimiter.threshold.value = -18;
+    audioLimiter.knee.value = 14;
+    audioLimiter.ratio.value = 8;
+    audioLimiter.attack.value = 0.003;
+    audioLimiter.release.value = 0.12;
+    audioMaster.connect(audioLimiter);
+    audioLimiter.connect(audioCtx.destination);
   }
 
-  if (audioCtx.state === "suspended") {
+  if (audioCtx.state !== "running") {
     audioCtx.resume().catch(() => {});
   }
 
@@ -336,7 +344,7 @@ async function unlockRadarAudio() {
   if (!context || !audioMaster) return false;
 
   try {
-    if (context.state === "suspended") {
+    if (context.state !== "running") {
       await context.resume();
     }
   } catch {
@@ -369,6 +377,39 @@ function queueRadarAudioUnlock() {
   window.addEventListener("keydown", retryUnlock, { once: true, passive: true });
   window.addEventListener("pointerdown", retryUnlock, { once: true, passive: true });
   window.addEventListener("touchend", retryUnlock, { once: true, passive: true });
+}
+
+async function resumeRadarAudio({ playTest = false } = {}) {
+  if (!radarSoundsEnabled) return false;
+  const context = ensureAudioContext();
+  if (!context) return false;
+
+  try {
+    if (context.state !== "running") {
+      await context.resume();
+    }
+  } catch {
+    audioUnlocked = false;
+    return false;
+  }
+
+  audioUnlocked = context.state === "running";
+  if (audioUnlocked && playTest) playSweepTick();
+  return audioUnlocked;
+}
+
+function installRadarAudioRecovery() {
+  const resume = () => {
+    resumeRadarAudio();
+  };
+  window.addEventListener("focus", resume);
+  window.addEventListener("pageshow", resume);
+  window.addEventListener("click", resume, { passive: true });
+  window.addEventListener("pointerdown", resume, { passive: true });
+  window.addEventListener("touchend", resume, { passive: true });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) resume();
+  });
 }
 
 function handleDeviceOrientation(event) {
@@ -441,7 +482,10 @@ function playTone({ frequency, type = "sine", duration = 0.05, gain = 0.05, slid
 
   const context = ensureAudioContext();
   if (!context || !audioMaster) return;
-  if (context.state === "suspended") return;
+  if (context.state !== "running") {
+    resumeRadarAudio();
+    return;
+  }
 
   const oscillator = context.createOscillator();
   const envelope = context.createGain();
@@ -464,7 +508,7 @@ function playTone({ frequency, type = "sine", duration = 0.05, gain = 0.05, slid
 }
 
 function playSweepTick() {
-  playTone({ frequency: 180, type: "triangle", duration: 0.035, gain: 0.035, slideTo: 90 });
+  playTone({ frequency: 360, type: "triangle", duration: 0.04, gain: 0.07, slideTo: 460 });
 }
 
 function playContactBlip() {
@@ -474,28 +518,28 @@ function playContactBlip() {
 
   lastContactSoundAt = now;
   if (radarSoundStyle === "submarine") {
-    playTone({ frequency: 620, type: "sine", duration: 0.28, gain: 0.075, slideTo: 900 });
-    playTone({ frequency: 900, type: "sine", duration: 0.18, gain: 0.035, slideTo: 520, delay: 0.16 });
+    playTone({ frequency: 620, type: "sine", duration: 0.28, gain: 0.13, slideTo: 900 });
+    playTone({ frequency: 900, type: "sine", duration: 0.18, gain: 0.065, slideTo: 520, delay: 0.16 });
     return;
   }
 
   if (radarSoundStyle === "chirp") {
-    playTone({ frequency: 740, type: "sawtooth", duration: 0.075, gain: 0.038, slideTo: 1680 });
+    playTone({ frequency: 740, type: "sawtooth", duration: 0.075, gain: 0.075, slideTo: 1680 });
     return;
   }
 
   if (radarSoundStyle === "sonar") {
-    playTone({ frequency: 360, type: "triangle", duration: 0.22, gain: 0.06, slideTo: 780 });
-    playTone({ frequency: 720, type: "sine", duration: 0.18, gain: 0.028, slideTo: 420, delay: 0.18 });
+    playTone({ frequency: 360, type: "triangle", duration: 0.22, gain: 0.11, slideTo: 780 });
+    playTone({ frequency: 720, type: "sine", duration: 0.18, gain: 0.055, slideTo: 420, delay: 0.18 });
     return;
   }
 
   if (radarSoundStyle === "tick") {
-    playTone({ frequency: 240, type: "square", duration: 0.028, gain: 0.045, slideTo: 120 });
+    playTone({ frequency: 620, type: "square", duration: 0.035, gain: 0.095, slideTo: 760 });
     return;
   }
 
-  playTone({ frequency: 920, type: "sine", duration: 0.055, gain: 0.06, slideTo: 1300 });
+  playTone({ frequency: 920, type: "sine", duration: 0.055, gain: 0.11, slideTo: 1300 });
 }
 
 function resizeCanvas() {
@@ -1788,7 +1832,9 @@ function drawTrack(scope, plane, alpha = 1) {
 
 function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   const highlightMix = highlight?.highlightMix || 0;
-  const heading = Number.isFinite(Number(plane.track)) ? ((Number(plane.track) - 90) * Math.PI) / 180 : -Math.PI / 2;
+  const heading = Number.isFinite(Number(plane.track))
+    ? ((Number(plane.track) - radarRotationDegrees() - 90) * Math.PI) / 180
+    : -Math.PI / 2;
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(point.x, point.y);
@@ -2249,6 +2295,7 @@ precipitationToggle.addEventListener("change", () => {
 });
 
 radarSoundStyleSelect.value = radarSoundStyle;
+installRadarAudioRecovery();
 queueRadarAudioUnlock();
 
 radarSoundStyleSelect.addEventListener("change", async () => {
