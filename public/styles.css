@@ -375,6 +375,16 @@ fieldset {
   font-size: 1.15rem;
 }
 
+.settings-header h2 a {
+  color: var(--text);
+  text-decoration-color: rgba(77, 255, 155, 0.65);
+  text-underline-offset: 4px;
+}
+
+.settings-header h2 a:hover {
+  color: var(--green);
+}
+
 .icon-button {
   width: 36px;
   height: 36px;

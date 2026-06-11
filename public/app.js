@@ -133,6 +133,7 @@ const aircraftTypeNames = new Map([
   ["C680", "Cessna Citation Sovereign"],
   ["C700", "Cessna Citation Longitude"],
   ["C750", "Cessna Citation X"],
+  ["CH7B", "Heli-Sport CH-7 Kompress"],
   ["COL4", "Cessna Corvalis TTx"],
   ["CL30", "Bombardier Challenger 300"],
   ["CL35", "Bombardier Challenger 350"],
@@ -158,8 +159,10 @@ const aircraftTypeNames = new Map([
   ["E550", "Embraer Legacy 500 / Praetor 600"],
   ["F2TH", "Dassault Falcon 2000"],
   ["FA50", "Dassault Falcon 50"],
+  ["FA7X", "Dassault Falcon 7X"],
   ["G150", "Gulfstream G150"],
   ["G280", "Gulfstream G280"],
+  ["G12T", "Grob G 120TP"],
   ["GLEX", "Bombardier Global Express"],
   ["GLF4", "Gulfstream IV"],
   ["GLF5", "Gulfstream V"],
@@ -172,12 +175,20 @@ const aircraftTypeNames = new Map([
   ["LJ45", "Learjet 45"],
   ["LJ60", "Learjet 60"],
   ["M20P", "Mooney M20"],
+  ["PA18", "Piper Super Cub"],
+  ["PA24", "Piper Comanche"],
   ["P28A", "Piper Cherokee"],
+  ["PA28A", "Piper Cherokee"],
   ["P28B", "Piper Cherokee"],
+  ["PA28B", "Piper Cherokee"],
   ["P28R", "Piper Arrow"],
+  ["PA28R", "Piper Arrow"],
   ["P28T", "Piper Turbo Arrow"],
+  ["PA28T", "Piper Turbo Arrow"],
   ["P32R", "Piper Saratoga"],
+  ["PA32R", "Piper Saratoga"],
   ["P32T", "Piper Turbo Saratoga"],
+  ["PA32T", "Piper Turbo Saratoga"],
   ["PA27", "Piper Aztec"],
   ["PA30", "Piper Twin Comanche"],
   ["PA31", "Piper Navajo"],
@@ -203,6 +214,7 @@ const aircraftTypeNames = new Map([
   ["B38M", "Boeing 737 MAX 8"],
   ["B39M", "Boeing 737 MAX 9"],
   ["BCS3", "Airbus A220-300"],
+  ["BL17", "Bellanca 17 Viking"],
   ["B752", "Boeing 757-200"],
   ["B763", "Boeing 767-300"],
   ["B772", "Boeing 777-200"],
@@ -702,6 +714,11 @@ function planeLabel(plane) {
 function aircraftType(plane) {
   const type = String(plane.type || plane.resolvedType || "").trim();
   return type.toLowerCase() === "adsb_icao" ? "Pvt" : type;
+}
+
+function faaRegistryUrl(nNumber) {
+  const registration = String(nNumber || "").trim().toUpperCase().replace(/^N/, "");
+  return `https://registry.faa.gov/aircraftinquiry/Search/NNumberResult?nNumberTxt=${encodeURIComponent(registration)}`;
 }
 
 function aircraftTypeCode(plane) {
@@ -1692,7 +1709,7 @@ function drawUserNavigation(scope) {
   }
 
   const heading = Number.isFinite(gpsTrackDegrees) ? gpsTrackDegrees : 0;
-  const headingAngle = screenAngleForBearing(heading);
+  const headingAngle = radarRotationDegrees() ? -Math.PI / 2 : screenAngleForBearing(heading);
   ctx.save();
   ctx.translate(scope.cx, scope.cy);
   ctx.rotate(headingAngle);
@@ -1857,7 +1874,9 @@ function openAircraftDetails(plane) {
   const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
   const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
   const friendlyType = friendlyAircraftType(plane) || "Unknown aircraft type";
-  aircraftTitle.textContent = plane.nNumber ? `Aircraft - ${plane.nNumber}` : "Aircraft";
+  aircraftTitle.innerHTML = plane.nNumber
+    ? `Aircraft - <a href="${faaRegistryUrl(plane.nNumber)}" target="_blank" rel="noopener noreferrer">${escapeHtml(plane.nNumber)}</a>`
+    : "Aircraft";
   aircraftDetail.innerHTML = `
     <div class="detail-title">${escapeHtml(friendlyType)}</div>
     <dl>
