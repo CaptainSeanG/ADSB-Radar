@@ -1287,8 +1287,8 @@ async function fetchTraffic({ force = false } = {}) {
       statusEl.textContent = gpsActive
         ? `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
         : aircraft.length
-          ? `ADS-B active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
-          : `ADS-B active; no aircraft returned for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
+          ? `ADS-B ${lastDataSource} active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
+          : `ADS-B ${lastDataSource} returned no aircraft for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
     }
     resolveMissingAircraftTypes(aircraft);
     pruneRadarBlips(aircraft);

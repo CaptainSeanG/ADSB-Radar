@@ -1,5 +1,9 @@
-const SOURCES = ["https://api.airplanes.live/v2", "https://api.adsb.lol/v2", "https://opendata.adsb.fi/api/v3"];
-const VERSION = "2026-06-10-empty-fallback-worker-v3";
+const SOURCES = [
+  { name: "airplanes.live", base: "https://api.airplanes.live/v2", path: "point" },
+  { name: "adsb.lol", base: "https://api.adsb.lol/v2", path: "latlon" },
+  { name: "adsb.fi", base: "https://opendata.adsb.fi/api/v3", path: "latlon" }
+];
+const VERSION = "2026-06-10-airplanes-live-worker-v4";
 const FRESH_TTL_SECONDS = 7;
 const UPSTREAM_TIMEOUT_MS = 6500;
 const aircraftCache = new Map();
@@ -74,9 +78,12 @@ function aircraft(raw) {
   };
 }
 
-async function fetchUpstream(base, lat, lon, radiusMiles) {
+async function fetchUpstream(source, lat, lon, radiusMiles) {
   const radiusNm = Math.max(1, Math.min(250, nm(radiusMiles))).toFixed(1);
-  const endpoint = `${base}/lat/${lat}/lon/${lon}/dist/${radiusNm}`;
+  const endpoint =
+    source.path === "point"
+      ? `${source.base}/point/${lat}/${lon}/${radiusMiles}`
+      : `${source.base}/lat/${lat}/lon/${lon}/dist/${radiusNm}`;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("timeout"), UPSTREAM_TIMEOUT_MS);
 
@@ -85,10 +92,10 @@ async function fetchUpstream(base, lat, lon, radiusMiles) {
       headers: { accept: "application/json", "user-agent": "ADSB Radar Worker/2.0" },
       signal: controller.signal
     });
-    console.log(`ADS-B upstream ${base} status ${response.status}`);
+    console.log(`ADS-B upstream ${source.name} status ${response.status}`);
 
     if (!response.ok) {
-      return { ok: false, status: response.status, detail: `${base}: HTTP ${response.status}` };
+      return { ok: false, status: response.status, detail: `${source.name}: HTTP ${response.status}` };
     }
 
     const data = await response.json();
@@ -100,15 +107,15 @@ async function fetchUpstream(base, lat, lon, radiusMiles) {
     return {
       ok: true,
       payload: {
-        source: base,
+        source: source.name,
         now: data.now || Date.now() / 1000,
         aircraft: list,
         total: list.length
       }
     };
   } catch (error) {
-    const detail = error?.name === "AbortError" ? `${base}: timeout` : `${base}: ${error?.message || error}`;
-    console.log(`ADS-B upstream ${base} error ${detail}`);
+    const detail = error?.name === "AbortError" ? `${source.name}: timeout` : `${source.name}: ${error?.message || error}`;
+    console.log(`ADS-B upstream ${source.name} error ${detail}`);
     return { ok: false, status: "timeout", detail };
   } finally {
     clearTimeout(timeout);
@@ -129,15 +136,15 @@ async function handleAircraft(url) {
 
   const failures = [];
   let emptyResult = null;
-  for (const base of SOURCES) {
-    const result = await fetchUpstream(base, lat, lon, radiusMiles);
+  for (const source of SOURCES) {
+    const result = await fetchUpstream(source, lat, lon, radiusMiles);
     if (!result.ok) {
       failures.push(result.detail);
       continue;
     }
 
     if (!result.payload.aircraft.length) {
-      failures.push(`${base}: zero aircraft`);
+      failures.push(`${source.name}: zero aircraft`);
       emptyResult = emptyResult || result;
       continue;
     }
