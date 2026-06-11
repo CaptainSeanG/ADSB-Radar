@@ -539,6 +539,21 @@ function playContactBlip() {
     return;
   }
 
+  if (radarSoundStyle === "softTick") {
+    playTone({ frequency: 240, type: "square", duration: 0.028, gain: 0.075, slideTo: 120 });
+    return;
+  }
+
+  if (radarSoundStyle === "sharpTick") {
+    playTone({ frequency: 980, type: "square", duration: 0.022, gain: 0.082, slideTo: 520 });
+    return;
+  }
+
+  if (radarSoundStyle === "glassPing") {
+    playTone({ frequency: 1180, type: "sine", duration: 0.11, gain: 0.09, slideTo: 920 });
+    return;
+  }
+
   playTone({ frequency: 920, type: "sine", duration: 0.055, gain: 0.11, slideTo: 1300 });
 }
 
@@ -2299,7 +2314,17 @@ installRadarAudioRecovery();
 queueRadarAudioUnlock();
 
 radarSoundStyleSelect.addEventListener("change", async () => {
-  const selectedStyle = ["off", "radar", "tick", "submarine", "chirp", "sonar"].includes(radarSoundStyleSelect.value)
+  const selectedStyle = [
+    "off",
+    "radar",
+    "tick",
+    "softTick",
+    "sharpTick",
+    "glassPing",
+    "submarine",
+    "chirp",
+    "sonar"
+  ].includes(radarSoundStyleSelect.value)
     ? radarSoundStyleSelect.value
     : "tick";
   radarSoundsEnabled = selectedStyle !== "off";
