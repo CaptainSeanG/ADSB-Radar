@@ -817,31 +817,51 @@ function formatRangeToTarget(distance) {
   return `${distance.toFixed(distance < 10 ? 1 : 0)} NM`;
 }
 
+function formatClosureRate(closureKts) {
+  if (!Number.isFinite(closureKts)) return "Closure --";
+  if (closureKts <= 0) return "Opening";
+  return `Closure ${Math.round(closureKts)} kt`;
+}
+
 function isAlertDisplayDevice() {
   return window.matchMedia("(max-width: 1180px), (pointer: coarse)").matches;
 }
 
-function isDivergingFromGps(plane, currentDistance) {
+function closureRateKts(plane, currentDistance) {
   const history = tracks.get(aircraftKey(plane)) || [];
-  const previous = history[history.length - 2] || history[history.length - 1];
-  if (!previous) return false;
+  const now = Date.now();
+  const recent = history
+    .filter((sample) => Number.isFinite(sample.at) && now - sample.at <= 90000)
+    .sort((a, b) => a.at - b.at);
+  const reference = recent[0] || history[history.length - 2] || history[history.length - 1];
+  if (!reference?.at) return 0;
 
-  const previousDistance = milesBetween(center.lat, center.lon, previous.lat, previous.lon);
-  return currentDistance > previousDistance + 0.05;
+  const seconds = Math.max(1, (now - reference.at) / 1000);
+  const referenceDistance = milesBetween(center.lat, center.lon, reference.lat, reference.lon);
+  const milesPerHour = ((referenceDistance - currentDistance) / seconds) * 3600;
+  return milesPerHour * 0.868976;
+}
+
+function alertRangeForClosure(closureKts) {
+  if (closureKts > 200) return 3;
+  if (closureKts < 50) return 1;
+  return 2;
 }
 
 function proximityCandidate(plane) {
   if (isGroundTraffic(plane)) return null;
 
   const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
-  const diverging = isDivergingFromGps(plane, distance);
-  if (diverging && distance > 1) return null;
-  if (!diverging && distance > 3) return null;
+  const closureKts = closureRateKts(plane, distance);
+  const diverging = closureKts < -5;
+  const alertRange = alertRangeForClosure(closureKts);
+  if (distance > alertRange) return null;
 
   const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
   return {
     plane,
     distance,
+    closureKts,
     diverging,
     relativeBearing: relativeBearingDegrees(bearing)
   };
@@ -949,6 +969,7 @@ function updateProximityAlert() {
       <span class="traffic-alert-number">${formatRangeToTarget(alert.distance)}</span>
       ${altitudeRelation(alert.plane.altitude)}
       <span class="traffic-alert-number">${formatAltitude(alert.plane.altitude)}</span>
+      <span class="traffic-alert-closure">${formatClosureRate(alert.closureKts)}</span>
     </strong>
     ${muteHint}
   `;

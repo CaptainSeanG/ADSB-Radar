@@ -197,6 +197,15 @@ select {
   text-shadow: 0 0 16px rgba(255, 255, 255, 0.72), 0 0 22px rgba(255, 240, 74, 0.58);
 }
 
+.traffic-alert-closure {
+  display: block;
+  margin-top: 3px;
+  color: #ffffff;
+  font-size: 0.82em;
+  letter-spacing: 0.05em;
+  text-shadow: 0 0 14px rgba(255, 255, 255, 0.48);
+}
+
 .traffic-alert-mute {
   margin-top: 6px;
   color: rgba(255, 255, 190, 0.92);
