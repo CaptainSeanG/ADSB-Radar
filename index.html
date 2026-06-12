@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./public/styles.css?v=20260612-1" />
+    <link rel="stylesheet" href="./public/styles.css?v=20260612-2" />
   </head>
   <body>
     <main class="shell">
@@ -14,6 +14,7 @@
         <button type="button" class="legend-button" id="legendOpen">Legend</button>
         <button type="button" class="wx-range-button" id="wxRangeButton" hidden>10 NM</button>
       </section>
+      <div class="wx-nearest" id="wxNearestTarget" hidden>Range to nearest target --</div>
       <div class="proximity-alert" id="proximityAlert" aria-live="polite" hidden></div>
 
       <aside class="panel" aria-label="Radar controls and aircraft list">
@@ -209,6 +210,6 @@
     </div>
 
     <script src="./public/config.js?v=20260611-1"></script>
-    <script type="module" src="./public/app.js?v=20260612-2"></script>
+    <script type="module" src="./public/app.js?v=20260612-3"></script>
   </body>
 </html>

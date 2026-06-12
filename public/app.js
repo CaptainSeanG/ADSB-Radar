@@ -6,6 +6,7 @@ const form = document.querySelector("#controls");
 const panelToggle = document.querySelector("#panelToggle");
 const wxToggle = document.querySelector("#wxToggle");
 const wxRangeButton = document.querySelector("#wxRangeButton");
+const wxNearestTarget = document.querySelector("#wxNearestTarget");
 const airportSelect = document.querySelector("#airportSelect");
 const coordRow = document.querySelector("#coordRow");
 const latInput = document.querySelector("#lat");
@@ -36,6 +37,7 @@ const proximityAlertEl = document.querySelector("#proximityAlert");
 
 const sweepSeconds = 4.2;
 const wxSweepSeconds = 2.25;
+const wxSectorDegrees = 50;
 const radarFadeMs = sweepSeconds * 3 * 1000;
 const allowedRanges = [2, 5, 10, 15, 20, 50, 100];
 const wxRanges = [2, 5, 10, 20, 50, 100];
@@ -798,6 +800,21 @@ function altitudeRelation(planeAltitude) {
   return difference > 0 ? " High" : " Low";
 }
 
+function relativeAltitudeDetail(planeAltitude) {
+  const ownAltitude = Number(gpsAltitudeFt);
+  const targetAltitude = Number(planeAltitude);
+  if (!Number.isFinite(ownAltitude) || !Number.isFinite(targetAltitude)) return formatAltitude(planeAltitude);
+
+  const difference = targetAltitude - ownAltitude;
+  const rounded = Math.round(Math.abs(difference) / 100) * 100;
+  if (rounded <= 300) return "same altitude";
+  return `${rounded.toLocaleString()} ${difference > 0 ? "above" : "below"}`;
+}
+
+function formatRangeToTarget(distance) {
+  return `${distance.toFixed(distance < 10 ? 1 : 0)} NM`;
+}
+
 function isAlertDisplayDevice() {
   return window.matchMedia("(max-width: 1180px), (pointer: coarse)").matches;
 }
@@ -836,6 +853,38 @@ function clearProximityAlert() {
   proximityAlertSolid = false;
   trafficAlertActive = false;
   updateBottomRangeButton();
+}
+
+function nearestVisibleAircraft() {
+  return visibleAircraft()
+    .map((plane) => ({
+      plane,
+      distance: milesBetween(center.lat, center.lon, plane.lat, plane.lon),
+      bearing: bearingDegrees(center.lat, center.lon, plane.lat, plane.lon)
+    }))
+    .filter((target) => target.distance <= radiusMiles)
+    .sort((a, b) => a.distance - b.distance)[0];
+}
+
+function updateWxNearestTarget() {
+  if (!wxNearestTarget) return;
+
+  if (!weatherMode) {
+    wxNearestTarget.hidden = true;
+    wxNearestTarget.textContent = "";
+    return;
+  }
+
+  const nearest = nearestVisibleAircraft();
+  if (!nearest) {
+    wxNearestTarget.textContent = "Range to nearest target --";
+    wxNearestTarget.hidden = false;
+    return;
+  }
+
+  const relativeBearing = relativeBearingDegrees(nearest.bearing);
+  wxNearestTarget.textContent = `Range to nearest target ${formatRangeToTarget(nearest.distance)} ${clockDirection(relativeBearing)} O'Clock, ${relativeAltitudeDetail(nearest.plane.altitude)}`;
+  wxNearestTarget.hidden = false;
 }
 
 function highlightProximityTarget(alert) {
@@ -884,7 +933,7 @@ function updateProximityAlert() {
   updateBottomRangeButton();
   highlightProximityTarget(alert);
   playTrafficAlertPing(alert);
-  proximityAlertEl.textContent = `Traffic ${clockDirection(alert.relativeBearing)} O'Clock${altitudeRelation(alert.plane.altitude)} ${formatAltitude(alert.plane.altitude)}`;
+  proximityAlertEl.textContent = `Traffic ${clockDirection(alert.relativeBearing)} O'Clock ${formatRangeToTarget(alert.distance)}${altitudeRelation(alert.plane.altitude)} ${formatAltitude(alert.plane.altitude)}`;
   proximityAlertEl.classList.toggle("diverging", alert.diverging);
   proximityAlertEl.classList.toggle("solid", proximityAlertSolid);
   proximityAlertEl.hidden = false;
@@ -2279,8 +2328,8 @@ function drawSweep(scope, angle) {
 function weatherSectorAngles() {
   const forward = weatherForwardBearing();
   return {
-    left: screenAngleForBearing(forward - 75),
-    right: screenAngleForBearing(forward + 75)
+    left: screenAngleForBearing(forward - wxSectorDegrees),
+    right: screenAngleForBearing(forward + wxSectorDegrees)
   };
 }
 
@@ -2308,9 +2357,8 @@ function weatherForwardBearing() {
 }
 
 function weatherSectorSweepBearing(progress) {
-  const sweepWidth = 75;
   const triangle = progress < 0.5 ? progress * 4 - 1 : 3 - progress * 4;
-  return normalizedDegrees(weatherForwardBearing() + triangle * sweepWidth);
+  return normalizedDegrees(weatherForwardBearing() + triangle * wxSectorDegrees);
 }
 
 function drawWeatherSector(scope, sweepBearing) {
@@ -2449,6 +2497,7 @@ function render(now) {
   }
   if (showRadarData) drawHud(scope);
   updateProximityAlert();
+  updateWxNearestTarget();
 
   requestAnimationFrame(render);
 }
@@ -2484,12 +2533,14 @@ function updateBottomRangeButton() {
 
 function setWeatherMode(enabled) {
   weatherMode = Boolean(enabled);
+  shell.classList.toggle("wx-mode", weatherMode);
   if (wxToggle) {
     wxToggle.classList.toggle("active", weatherMode);
     wxToggle.setAttribute("aria-pressed", String(weatherMode));
     wxToggle.setAttribute("aria-label", weatherMode ? "Return to radar mode" : "Weather mode");
   }
   updateBottomRangeButton();
+  updateWxNearestTarget();
   previousSweepAngle = null;
 }
 
