@@ -1,12 +1,17 @@
 import dgram from "node:dgram";
 import { createServer } from "node:http";
+import os from "node:os";
 
 const httpPort = Number(process.env.STRATUS_BRIDGE_HTTP_PORT || 8787);
-const udpPort = Number(process.env.STRATUS_GDL90_PORT || 4000);
+const udpPorts = String(process.env.STRATUS_GDL90_PORTS || process.env.STRATUS_GDL90_PORT || "4000,4001,43211")
+  .split(",")
+  .map((value) => Number(value.trim()))
+  .filter((value, index, values) => Number.isInteger(value) && value > 0 && value < 65536 && values.indexOf(value) === index);
 const staleAfterMs = Number(process.env.STRATUS_STALE_MS || 30000);
 const maxTrafficAgeMs = Number(process.env.STRATUS_MAX_TRAFFIC_AGE_MS || 90000);
 
 const traffic = new Map();
+const portStats = new Map(udpPorts.map((port) => [port, { packetCount: 0, byteCount: 0, lastPacketAt: 0 }]));
 let packetCount = 0;
 let frameCount = 0;
 let trafficFrameCount = 0;
@@ -170,22 +175,49 @@ function aircraftPayload() {
   };
 }
 
-const udp = dgram.createSocket({ type: "udp4", reuseAddr: true });
+function networkInterfaces() {
+  return Object.entries(os.networkInterfaces())
+    .flatMap(([name, addresses]) =>
+      (addresses || [])
+        .filter((address) => address.family === "IPv4" && !address.internal)
+        .map((address) => ({
+          name,
+          address: address.address,
+          netmask: address.netmask
+        }))
+    );
+}
 
-udp.on("message", (packet) => {
+function handlePacket(packet, port) {
   packetCount += 1;
   lastPacketAt = Date.now();
+  const stats = portStats.get(port);
+  if (stats) {
+    stats.packetCount += 1;
+    stats.byteCount += packet.length;
+    stats.lastPacketAt = lastPacketAt;
+  }
   parsePacket(packet);
-});
+}
 
-udp.on("error", (error) => {
-  console.error("Stratus UDP listener error:", error);
-});
+function bindUdpPort(port) {
+  const udp = dgram.createSocket({ type: "udp4", reuseAddr: true });
 
-udp.bind(udpPort, "0.0.0.0", () => {
-  udp.setBroadcast(true);
-  console.log(`Listening for Stratus/GDL90 UDP on 0.0.0.0:${udpPort}`);
-});
+  udp.on("message", (packet) => {
+    handlePacket(packet, port);
+  });
+
+  udp.on("error", (error) => {
+    console.error(`Stratus UDP listener error on ${port}:`, error);
+  });
+
+  udp.bind(port, "0.0.0.0", () => {
+    udp.setBroadcast(true);
+    console.log(`Listening for Stratus/GDL90 UDP on 0.0.0.0:${port}`);
+  });
+}
+
+udpPorts.forEach(bindUdpPort);
 
 createServer((req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
@@ -199,7 +231,7 @@ createServer((req, res) => {
     json(res, 200, {
       ok: true,
       source: "Stratus",
-      udpPort,
+      udpPorts,
       httpPort,
       packetCount,
       frameCount,
@@ -208,7 +240,17 @@ createServer((req, res) => {
       decodeErrors,
       trafficCount: traffic.size,
       lastPacketAgeSeconds: lastPacketAt ? Math.round((Date.now() - lastPacketAt) / 1000) : null,
-      lastFrameAgeSeconds: lastFrameAt ? Math.round((Date.now() - lastFrameAt) / 1000) : null
+      lastFrameAgeSeconds: lastFrameAt ? Math.round((Date.now() - lastFrameAt) / 1000) : null,
+      portStats: Object.fromEntries(
+        Array.from(portStats.entries()).map(([port, stats]) => [
+          port,
+          {
+            ...stats,
+            lastPacketAgeSeconds: stats.lastPacketAt ? Math.round((Date.now() - stats.lastPacketAt) / 1000) : null
+          }
+        ])
+      ),
+      networkInterfaces: networkInterfaces()
     });
     return;
   }

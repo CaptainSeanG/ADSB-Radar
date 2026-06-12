@@ -111,7 +111,7 @@ A normal browser page cannot listen directly to Stratus WiFi/UDP traffic, so the
 
 ## Stratus Bridge
 
-The repo includes a first-pass Stratus bridge at `stratus-bridge.js`. It listens for GDL90 traffic on UDP port `4000` and exposes the radar-compatible aircraft endpoint on HTTP port `8787`.
+The repo includes a first-pass Stratus bridge at `stratus-bridge.js`. It listens for GDL90 traffic on common UDP ports `4000`, `4001`, and `43211`, then exposes the radar-compatible aircraft endpoint on HTTP port `8787`.
 
 Run it while connected to the Stratus WiFi:
 
@@ -125,7 +125,7 @@ Then open the health page:
 http://127.0.0.1:8787/health
 ```
 
-If `packetCount` increases, the laptop is hearing the Stratus. If `trafficCount` increases, the bridge is decoding traffic reports.
+If `packetCount` increases, the laptop is hearing the Stratus. If `trafficCount` increases, the bridge is decoding traffic reports. The `portStats` object shows which UDP port is receiving packets.
 
 Point the radar at it with:
 
@@ -138,7 +138,7 @@ On another device, replace `127.0.0.1` with the laptop or Raspberry Pi IP addres
 Optional ports:
 
 ```powershell
-$env:STRATUS_GDL90_PORT=4000
+$env:STRATUS_GDL90_PORTS="4000,4001,43211"
 $env:STRATUS_BRIDGE_HTTP_PORT=8787
 npm run stratus
 ```
