@@ -4,6 +4,7 @@ const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
 const form = document.querySelector("#controls");
 const panelToggle = document.querySelector("#panelToggle");
+const radarModeToggle = document.querySelector("#radarModeToggle");
 const wxToggle = document.querySelector("#wxToggle");
 const wxRangeButton = document.querySelector("#wxRangeButton");
 const wxNearestTarget = document.querySelector("#wxNearestTarget");
@@ -22,7 +23,6 @@ const legendModal = document.querySelector("#legendModal");
 const groundTrafficToggle = document.querySelector("#groundTrafficToggle");
 const flightLevelsToggle = document.querySelector("#flightLevelsToggle");
 const radarDataToggle = document.querySelector("#radarDataToggle");
-const precipitationToggle = document.querySelector("#precipitationToggle");
 const radarSoundStyleSelect = document.querySelector("#radarSoundStyle");
 const orientationModeSelect = document.querySelector("#orientationMode");
 const sweepColorToggle = document.querySelector("#sweepColorToggle");
@@ -2534,14 +2534,25 @@ function updateBottomRangeButton() {
 function setWeatherMode(enabled) {
   weatherMode = Boolean(enabled);
   shell.classList.toggle("wx-mode", weatherMode);
-  if (wxToggle) {
-    wxToggle.classList.toggle("active", weatherMode);
-    wxToggle.setAttribute("aria-pressed", String(weatherMode));
-    wxToggle.setAttribute("aria-label", weatherMode ? "Return to radar mode" : "Weather mode");
+  if (radarModeToggle) {
+    radarModeToggle.classList.toggle("active", weatherMode);
+    radarModeToggle.textContent = weatherMode ? "360" : "ARC";
+    radarModeToggle.setAttribute("aria-pressed", String(weatherMode));
+    radarModeToggle.setAttribute("aria-label", weatherMode ? "Full circle radar mode" : "Forward radar mode");
   }
   updateBottomRangeButton();
   updateWxNearestTarget();
   previousSweepAngle = null;
+}
+
+function setPrecipitationLayer(enabled) {
+  showPrecipitation = Boolean(enabled);
+  if (wxToggle) {
+    wxToggle.classList.toggle("active", showPrecipitation);
+    wxToggle.setAttribute("aria-pressed", String(showPrecipitation));
+    wxToggle.setAttribute("aria-label", showPrecipitation ? "Hide precipitation layer" : "Show precipitation layer");
+  }
+  if (showPrecipitation) ensureWeatherImage();
 }
 
 rangeButtons.addEventListener("click", (event) => {
@@ -2552,7 +2563,7 @@ rangeButtons.addEventListener("click", (event) => {
   fetchTraffic({ force: true });
 });
 
-wxToggle?.addEventListener("click", () => {
+radarModeToggle?.addEventListener("click", () => {
   if (!weatherMode) {
     previousRangeBeforeWx = radiusMiles;
     if (!wxRanges.includes(radiusMiles)) setRange(10);
@@ -2561,6 +2572,10 @@ wxToggle?.addEventListener("click", () => {
   }
   setWeatherMode(!weatherMode);
   fetchTraffic({ force: true });
+});
+
+wxToggle?.addEventListener("click", () => {
+  setPrecipitationLayer(!showPrecipitation);
 });
 
 wxRangeButton?.addEventListener("click", () => {
@@ -2783,12 +2798,9 @@ radarDataToggle.addEventListener("change", () => {
   showRadarData = radarDataToggle.checked;
 });
 
-precipitationToggle.addEventListener("change", () => {
-  showPrecipitation = precipitationToggle.checked;
-  if (showPrecipitation) ensureWeatherImage();
-});
-
 radarSoundStyleSelect.value = radarSoundStyle;
+setWeatherMode(false);
+setPrecipitationLayer(showPrecipitation);
 installRadarAudioRecovery();
 queueRadarAudioUnlock();
 

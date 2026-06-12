@@ -262,10 +262,10 @@ select {
   left: 12px;
 }
 
+.radar-mode-toggle,
 .wx-toggle {
   position: absolute;
   z-index: 4;
-  top: 74px;
   right: 32px;
   width: 34px;
   height: 34px;
@@ -281,6 +281,16 @@ select {
   transition: right 220ms ease, background 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
+.radar-mode-toggle {
+  top: 74px;
+}
+
+.wx-toggle {
+  top: 116px;
+}
+
+.radar-mode-toggle:hover,
+.radar-mode-toggle.active,
 .wx-toggle:hover,
 .wx-toggle.active {
   border-color: var(--amber);
@@ -288,6 +298,7 @@ select {
   color: var(--amber);
 }
 
+.shell.panel-collapsed .radar-mode-toggle,
 .shell.panel-collapsed .wx-toggle {
   right: 28px;
 }
@@ -960,10 +971,17 @@ fieldset {
     order: -1;
   }
 
+  .radar-mode-toggle,
+  .shell.panel-collapsed .radar-mode-toggle {
+    position: fixed;
+    top: 58px;
+    right: 16px;
+  }
+
   .wx-toggle,
   .shell.panel-collapsed .wx-toggle {
     position: fixed;
-    top: 58px;
+    top: 100px;
     right: 16px;
   }
 }
