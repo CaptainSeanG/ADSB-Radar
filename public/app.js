@@ -941,8 +941,17 @@ function updateProximityAlert() {
   updateBottomRangeButton();
   highlightProximityTarget(alert);
   playTrafficAlertPing(alert);
-  const muteHint = proximityAlertAudioLevel === 0.5 ? `<span>Tap to mute</span>` : "";
-  proximityAlertEl.innerHTML = `<strong>Traffic ${clockDirection(alert.relativeBearing)} O'Clock ${formatRangeToTarget(alert.distance)}${altitudeRelation(alert.plane.altitude)} ${formatAltitude(alert.plane.altitude)}</strong>${muteHint}`;
+  const muteHint = proximityAlertAudioLevel === 0.5 ? `<span class="traffic-alert-mute">Tap to mute</span>` : "";
+  proximityAlertEl.innerHTML = `
+    <strong class="traffic-alert-main">
+      Traffic
+      <span class="traffic-alert-number">${clockDirection(alert.relativeBearing)}</span> O'Clock
+      <span class="traffic-alert-number">${formatRangeToTarget(alert.distance)}</span>
+      ${altitudeRelation(alert.plane.altitude)}
+      <span class="traffic-alert-number">${formatAltitude(alert.plane.altitude)}</span>
+    </strong>
+    ${muteHint}
+  `;
   proximityAlertEl.classList.toggle("diverging", alert.diverging);
   proximityAlertEl.classList.toggle("solid", proximityAlertSolid);
   proximityAlertEl.hidden = false;
@@ -2769,8 +2778,8 @@ proximityAlertEl?.addEventListener("click", () => {
   proximityAlertSolid = true;
   proximityAlertAudioLevel = proximityAlertAudioLevel === 1 ? 0.5 : 0;
   proximityAlertEl.classList.add("solid");
-  if (proximityAlertAudioLevel === 0.5 && !proximityAlertEl.querySelector("span")) {
-    proximityAlertEl.insertAdjacentHTML("beforeend", "<span>Tap to mute</span>");
+  if (proximityAlertAudioLevel === 0.5 && !proximityAlertEl.querySelector(".traffic-alert-mute")) {
+    proximityAlertEl.insertAdjacentHTML("beforeend", `<span class="traffic-alert-mute">Tap to mute</span>`);
   }
 });
 
