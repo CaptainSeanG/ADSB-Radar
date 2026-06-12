@@ -46,7 +46,7 @@ function signed12(value) {
   return value & 0x800 ? value - 0x1000 : value;
 }
 
-function decodeCallsign(buffer, offset = 18, length = 8) {
+function decodeCallsign(buffer, offset = 19, length = 8) {
   return buffer
     .subarray(offset, offset + length)
     .toString("ascii")
@@ -62,9 +62,10 @@ function decodeTrafficReport(frame) {
   const lon = decodeCoordinate(frame, 8);
   const rawAltitude = ((frame[11] << 4) | (frame[12] >> 4)) & 0xfff;
   const altitude = rawAltitude === 0xfff ? null : rawAltitude * 25 - 1000;
-  const speed = ((frame[13] << 4) | (frame[14] >> 4)) & 0xfff;
-  const track = Math.round((frame[16] * 360) / 256);
-  const verticalRateRaw = ((frame[14] & 0x0f) << 8) | frame[15];
+  // Byte 13 contains NIC/NACp metadata; velocity starts at byte 14 in GDL90 traffic reports.
+  const speed = ((frame[14] << 4) | (frame[15] >> 4)) & 0xfff;
+  const track = Math.round((frame[17] * 360) / 256);
+  const verticalRateRaw = ((frame[15] & 0x0f) << 8) | frame[16];
   const verticalRate = verticalRateRaw === 0x800 ? null : signed12(verticalRateRaw) * 64;
   const callsign = decodeCallsign(frame);
 
