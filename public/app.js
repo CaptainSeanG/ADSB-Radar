@@ -1345,10 +1345,15 @@ async function fetchAircraftFeed(baseUrl, { displaySource, timeoutMs = 6500 } = 
 async function fetchPreferredAircraftFeed() {
   if (stratusBridgeBaseUrl) {
     try {
-      return await fetchAircraftFeed(stratusBridgeBaseUrl, {
+      const stratusData = await fetchAircraftFeed(stratusBridgeBaseUrl, {
         displaySource: "Stratus",
         timeoutMs: 1600
       });
+      if (stratusData.stale) {
+        const age = Number.isFinite(Number(stratusData.ageSeconds)) ? `${Math.round(Number(stratusData.ageSeconds))}s old` : "not receiving packets";
+        throw new Error(`Stratus bridge is stale (${age})`);
+      }
+      return stratusData;
     } catch (error) {
       console.warn("Stratus traffic source unavailable; falling back to cellular source", error);
     }
