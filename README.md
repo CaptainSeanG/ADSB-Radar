@@ -113,6 +113,8 @@ A normal browser page cannot listen directly to Stratus WiFi/UDP traffic, so the
 
 The repo includes a first-pass Stratus bridge at `stratus-bridge.js`. It listens for GDL90 traffic on common UDP ports `4000`, `4001`, and `43211`, then exposes the radar-compatible aircraft endpoint on HTTP port `8787`.
 
+For Raspberry Pi Zero 2 W setup, see `pi/README.md`.
+
 Run it while connected to the Stratus WiFi:
 
 ```powershell
