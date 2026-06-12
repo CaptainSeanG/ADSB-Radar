@@ -108,3 +108,37 @@ https://captainseang.github.io/ADSB-Radar/?stratus=http://127.0.0.1:8787
 When the bridge responds, the app labels traffic source as `Stratus`. If it does not respond, the radar falls back to the Worker and labels traffic source as `Cellular`.
 
 A normal browser page cannot listen directly to Stratus WiFi/UDP traffic, so the Stratus bridge must run locally on the laptop or Raspberry Pi and expose compatible `/api/aircraft` JSON.
+
+## Stratus Bridge
+
+The repo includes a first-pass Stratus bridge at `stratus-bridge.js`. It listens for GDL90 traffic on UDP port `4000` and exposes the radar-compatible aircraft endpoint on HTTP port `8787`.
+
+Run it while connected to the Stratus WiFi:
+
+```powershell
+npm run stratus
+```
+
+Then open the health page:
+
+```text
+http://127.0.0.1:8787/health
+```
+
+If `packetCount` increases, the laptop is hearing the Stratus. If `trafficCount` increases, the bridge is decoding traffic reports.
+
+Point the radar at it with:
+
+```text
+https://captainseang.github.io/ADSB-Radar/?stratus=http://127.0.0.1:8787
+```
+
+On another device, replace `127.0.0.1` with the laptop or Raspberry Pi IP address on the same network.
+
+Optional ports:
+
+```powershell
+$env:STRATUS_GDL90_PORT=4000
+$env:STRATUS_BRIDGE_HTTP_PORT=8787
+npm run stratus
+```
