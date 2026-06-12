@@ -371,7 +371,7 @@ select {
   grid-template-areas:
     "label label"
     "data altitude";
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: center;
   gap: 1px 10px;
   border: 1px solid rgba(255, 207, 106, 0.32);
@@ -401,7 +401,7 @@ select {
   font-size: clamp(1.38rem, 3vw, 2.05rem);
   font-weight: 950;
   line-height: 0.86;
-  text-align: right;
+  text-align: center;
 }
 
 .wx-nearest-altitude {
@@ -410,6 +410,7 @@ select {
   font-size: clamp(0.98rem, 1.8vw, 1.25rem);
   font-weight: 900;
   line-height: 0.92;
+  text-align: center;
   white-space: nowrap;
 }
 

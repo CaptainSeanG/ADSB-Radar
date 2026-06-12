@@ -820,7 +820,7 @@ function formatRangeToTarget(distance) {
 function formatClosureRate(closureKts) {
   if (!Number.isFinite(closureKts)) return "Closure --";
   if (closureKts <= 0) return "Opening";
-  return `Closure ${Math.round(closureKts)} kt`;
+  return `Closure ${Math.round(closureKts / 20) * 20} kt`;
 }
 
 function isAlertDisplayDevice() {
@@ -2425,6 +2425,29 @@ function drawWeatherSector(scope, sweepBearing) {
     ctx.stroke();
   }
   ctx.setLineDash([]);
+
+  ctx.strokeStyle = "rgba(233, 255, 243, 0.62)";
+  ctx.fillStyle = "rgba(233, 255, 243, 0.78)";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = "850 12px ui-monospace, SFMono-Regular, Consolas, monospace";
+  for (let offset = -wxSectorDegrees; offset <= wxSectorDegrees; offset += 5) {
+    const angle = screenAngleForBearing(weatherForwardBearing() + offset);
+    const labeled = offset % 10 === 0;
+    const inner = scope.radius - (labeled ? 15 : 8);
+    const outer = scope.radius;
+    ctx.lineWidth = labeled ? 1.8 : 1;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(angle) * inner, Math.sin(angle) * inner);
+    ctx.lineTo(Math.cos(angle) * outer, Math.sin(angle) * outer);
+    ctx.stroke();
+
+    if (labeled) {
+      const labelRadius = scope.radius + 18;
+      const label = offset === 0 ? "0" : `${Math.abs(offset)}`;
+      ctx.fillText(label, Math.cos(angle) * labelRadius, Math.sin(angle) * labelRadius);
+    }
+  }
 
   ctx.strokeStyle = "rgba(255, 207, 106, 0.48)";
   ctx.lineWidth = 1.1;
