@@ -38,7 +38,7 @@ const sweepSeconds = 4.2;
 const wxSweepSeconds = 2.25;
 const radarFadeMs = sweepSeconds * 3 * 1000;
 const allowedRanges = [2, 5, 10, 15, 20, 50, 100];
-const wxRanges = [5, 10, 20, 50, 100];
+const wxRanges = [2, 5, 10, 20, 50, 100];
 const sweepPalettes = {
   green: {
     trail: "77, 255, 155",
@@ -305,6 +305,7 @@ let audioUnlocked = false;
 let proximityAlertKey = "";
 let proximityAlertSolid = false;
 let proximityHighlightLastAt = 0;
+let trafficAlertActive = false;
 
 function scheduleAircraftHighlight(key, { delayMs = 1000, durationMs = 10000 } = {}) {
   if (!key) return;
@@ -833,6 +834,8 @@ function clearProximityAlert() {
   proximityAlertEl.classList.remove("diverging", "solid");
   proximityAlertKey = "";
   proximityAlertSolid = false;
+  trafficAlertActive = false;
+  updateBottomRangeButton();
 }
 
 function highlightProximityTarget(alert) {
@@ -868,7 +871,17 @@ function updateProximityAlert() {
     return;
   }
 
-  if (weatherMode) setWeatherMode(false);
+  const alertKey = aircraftKey(alert.plane);
+  if (alertKey !== proximityAlertKey) {
+    if (weatherMode) setWeatherMode(false);
+    if (radiusMiles !== 5) {
+      setRange(5);
+      fetchAirspace();
+      fetchTraffic({ force: true });
+    }
+  }
+  trafficAlertActive = true;
+  updateBottomRangeButton();
   highlightProximityTarget(alert);
   playTrafficAlertPing(alert);
   proximityAlertEl.textContent = `Traffic ${clockDirection(alert.relativeBearing)} O'Clock${altitudeRelation(alert.plane.altitude)} ${formatAltitude(alert.plane.altitude)}`;
@@ -928,6 +941,29 @@ function project(lat, lon, scope) {
     y: scope.cy + Math.sin(angle) * radius,
     distance,
     bearing
+  };
+}
+
+function radarScope(width, height) {
+  return {
+    width,
+    height,
+    cx: width / 2,
+    cy: height / 2,
+    radius: Math.max(80, Math.min(width, height) * 0.43)
+  };
+}
+
+function weatherScope(width, height) {
+  const framePad = Math.max(22, Math.min(width, height) * 0.035);
+  const cy = height - framePad - 18;
+  const radius = Math.max(120, Math.min(width * 0.64, height * 0.9));
+  return {
+    width,
+    height,
+    cx: width / 2,
+    cy,
+    radius
   };
 }
 
@@ -2240,6 +2276,31 @@ function drawSweep(scope, angle) {
   ctx.restore();
 }
 
+function weatherSectorAngles() {
+  const forward = weatherForwardBearing();
+  return {
+    left: screenAngleForBearing(forward - 75),
+    right: screenAngleForBearing(forward + 75)
+  };
+}
+
+function weatherSectorPath(scope) {
+  const { left, right } = weatherSectorAngles();
+  ctx.beginPath();
+  ctx.moveTo(scope.cx, scope.cy);
+  ctx.lineTo(scope.cx + Math.cos(left) * scope.radius, scope.cy + Math.sin(left) * scope.radius);
+  ctx.arc(scope.cx, scope.cy, scope.radius, left, right, false);
+  ctx.closePath();
+}
+
+function withWeatherSectorClip(scope, draw) {
+  ctx.save();
+  weatherSectorPath(scope);
+  ctx.clip();
+  draw();
+  ctx.restore();
+}
+
 function weatherForwardBearing() {
   if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= 0.8) return gpsTrackDegrees;
   if (Number.isFinite(compassHeadingDegrees)) return compassHeadingDegrees;
@@ -2253,16 +2314,14 @@ function weatherSectorSweepBearing(progress) {
 }
 
 function drawWeatherSector(scope, sweepBearing) {
-  const forward = weatherForwardBearing();
-  const leftAngle = screenAngleForBearing(forward - 75);
-  const rightAngle = screenAngleForBearing(forward + 75);
+  const { left: leftAngle, right: rightAngle } = weatherSectorAngles();
   const sweepAngle = screenAngleForBearing(sweepBearing);
   const palette = sweepPalettes[sweepColor] || sweepPalettes.green;
 
   ctx.save();
   ctx.translate(scope.cx, scope.cy);
 
-  ctx.strokeStyle = "rgba(233, 255, 243, 0.78)";
+  ctx.strokeStyle = "rgba(233, 255, 243, 0.82)";
   ctx.lineWidth = 2;
   for (const angle of [leftAngle, rightAngle]) {
     ctx.beginPath();
@@ -2271,7 +2330,7 @@ function drawWeatherSector(scope, sweepBearing) {
     ctx.stroke();
   }
 
-  ctx.strokeStyle = "rgba(233, 255, 243, 0.32)";
+  ctx.strokeStyle = "rgba(233, 255, 243, 0.34)";
   ctx.setLineDash([2, 10]);
   for (const fraction of [0.25, 0.5, 0.75, 1]) {
     ctx.beginPath();
@@ -2280,7 +2339,18 @@ function drawWeatherSector(scope, sweepBearing) {
   }
   ctx.setLineDash([]);
 
-  const labelValues = [5, 10, 20, 50, 100].filter((value) => value <= radiusMiles);
+  ctx.strokeStyle = "rgba(255, 207, 106, 0.48)";
+  ctx.lineWidth = 1.1;
+  for (let offset = -60; offset <= 60; offset += 30) {
+    if (offset === -60 || offset === 60) continue;
+    const angle = screenAngleForBearing(weatherForwardBearing() + offset);
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(angle) * scope.radius * 0.08, Math.sin(angle) * scope.radius * 0.08);
+    ctx.lineTo(Math.cos(angle) * scope.radius, Math.sin(angle) * scope.radius);
+    ctx.stroke();
+  }
+
+  const labelValues = [2, 5, 10, 20, 50, 100].filter((value) => value <= radiusMiles);
   ctx.fillStyle = "rgba(233, 255, 243, 0.74)";
   ctx.font = "800 11px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.textAlign = "left";
@@ -2292,7 +2362,7 @@ function drawWeatherSector(scope, sweepBearing) {
     ctx.fillText(`${value}`, x, y);
   }
 
-  for (let index = 0; index < 20; index += 1) {
+  for (let index = 0; index < 22; index += 1) {
     const progress = index / 20;
     const segmentAngle = sweepAngle - progress * 0.52;
     const alpha = (1 - progress) ** 2 * 0.24;
@@ -2327,13 +2397,7 @@ function drawHud(scope) {
 function render(now) {
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
-  const scope = {
-    width,
-    height,
-    cx: width / 2,
-    cy: height / 2,
-    radius: Math.max(80, Math.min(width, height) * 0.43)
-  };
+  const scope = weatherMode ? weatherScope(width, height) : radarScope(width, height);
 
   const sweepProgress = ((now / 1000) % sweepSeconds) / sweepSeconds;
   const sweepBucket = Math.floor(now / (sweepSeconds * 1000));
@@ -2365,14 +2429,24 @@ function render(now) {
   if (weatherMode) updateRadarBlipsForWeatherSweep(wxAngle);
   else updateRadarBlipsForSweep(angle);
   prepareAircraftLabels(scope, Date.now());
-  drawGrid(scope);
-  drawPrecipitation(scope);
-  drawAirspace(scope);
-  drawAirports(scope);
-  drawAircraft(scope);
-  drawUserNavigation(scope);
-  if (weatherMode) drawWeatherSector(scope, wxSweepBearing);
-  else drawSweep(scope, angle);
+  if (weatherMode) {
+    withWeatherSectorClip(scope, () => {
+      drawPrecipitation(scope);
+      drawAirspace(scope);
+      drawAirports(scope);
+      drawAircraft(scope);
+      drawUserNavigation(scope);
+    });
+    drawWeatherSector(scope, wxSweepBearing);
+  } else {
+    drawGrid(scope);
+    drawPrecipitation(scope);
+    drawAirspace(scope);
+    drawAirports(scope);
+    drawAircraft(scope);
+    drawUserNavigation(scope);
+    drawSweep(scope, angle);
+  }
   if (showRadarData) drawHud(scope);
   updateProximityAlert();
 
@@ -2385,7 +2459,27 @@ function setRange(nextRange) {
   for (const button of rangeButtons.querySelectorAll("button")) {
     button.classList.toggle("active", Number(button.dataset.range) === radiusMiles);
   }
-  if (wxRangeButton) wxRangeButton.textContent = `${radiusMiles} NM`;
+  updateBottomRangeButton();
+}
+
+function updateBottomRangeButton() {
+  if (!wxRangeButton) return;
+
+  if (weatherMode) {
+    wxRangeButton.hidden = false;
+    wxRangeButton.textContent = `${radiusMiles} NM`;
+    wxRangeButton.setAttribute("aria-label", "Change weather radar range");
+    return;
+  }
+
+  if (trafficAlertActive) {
+    wxRangeButton.hidden = false;
+    wxRangeButton.textContent = radiusMiles === 2 ? "5 NM" : "2 NM";
+    wxRangeButton.setAttribute("aria-label", "Change traffic alert range");
+    return;
+  }
+
+  wxRangeButton.hidden = true;
 }
 
 function setWeatherMode(enabled) {
@@ -2395,7 +2489,7 @@ function setWeatherMode(enabled) {
     wxToggle.setAttribute("aria-pressed", String(weatherMode));
     wxToggle.setAttribute("aria-label", weatherMode ? "Return to radar mode" : "Weather mode");
   }
-  if (wxRangeButton) wxRangeButton.hidden = !weatherMode;
+  updateBottomRangeButton();
   previousSweepAngle = null;
 }
 
@@ -2419,6 +2513,14 @@ wxToggle?.addEventListener("click", () => {
 });
 
 wxRangeButton?.addEventListener("click", () => {
+  if (!weatherMode) {
+    const nextRange = radiusMiles === 2 ? 5 : 2;
+    setRange(nextRange);
+    fetchAirspace();
+    fetchTraffic({ force: true });
+    return;
+  }
+
   const currentIndex = wxRanges.indexOf(radiusMiles);
   const nextRange = wxRanges[(currentIndex + 1) % wxRanges.length] || 5;
   setRange(nextRange);
