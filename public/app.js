@@ -4,6 +4,8 @@ const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
 const form = document.querySelector("#controls");
 const panelToggle = document.querySelector("#panelToggle");
+const wxToggle = document.querySelector("#wxToggle");
+const wxRangeButton = document.querySelector("#wxRangeButton");
 const airportSelect = document.querySelector("#airportSelect");
 const coordRow = document.querySelector("#coordRow");
 const latInput = document.querySelector("#lat");
@@ -33,8 +35,10 @@ const aircraftListEl = document.querySelector("#aircraftList");
 const proximityAlertEl = document.querySelector("#proximityAlert");
 
 const sweepSeconds = 4.2;
+const wxSweepSeconds = 2.25;
 const radarFadeMs = sweepSeconds * 3 * 1000;
 const allowedRanges = [2, 5, 10, 15, 20, 50, 100];
+const wxRanges = [5, 10, 20, 50, 100];
 const sweepPalettes = {
   green: {
     trail: "77, 255, 155",
@@ -257,11 +261,14 @@ let showPrecipitation = false;
 let radarSoundsEnabled = true;
 let radarSoundStyle = "softTick";
 let orientationMode = "north";
+let weatherMode = false;
+let previousRangeBeforeWx = 10;
 let aircraft = [];
 let airports = [];
 let airspaces = [];
 let running = true;
 let lastSweepBucket = -1;
+let lastWxSweepBucket = -1;
 let previousSweepAngle = null;
 let lastFetchAt = 0;
 let lastDataSource = "standby";
@@ -293,14 +300,18 @@ let audioCtx = null;
 let audioMaster = null;
 let audioLimiter = null;
 let lastContactSoundAt = 0;
+let lastTrafficAlertSoundAt = 0;
 let audioUnlocked = false;
+let proximityAlertKey = "";
+let proximityAlertSolid = false;
+let proximityHighlightLastAt = 0;
 
-function scheduleAircraftHighlight(key) {
+function scheduleAircraftHighlight(key, { delayMs = 1000, durationMs = 10000 } = {}) {
   if (!key) return;
   const now = Date.now();
   aircraftHighlights.set(key, {
-    startsAt: now + 1000,
-    endsAt: now + 11000
+    startsAt: now + delayMs,
+    endsAt: now + delayMs + durationMs
   });
 }
 
@@ -480,6 +491,10 @@ function randomJitter(minMs = 500, maxMs = 2000) {
   return minMs + Math.random() * (maxMs - minMs);
 }
 
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
 function scheduleNextTrafficFetch({ failed = false } = {}) {
   if (failed) {
     trafficBackoffMs = trafficBackoffMs ? Math.min(60000, trafficBackoffMs * 2) : 5000;
@@ -523,6 +538,24 @@ function playTone({ frequency, type = "sine", duration = 0.05, gain = 0.05, slid
 
 function playSweepTick() {
   playTone({ frequency: 360, type: "triangle", duration: 0.04, gain: 0.07, slideTo: 460 });
+}
+
+function playTrafficAlertPing(alert) {
+  if (!alert || !radarSoundsEnabled) return;
+  const now = performance.now();
+  const distanceFactor = clamp(alert.distance / 3, 0, 1);
+  const interval = alert.diverging
+    ? clamp(760 + alert.distance * 820, 760, 1900)
+    : clamp(170 + distanceFactor * 1050, 170, 1220);
+
+  if (now - lastTrafficAlertSoundAt < interval) return;
+
+  lastTrafficAlertSoundAt = now;
+  const closeness = 1 - distanceFactor;
+  const base = alert.diverging ? 430 : 500 + closeness * 190;
+  const gain = alert.diverging ? 0.08 : 0.1 + closeness * 0.05;
+  playTone({ frequency: base, type: "sine", duration: 0.24, gain, slideTo: base + 180 + closeness * 140 });
+  playTone({ frequency: base + 430, type: "sine", duration: 0.16, gain: gain * 0.42, slideTo: base + 210, delay: 0.13 });
 }
 
 function playContactBlip() {
@@ -764,27 +797,64 @@ function altitudeRelation(planeAltitude) {
   return difference > 0 ? " High" : " Low";
 }
 
+function isAlertDisplayDevice() {
+  return window.matchMedia("(max-width: 1180px), (pointer: coarse)").matches;
+}
+
+function isDivergingFromGps(plane, currentDistance) {
+  const history = tracks.get(aircraftKey(plane)) || [];
+  const previous = history[history.length - 2] || history[history.length - 1];
+  if (!previous) return false;
+
+  const previousDistance = milesBetween(center.lat, center.lon, previous.lat, previous.lon);
+  return currentDistance > previousDistance + 0.05;
+}
+
 function proximityCandidate(plane) {
   if (isGroundTraffic(plane)) return null;
 
   const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
-  if (distance > 3) return null;
+  const diverging = isDivergingFromGps(plane, distance);
+  if (diverging && distance > 1) return null;
+  if (!diverging && distance > 3) return null;
 
   const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
   return {
     plane,
     distance,
+    diverging,
     relativeBearing: relativeBearingDegrees(bearing)
   };
+}
+
+function clearProximityAlert() {
+  proximityAlertEl.hidden = true;
+  proximityAlertEl.textContent = "";
+  proximityAlertEl.classList.remove("diverging", "solid");
+  proximityAlertKey = "";
+  proximityAlertSolid = false;
+}
+
+function highlightProximityTarget(alert) {
+  const key = aircraftKey(alert.plane);
+  const now = Date.now();
+  if (key !== proximityAlertKey) {
+    proximityAlertKey = key;
+    proximityAlertSolid = false;
+    proximityHighlightLastAt = 0;
+  }
+
+  if (!proximityHighlightLastAt || now - proximityHighlightLastAt > 8500) {
+    scheduleAircraftHighlight(key, { delayMs: 0, durationMs: 10000 });
+    proximityHighlightLastAt = now;
+  }
 }
 
 function updateProximityAlert() {
   if (!proximityAlertEl) return;
   const panelHidden = shell.classList.contains("panel-collapsed");
-  const mobile = window.matchMedia("(max-width: 520px)").matches;
-  if (!gpsActive || !panelHidden || !mobile) {
-    proximityAlertEl.hidden = true;
-    proximityAlertEl.textContent = "";
+  if (!gpsActive || !panelHidden || !isAlertDisplayDevice()) {
+    clearProximityAlert();
     return;
   }
 
@@ -794,12 +864,16 @@ function updateProximityAlert() {
     .sort((a, b) => a.distance - b.distance)[0];
 
   if (!alert) {
-    proximityAlertEl.hidden = true;
-    proximityAlertEl.textContent = "";
+    clearProximityAlert();
     return;
   }
 
+  if (weatherMode) setWeatherMode(false);
+  highlightProximityTarget(alert);
+  playTrafficAlertPing(alert);
   proximityAlertEl.textContent = `Traffic ${clockDirection(alert.relativeBearing)} O'Clock${altitudeRelation(alert.plane.altitude)} ${formatAltitude(alert.plane.altitude)}`;
+  proximityAlertEl.classList.toggle("diverging", alert.diverging);
+  proximityAlertEl.classList.toggle("solid", proximityAlertSolid);
   proximityAlertEl.hidden = false;
 }
 
@@ -1213,6 +1287,32 @@ function updateRadarBlipsForSweep(angle) {
   }
 
   previousSweepAngle = currentSweepAngle;
+}
+
+function angularDifference(a, b) {
+  const difference = Math.abs(normalizeRadians(a) - normalizeRadians(b));
+  return Math.min(difference, Math.PI * 2 - difference);
+}
+
+function updateRadarBlipsForWeatherSweep(angle) {
+  const currentSweepAngle = normalizeRadians(angle);
+
+  for (const plane of aircraft) {
+    if (!isVisibleTraffic(plane)) continue;
+    if (milesBetween(center.lat, center.lon, plane.lat, plane.lon) > radiusMiles + 1) continue;
+
+    const targetAngle = planeSweepAngle(plane);
+    if (angularDifference(currentSweepAngle, targetAngle) > 0.16) continue;
+
+    const key = aircraftKey(plane);
+    const previousBlip = radarBlips.get(key);
+    if (previousBlip?.radarSeenAt && Date.now() - previousBlip.radarSeenAt < 450) continue;
+
+    const snapshot = { ...plane, radarSeenAt: Date.now() };
+    radarBlips.set(key, snapshot);
+    appendTrackHistory(snapshot);
+    playContactBlip();
+  }
 }
 
 async function getJson(url) {
@@ -2140,6 +2240,80 @@ function drawSweep(scope, angle) {
   ctx.restore();
 }
 
+function weatherForwardBearing() {
+  if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= 0.8) return gpsTrackDegrees;
+  if (Number.isFinite(compassHeadingDegrees)) return compassHeadingDegrees;
+  return activeTrackHeadingDegrees() ?? 0;
+}
+
+function weatherSectorSweepBearing(progress) {
+  const sweepWidth = 75;
+  const triangle = progress < 0.5 ? progress * 4 - 1 : 3 - progress * 4;
+  return normalizedDegrees(weatherForwardBearing() + triangle * sweepWidth);
+}
+
+function drawWeatherSector(scope, sweepBearing) {
+  const forward = weatherForwardBearing();
+  const leftAngle = screenAngleForBearing(forward - 75);
+  const rightAngle = screenAngleForBearing(forward + 75);
+  const sweepAngle = screenAngleForBearing(sweepBearing);
+  const palette = sweepPalettes[sweepColor] || sweepPalettes.green;
+
+  ctx.save();
+  ctx.translate(scope.cx, scope.cy);
+
+  ctx.strokeStyle = "rgba(233, 255, 243, 0.78)";
+  ctx.lineWidth = 2;
+  for (const angle of [leftAngle, rightAngle]) {
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(Math.cos(angle) * scope.radius, Math.sin(angle) * scope.radius);
+    ctx.stroke();
+  }
+
+  ctx.strokeStyle = "rgba(233, 255, 243, 0.32)";
+  ctx.setLineDash([2, 10]);
+  for (const fraction of [0.25, 0.5, 0.75, 1]) {
+    ctx.beginPath();
+    ctx.arc(0, 0, scope.radius * fraction, leftAngle, rightAngle, false);
+    ctx.stroke();
+  }
+  ctx.setLineDash([]);
+
+  const labelValues = [5, 10, 20, 50, 100].filter((value) => value <= radiusMiles);
+  ctx.fillStyle = "rgba(233, 255, 243, 0.74)";
+  ctx.font = "800 11px ui-monospace, SFMono-Regular, Consolas, monospace";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  for (const value of labelValues) {
+    const radius = (value / radiusMiles) * scope.radius;
+    const x = Math.cos(rightAngle) * radius + 8;
+    const y = Math.sin(rightAngle) * radius;
+    ctx.fillText(`${value}`, x, y);
+  }
+
+  for (let index = 0; index < 20; index += 1) {
+    const progress = index / 20;
+    const segmentAngle = sweepAngle - progress * 0.52;
+    const alpha = (1 - progress) ** 2 * 0.24;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, scope.radius, segmentAngle - 0.02, segmentAngle + 0.02);
+    ctx.closePath();
+    ctx.fillStyle = `rgba(${palette.trail}, ${alpha})`;
+    ctx.fill();
+  }
+
+  ctx.rotate(sweepAngle);
+  ctx.strokeStyle = palette.line;
+  ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(scope.radius, 0);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawHud(scope) {
   ctx.save();
   ctx.fillStyle = "rgba(233, 255, 243, 0.75)";
@@ -2164,9 +2338,18 @@ function render(now) {
   const sweepProgress = ((now / 1000) % sweepSeconds) / sweepSeconds;
   const sweepBucket = Math.floor(now / (sweepSeconds * 1000));
   const angle = sweepProgress * Math.PI * 2 - Math.PI / 2;
+  const wxProgress = ((now / 1000) % wxSweepSeconds) / wxSweepSeconds;
+  const wxSweepBucket = Math.floor(now / (wxSweepSeconds * 1000));
+  const wxSweepBearing = weatherSectorSweepBearing(wxProgress);
+  const wxAngle = screenAngleForBearing(wxSweepBearing);
 
-  if (running && sweepBucket !== lastSweepBucket) {
+  if (running && !weatherMode && sweepBucket !== lastSweepBucket) {
     lastSweepBucket = sweepBucket;
+    playSweepTick();
+  }
+
+  if (running && weatherMode && wxSweepBucket !== lastWxSweepBucket) {
+    lastWxSweepBucket = wxSweepBucket;
     playSweepTick();
   }
 
@@ -2179,7 +2362,8 @@ function render(now) {
   ctx.fillRect(0, 0, width, height);
 
   pruneExpiredRadarBlips();
-  updateRadarBlipsForSweep(angle);
+  if (weatherMode) updateRadarBlipsForWeatherSweep(wxAngle);
+  else updateRadarBlipsForSweep(angle);
   prepareAircraftLabels(scope, Date.now());
   drawGrid(scope);
   drawPrecipitation(scope);
@@ -2187,8 +2371,10 @@ function render(now) {
   drawAirports(scope);
   drawAircraft(scope);
   drawUserNavigation(scope);
-  drawSweep(scope, angle);
+  if (weatherMode) drawWeatherSector(scope, wxSweepBearing);
+  else drawSweep(scope, angle);
   if (showRadarData) drawHud(scope);
+  updateProximityAlert();
 
   requestAnimationFrame(render);
 }
@@ -2199,12 +2385,43 @@ function setRange(nextRange) {
   for (const button of rangeButtons.querySelectorAll("button")) {
     button.classList.toggle("active", Number(button.dataset.range) === radiusMiles);
   }
+  if (wxRangeButton) wxRangeButton.textContent = `${radiusMiles} NM`;
+}
+
+function setWeatherMode(enabled) {
+  weatherMode = Boolean(enabled);
+  if (wxToggle) {
+    wxToggle.classList.toggle("active", weatherMode);
+    wxToggle.setAttribute("aria-pressed", String(weatherMode));
+    wxToggle.setAttribute("aria-label", weatherMode ? "Return to radar mode" : "Weather mode");
+  }
+  if (wxRangeButton) wxRangeButton.hidden = !weatherMode;
+  previousSweepAngle = null;
 }
 
 rangeButtons.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-range]");
   if (!button) return;
   setRange(Number(button.dataset.range));
+  fetchAirspace();
+  fetchTraffic({ force: true });
+});
+
+wxToggle?.addEventListener("click", () => {
+  if (!weatherMode) {
+    previousRangeBeforeWx = radiusMiles;
+    if (!wxRanges.includes(radiusMiles)) setRange(10);
+  } else if (allowedRanges.includes(previousRangeBeforeWx)) {
+    setRange(previousRangeBeforeWx);
+  }
+  setWeatherMode(!weatherMode);
+  fetchTraffic({ force: true });
+});
+
+wxRangeButton?.addEventListener("click", () => {
+  const currentIndex = wxRanges.indexOf(radiusMiles);
+  const nextRange = wxRanges[(currentIndex + 1) % wxRanges.length] || 5;
+  setRange(nextRange);
   fetchAirspace();
   fetchTraffic({ force: true });
 });
@@ -2368,6 +2585,11 @@ panelToggle.addEventListener("click", () => {
   shell.classList.toggle("panel-collapsed");
   updatePanelToggle();
   window.setTimeout(resizeCanvas, 240);
+});
+
+proximityAlertEl?.addEventListener("click", () => {
+  proximityAlertSolid = true;
+  proximityAlertEl.classList.add("solid");
 });
 
 settingsModal.addEventListener("click", (event) => {

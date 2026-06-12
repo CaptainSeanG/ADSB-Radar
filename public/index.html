@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./styles.css?v=20260611-5" />
+    <link rel="stylesheet" href="./styles.css?v=20260612-1" />
   </head>
   <body>
     <main class="shell">
@@ -12,6 +12,7 @@
         <canvas id="radar" aria-label="Radar screen"></canvas>
         <div class="scope-glass"></div>
         <button type="button" class="legend-button" id="legendOpen">Legend</button>
+        <button type="button" class="wx-range-button" id="wxRangeButton" hidden>10 NM</button>
       </section>
       <div class="proximity-alert" id="proximityAlert" aria-live="polite" hidden></div>
 
@@ -77,6 +78,7 @@
         </section>
       </aside>
       <button type="button" class="panel-toggle" id="panelToggle" aria-label="Hide panel" aria-expanded="true" aria-controls="controls"></button>
+      <button type="button" class="wx-toggle" id="wxToggle" aria-label="Weather mode" aria-pressed="false">WX</button>
     </main>
 
     <div class="modal-backdrop" id="settingsModal" hidden>
@@ -207,6 +209,6 @@
     </div>
 
     <script src="./config.js?v=20260611-1"></script>
-    <script type="module" src="./app.js?v=20260611-16"></script>
+    <script type="module" src="./app.js?v=20260612-1"></script>
   </body>
 </html>

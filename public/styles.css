@@ -155,6 +155,8 @@ select {
 
 .proximity-alert {
   display: none;
+  cursor: pointer;
+  user-select: none;
 }
 
 @keyframes traffic-alert-flash {
@@ -169,6 +171,20 @@ select {
     opacity: 0.42;
     filter: saturate(0.8);
   }
+}
+
+.proximity-alert.solid {
+  animation: none !important;
+  opacity: 1 !important;
+  filter: saturate(1.05) !important;
+}
+
+.shell.panel-collapsed .proximity-alert.diverging:not([hidden]) {
+  border-color: rgba(132, 255, 194, 0.96);
+  background: rgba(0, 105, 50, 0.94);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.42), inset 0 0 26px rgba(132, 255, 194, 0.16);
+  color: #dffff0;
+  text-shadow: 0 0 12px rgba(132, 255, 194, 0.62);
 }
 
 .panel {
@@ -244,6 +260,59 @@ select {
 .shell.panel-collapsed .panel-toggle::after {
   right: auto;
   left: 12px;
+}
+
+.wx-toggle {
+  position: absolute;
+  z-index: 4;
+  top: 74px;
+  right: 32px;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(233, 255, 243, 0.34);
+  border-radius: 7px;
+  background: rgba(3, 8, 5, 0.82);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
+  color: rgba(233, 255, 243, 0.8);
+  cursor: pointer;
+  font: 850 0.68rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.04em;
+  padding: 0;
+  transition: right 220ms ease, background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.wx-toggle:hover,
+.wx-toggle.active {
+  border-color: var(--amber);
+  background: rgba(255, 155, 64, 0.16);
+  color: var(--amber);
+}
+
+.shell.panel-collapsed .wx-toggle {
+  right: 28px;
+}
+
+.wx-range-button {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  z-index: 4;
+  min-width: 92px;
+  min-height: 36px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 207, 106, 0.5);
+  border-radius: 6px;
+  background: rgba(3, 8, 5, 0.8);
+  color: var(--amber);
+  cursor: pointer;
+  font: 900 0.78rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wx-range-button:hover {
+  border-color: var(--green);
+  color: var(--green);
 }
 
 .eyebrow {
@@ -868,11 +937,19 @@ fieldset {
     right: 16px;
     order: -1;
   }
+
+  .wx-toggle,
+  .shell.panel-collapsed .wx-toggle {
+    position: fixed;
+    top: 58px;
+    right: 16px;
+  }
 }
 
-@media (max-width: 520px) {
-  .shell {
-    padding: 10px;
+@media (max-width: 1180px), (pointer: coarse) {
+  .shell.panel-collapsed .radar-wrap,
+  .shell.panel-collapsed .proximity-alert {
+    grid-column: 1 / -1;
   }
 
   .shell.panel-collapsed .proximity-alert:not([hidden]) {
@@ -892,6 +969,12 @@ fieldset {
     text-transform: uppercase;
     padding: 12px 14px;
     animation: traffic-alert-flash 360ms steps(2, end) infinite;
+  }
+}
+
+@media (max-width: 520px) {
+  .shell {
+    padding: 10px;
   }
 
   .range-buttons {
