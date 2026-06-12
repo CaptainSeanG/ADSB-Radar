@@ -179,6 +179,18 @@ select {
   filter: saturate(1.05) !important;
 }
 
+.proximity-alert strong,
+.proximity-alert span {
+  display: block;
+}
+
+.proximity-alert span {
+  margin-top: 4px;
+  color: rgba(255, 255, 190, 0.92);
+  font-size: 0.62em;
+  letter-spacing: 0.08em;
+}
+
 .shell.panel-collapsed .proximity-alert.diverging:not([hidden]) {
   border-color: rgba(132, 255, 194, 0.96);
   background: rgba(0, 105, 50, 0.94);
@@ -331,21 +343,46 @@ select {
 }
 
 .shell.wx-mode .wx-nearest:not([hidden]) {
-  display: flex;
-  min-height: 38px;
+  display: grid;
+  min-height: 58px;
   grid-column: 1;
-  align-items: center;
-  justify-content: center;
+  grid-template-columns: minmax(105px, 0.38fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 10px;
   border: 1px solid rgba(255, 207, 106, 0.32);
   border-radius: 7px;
   background: rgba(3, 8, 5, 0.76);
   box-shadow: inset 0 0 26px rgba(255, 207, 106, 0.06);
   color: rgba(255, 232, 150, 0.96);
-  font: 850 0.86rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   letter-spacing: 0.03em;
-  text-align: center;
   text-transform: uppercase;
-  padding: 8px 12px;
+  padding: 10px 14px;
+}
+
+.wx-nearest-label {
+  align-self: start;
+  color: rgba(233, 255, 243, 0.62);
+  font-size: 0.66rem;
+  font-weight: 850;
+  line-height: 1.15;
+  text-align: left;
+}
+
+.wx-nearest-data {
+  color: rgba(255, 232, 150, 0.98);
+  font-size: clamp(1.45rem, 3.4vw, 2.35rem);
+  font-weight: 950;
+  line-height: 0.9;
+  text-align: center;
+}
+
+.wx-nearest-altitude {
+  color: rgba(77, 255, 155, 0.94);
+  font-size: clamp(1.02rem, 2vw, 1.35rem);
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .eyebrow {
@@ -1015,6 +1052,17 @@ fieldset {
 @media (max-width: 520px) {
   .shell {
     padding: 10px;
+  }
+
+  .shell.wx-mode .wx-nearest:not([hidden]) {
+    grid-template-columns: 1fr;
+    align-items: center;
+    gap: 4px;
+    text-align: center;
+  }
+
+  .wx-nearest-label {
+    text-align: center;
   }
 
   .range-buttons {

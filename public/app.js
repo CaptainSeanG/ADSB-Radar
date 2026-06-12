@@ -306,6 +306,7 @@ let lastTrafficAlertSoundAt = 0;
 let audioUnlocked = false;
 let proximityAlertKey = "";
 let proximityAlertSolid = false;
+let proximityAlertAudioLevel = 1;
 let proximityHighlightLastAt = 0;
 let trafficAlertActive = false;
 
@@ -545,6 +546,7 @@ function playSweepTick() {
 
 function playTrafficAlertPing(alert) {
   if (!alert || !radarSoundsEnabled) return;
+  if (proximityAlertAudioLevel <= 0) return;
   const now = performance.now();
   const distanceFactor = clamp(alert.distance / 3, 0, 1);
   const interval = alert.diverging
@@ -556,7 +558,7 @@ function playTrafficAlertPing(alert) {
   lastTrafficAlertSoundAt = now;
   const closeness = 1 - distanceFactor;
   const base = alert.diverging ? 430 : 500 + closeness * 190;
-  const gain = alert.diverging ? 0.08 : 0.1 + closeness * 0.05;
+  const gain = (alert.diverging ? 0.08 : 0.1 + closeness * 0.05) * proximityAlertAudioLevel;
   playTone({ frequency: base, type: "sine", duration: 0.24, gain, slideTo: base + 180 + closeness * 140 });
   playTone({ frequency: base + 430, type: "sine", duration: 0.16, gain: gain * 0.42, slideTo: base + 210, delay: 0.13 });
 }
@@ -851,6 +853,7 @@ function clearProximityAlert() {
   proximityAlertEl.classList.remove("diverging", "solid");
   proximityAlertKey = "";
   proximityAlertSolid = false;
+  proximityAlertAudioLevel = 1;
   trafficAlertActive = false;
   updateBottomRangeButton();
 }
@@ -871,19 +874,23 @@ function updateWxNearestTarget() {
 
   if (!weatherMode) {
     wxNearestTarget.hidden = true;
-    wxNearestTarget.textContent = "";
+    wxNearestTarget.innerHTML = "";
     return;
   }
 
   const nearest = nearestVisibleAircraft();
   if (!nearest) {
-    wxNearestTarget.textContent = "Range to nearest target --";
+    wxNearestTarget.innerHTML = `<span class="wx-nearest-label">Range to nearest target</span><strong class="wx-nearest-data">--</strong>`;
     wxNearestTarget.hidden = false;
     return;
   }
 
   const relativeBearing = relativeBearingDegrees(nearest.bearing);
-  wxNearestTarget.textContent = `Range to nearest target ${formatRangeToTarget(nearest.distance)} ${clockDirection(relativeBearing)} O'Clock, ${relativeAltitudeDetail(nearest.plane.altitude)}`;
+  wxNearestTarget.innerHTML = `
+    <span class="wx-nearest-label">Range to nearest target</span>
+    <strong class="wx-nearest-data">${formatRangeToTarget(nearest.distance)} ${clockDirection(relativeBearing)} O'Clock</strong>
+    <span class="wx-nearest-altitude">${relativeAltitudeDetail(nearest.plane.altitude)}</span>
+  `;
   wxNearestTarget.hidden = false;
 }
 
@@ -893,6 +900,7 @@ function highlightProximityTarget(alert) {
   if (key !== proximityAlertKey) {
     proximityAlertKey = key;
     proximityAlertSolid = false;
+    proximityAlertAudioLevel = 1;
     proximityHighlightLastAt = 0;
   }
 
@@ -933,7 +941,8 @@ function updateProximityAlert() {
   updateBottomRangeButton();
   highlightProximityTarget(alert);
   playTrafficAlertPing(alert);
-  proximityAlertEl.textContent = `Traffic ${clockDirection(alert.relativeBearing)} O'Clock ${formatRangeToTarget(alert.distance)}${altitudeRelation(alert.plane.altitude)} ${formatAltitude(alert.plane.altitude)}`;
+  const muteHint = proximityAlertAudioLevel === 0.5 ? `<span>Tap to mute</span>` : "";
+  proximityAlertEl.innerHTML = `<strong>Traffic ${clockDirection(alert.relativeBearing)} O'Clock ${formatRangeToTarget(alert.distance)}${altitudeRelation(alert.plane.altitude)} ${formatAltitude(alert.plane.altitude)}</strong>${muteHint}`;
   proximityAlertEl.classList.toggle("diverging", alert.diverging);
   proximityAlertEl.classList.toggle("solid", proximityAlertSolid);
   proximityAlertEl.hidden = false;
@@ -2756,8 +2765,13 @@ panelToggle.addEventListener("click", () => {
 });
 
 proximityAlertEl?.addEventListener("click", () => {
+  if (!trafficAlertActive || !proximityAlertKey) return;
   proximityAlertSolid = true;
+  proximityAlertAudioLevel = proximityAlertAudioLevel === 1 ? 0.5 : 0;
   proximityAlertEl.classList.add("solid");
+  if (proximityAlertAudioLevel === 0.5 && !proximityAlertEl.querySelector("span")) {
+    proximityAlertEl.insertAdjacentHTML("beforeend", "<span>Tap to mute</span>");
+  }
 });
 
 settingsModal.addEventListener("click", (event) => {
