@@ -885,7 +885,6 @@ function nearestVisibleAircraft() {
       distance: milesBetween(center.lat, center.lon, plane.lat, plane.lon),
       bearing: bearingDegrees(center.lat, center.lon, plane.lat, plane.lon)
     }))
-    .filter((target) => target.distance <= radiusMiles)
     .sort((a, b) => a.distance - b.distance)[0];
 }
 

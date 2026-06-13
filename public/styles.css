@@ -366,7 +366,8 @@ select {
 
 .shell.wx-mode .wx-nearest:not([hidden]) {
   display: grid;
-  min-height: 34px;
+  height: 48px;
+  min-height: 48px;
   grid-column: 1;
   grid-template-areas:
     "label label"
@@ -382,6 +383,7 @@ select {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+  overflow: hidden;
   padding: 5px 12px;
 }
 
