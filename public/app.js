@@ -2625,8 +2625,8 @@ function formatHeading(value) {
 function drawWeatherHeadingTape(scope) {
   const heading = weatherForwardBearing();
   const centerX = scope.cx;
-  const topY = 42;
-  const lineY = 76;
+  const topY = 82;
+  const lineY = 116;
   const spacing = Math.max(34, Math.min(52, scope.width / 16));
   const leftX = Math.max(24, centerX - spacing * 6.5);
   const rightX = Math.min(scope.width - 24, centerX + spacing * 6.5);
