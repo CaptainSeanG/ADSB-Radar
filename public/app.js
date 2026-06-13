@@ -265,6 +265,7 @@ let radarSoundStyle = "softTick";
 let orientationMode = "north";
 let weatherMode = false;
 let previousRangeBeforeWx = 10;
+let previousOrientationBeforeArc = "north";
 let aircraft = [];
 let airports = [];
 let airspaces = [];
@@ -2399,6 +2400,61 @@ function weatherSectorSweepBearing(progress) {
   return normalizedDegrees(weatherForwardBearing() + triangle * wxSectorDegrees);
 }
 
+function formatHeading(value) {
+  const heading = Math.round(normalizedDegrees(value || 0));
+  return String(heading === 360 ? 0 : heading).padStart(3, "0");
+}
+
+function drawWeatherHeadingTape(scope) {
+  const heading = weatherForwardBearing();
+  const centerX = scope.cx;
+  const topY = 18;
+  const lineY = 48;
+  const spacing = Math.max(34, Math.min(52, scope.width / 16));
+  const leftX = Math.max(24, centerX - spacing * 6.5);
+  const rightX = Math.min(scope.width - 24, centerX + spacing * 6.5);
+
+  ctx.save();
+  ctx.strokeStyle = "rgba(233, 255, 243, 0.58)";
+  ctx.fillStyle = "rgba(233, 255, 243, 0.74)";
+  ctx.lineWidth = 1.4;
+  ctx.font = "850 12px ui-monospace, SFMono-Regular, Consolas, monospace";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  ctx.beginPath();
+  ctx.moveTo(leftX, lineY);
+  ctx.lineTo(rightX, lineY);
+  ctx.stroke();
+
+  for (let offset = -60; offset <= 60; offset += 10) {
+    const x = centerX + (offset / 10) * spacing;
+    if (x < leftX || x > rightX) continue;
+
+    ctx.beginPath();
+    ctx.moveTo(x, lineY - 7);
+    ctx.lineTo(x, lineY + 7);
+    ctx.stroke();
+    if (offset !== 0) {
+      ctx.fillText(formatHeading(heading + offset), x, lineY + 21);
+    }
+  }
+
+  const boxWidth = 64;
+  const boxHeight = 28;
+  ctx.fillStyle = "rgba(3, 8, 5, 0.88)";
+  ctx.strokeStyle = "rgba(255, 207, 106, 0.8)";
+  ctx.lineWidth = 1.6;
+  ctx.beginPath();
+  ctx.rect(centerX - boxWidth / 2, topY, boxWidth, boxHeight);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = "rgba(255, 232, 150, 0.98)";
+  ctx.font = "950 17px ui-monospace, SFMono-Regular, Consolas, monospace";
+  ctx.fillText(formatHeading(heading), centerX, topY + boxHeight / 2 + 1);
+  ctx.restore();
+}
+
 function drawWeatherSector(scope, sweepBearing, sweepProgress) {
   const { left: leftAngle, right: rightAngle } = weatherSectorAngles();
   const sweepAngle = screenAngleForBearing(sweepBearing);
@@ -2548,6 +2604,7 @@ function render(now) {
       drawUserNavigation(scope);
     });
     drawWeatherSector(scope, wxSweepBearing, wxProgress);
+    drawWeatherHeadingTape(scope);
   } else {
     drawGrid(scope);
     drawPrecipitation(scope);
@@ -2594,6 +2651,16 @@ function updateBottomRangeButton() {
 }
 
 function setWeatherMode(enabled) {
+  if (enabled && !weatherMode) {
+    previousOrientationBeforeArc = orientationMode;
+    orientationMode = "track";
+    orientationModeSelect.value = "track";
+    queueCompassHeadingEnable();
+  } else if (!enabled && weatherMode) {
+    orientationMode = previousOrientationBeforeArc === "track" ? "track" : "north";
+    orientationModeSelect.value = orientationMode;
+  }
+
   weatherMode = Boolean(enabled);
   shell.classList.toggle("wx-mode", weatherMode);
   if (radarModeToggle) {
