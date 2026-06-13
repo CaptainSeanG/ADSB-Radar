@@ -1753,18 +1753,63 @@ function drawPrecipitation(scope) {
   ctx.clip();
   ctx.globalAlpha = 0.58;
   for (const tile of weatherTiles) {
-    const nw = weatherTileToLatLon(tile.x, tile.y, tile.zoom);
-    const se = weatherTileToLatLon(tile.x + 1, tile.y + 1, tile.zoom);
-    const nwPoint = project(nw.lat, nw.lon, scope);
-    const sePoint = project(se.lat, se.lon, scope);
-    const x = Math.min(nwPoint.x, sePoint.x);
-    const y = Math.min(nwPoint.y, sePoint.y);
-    const width = Math.abs(sePoint.x - nwPoint.x);
-    const height = Math.abs(sePoint.y - nwPoint.y);
-    if (width <= 0 || height <= 0) continue;
-    ctx.drawImage(tile.image, x, y, width, height);
+    drawProjectedWeatherTile(tile, scope);
   }
   ctx.restore();
+}
+
+function drawProjectedWeatherTile(tile, scope) {
+  const steps = 5;
+  const sourceWidth = tile.image.naturalWidth || tile.image.width;
+  const sourceHeight = tile.image.naturalHeight || tile.image.height;
+  if (!sourceWidth || !sourceHeight) return;
+
+  for (let row = 0; row < steps; row += 1) {
+    for (let col = 0; col < steps; col += 1) {
+      const u0 = col / steps;
+      const v0 = row / steps;
+      const u1 = (col + 1) / steps;
+      const v1 = (row + 1) / steps;
+      const nw = weatherTileToLatLon(tile.x + u0, tile.y + v0, tile.zoom);
+      const ne = weatherTileToLatLon(tile.x + u1, tile.y + v0, tile.zoom);
+      const sw = weatherTileToLatLon(tile.x + u0, tile.y + v1, tile.zoom);
+      const se = weatherTileToLatLon(tile.x + u1, tile.y + v1, tile.zoom);
+      const p00 = project(nw.lat, nw.lon, scope);
+      const p10 = project(ne.lat, ne.lon, scope);
+      const p01 = project(sw.lat, sw.lon, scope);
+      const p11 = project(se.lat, se.lon, scope);
+      const margin = 30;
+      const outside =
+        [p00, p10, p01, p11].every(
+          (point) =>
+            point.x < -margin ||
+            point.x > scope.width + margin ||
+            point.y < -margin ||
+            point.y > scope.height + margin ||
+            point.distance > radiusMiles * 1.35
+        );
+      if (outside) continue;
+
+      const sx = u0 * sourceWidth;
+      const sy = v0 * sourceHeight;
+      const swidth = (u1 - u0) * sourceWidth;
+      const sheight = (v1 - v0) * sourceHeight;
+      if (swidth <= 0 || sheight <= 0) continue;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(p00.x, p00.y);
+      ctx.lineTo(p10.x, p10.y);
+      ctx.lineTo(p11.x, p11.y);
+      ctx.lineTo(p01.x, p01.y);
+      ctx.closePath();
+      ctx.clip();
+      ctx.translate(p00.x, p00.y);
+      ctx.transform((p10.x - p00.x) / swidth, (p10.y - p00.y) / swidth, (p01.x - p00.x) / sheight, (p01.y - p00.y) / sheight, 0, 0);
+      ctx.drawImage(tile.image, sx, sy, swidth, sheight, 0, 0, swidth, sheight);
+      ctx.restore();
+    }
+  }
 }
 
 function updateCenter(lat, lon, { clearTracks = true, source = "manual" } = {}) {
