@@ -310,6 +310,7 @@ let proximityAlertSolid = false;
 let proximityAlertAudioLevel = 1;
 let proximityHighlightLastAt = 0;
 let trafficAlertActive = false;
+let returnToArcAfterThreat = false;
 
 function scheduleAircraftHighlight(key, { delayMs = 1000, durationMs = 10000 } = {}) {
   if (!key) return;
@@ -829,6 +830,32 @@ function isAlertDisplayDevice() {
 }
 
 function closureRateKts(plane, currentDistance) {
+  const targetSpeed = Number(plane.speed);
+  const targetTrack = Number(plane.track);
+  const ownSpeed = Number(gpsSpeedKts);
+  const ownTrack = Number(gpsTrackDegrees);
+  const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
+
+  if (Number.isFinite(targetSpeed) && Number.isFinite(targetTrack)) {
+    const toRad = (value) => (value * Math.PI) / 180;
+    const vector = (speed, track) => ({
+      east: speed * Math.sin(toRad(track)),
+      north: speed * Math.cos(toRad(track))
+    });
+    const targetVector = vector(targetSpeed, targetTrack);
+    const ownVector =
+      Number.isFinite(ownSpeed) && Number.isFinite(ownTrack) && ownSpeed >= 0.5
+        ? vector(ownSpeed, ownTrack)
+        : { east: 0, north: 0 };
+    const lineOfSight = {
+      east: Math.sin(toRad(bearing)),
+      north: Math.cos(toRad(bearing))
+    };
+    const relativeEast = targetVector.east - ownVector.east;
+    const relativeNorth = targetVector.north - ownVector.north;
+    return -(relativeEast * lineOfSight.east + relativeNorth * lineOfSight.north);
+  }
+
   const history = tracks.get(aircraftKey(plane)) || [];
   const now = Date.now();
   const recent = history
@@ -854,8 +881,9 @@ function proximityCandidate(plane) {
 
   const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
   const closureKts = closureRateKts(plane, distance);
-  const diverging = closureKts < -5;
-  const alertRange = alertRangeForClosure(closureKts);
+  const key = aircraftKey(plane);
+  const diverging = closureKts <= 0;
+  const alertRange = diverging && key === proximityAlertKey ? 3 : alertRangeForClosure(closureKts);
   if (distance > alertRange) return null;
 
   const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
@@ -876,6 +904,10 @@ function clearProximityAlert() {
   proximityAlertSolid = false;
   proximityAlertAudioLevel = 1;
   trafficAlertActive = false;
+  if (returnToArcAfterThreat) {
+    returnToArcAfterThreat = false;
+    setWeatherMode(true);
+  }
   updateBottomRangeButton();
 }
 
@@ -950,7 +982,10 @@ function updateProximityAlert() {
 
   const alertKey = aircraftKey(alert.plane);
   if (alertKey !== proximityAlertKey) {
-    if (weatherMode) setWeatherMode(false);
+    if (weatherMode) {
+      returnToArcAfterThreat = true;
+      setWeatherMode(false);
+    }
     if (radiusMiles !== 5) {
       setRange(5);
       fetchAirspace();
@@ -960,6 +995,13 @@ function updateProximityAlert() {
   trafficAlertActive = true;
   updateBottomRangeButton();
   highlightProximityTarget(alert);
+  if (alert.diverging) {
+    proximityAlertAudioLevel = 0;
+    if (returnToArcAfterThreat) {
+      returnToArcAfterThreat = false;
+      setWeatherMode(true);
+    }
+  }
   playTrafficAlertPing(alert);
   const muteHint = proximityAlertAudioLevel === 0.5 ? `<span class="traffic-alert-mute">Tap to mute</span>` : "";
   proximityAlertEl.innerHTML = `
@@ -2338,33 +2380,25 @@ function drawArcOwnship(scope) {
   if (!weatherMode) return;
 
   ctx.save();
-  ctx.translate(scope.cx, scope.cy - 18);
+  ctx.translate(scope.cx, scope.cy);
   ctx.strokeStyle = "rgba(233, 255, 243, 0.92)";
-  ctx.fillStyle = "rgba(233, 255, 243, 0.92)";
-  ctx.lineWidth = 2.4;
+  ctx.fillStyle = "rgba(3, 8, 5, 0.88)";
+  ctx.lineWidth = 2.2;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
   ctx.beginPath();
-  ctx.moveTo(0, -18);
-  ctx.lineTo(0, 18);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(-27, 0);
-  ctx.lineTo(27, 0);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(-12, 14);
-  ctx.lineTo(12, 14);
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.moveTo(0, -22);
-  ctx.lineTo(-5, -13);
-  ctx.lineTo(5, -13);
+  ctx.moveTo(0, 0);
+  ctx.lineTo(-14, 28);
+  ctx.lineTo(0, 20);
+  ctx.lineTo(14, 28);
   ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(0, 0, 3.2, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(255, 232, 150, 0.98)";
   ctx.fill();
   ctx.restore();
 }
@@ -2464,17 +2498,19 @@ function drawWeatherHeadingTape(scope) {
   ctx.lineTo(rightX, lineY);
   ctx.stroke();
 
-  for (let offset = -60; offset <= 60; offset += 10) {
-    const x = centerX + (offset / 10) * spacing;
+  const baseHeading = Math.floor(heading / 10) * 10;
+  for (let index = -8; index <= 8; index += 1) {
+    const tapeHeading = baseHeading + index * 10;
+    const offset = normalizedDegrees(tapeHeading - heading);
+    const signedOffset = offset > 180 ? offset - 360 : offset;
+    const x = centerX + (signedOffset / 10) * spacing;
     if (x < leftX || x > rightX) continue;
 
     ctx.beginPath();
     ctx.moveTo(x, lineY - 7);
     ctx.lineTo(x, lineY + 7);
     ctx.stroke();
-    if (offset !== 0) {
-      ctx.fillText(formatHeading(heading + offset), x, lineY + 21);
-    }
+    ctx.fillText(formatHeading(tapeHeading), x, lineY + 21);
   }
 
   const boxWidth = 64;

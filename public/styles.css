@@ -340,7 +340,7 @@ select {
 .wx-range-button {
   position: absolute;
   left: 50%;
-  bottom: 8px;
+  bottom: 0;
   z-index: 4;
   min-width: 92px;
   min-height: 36px;
@@ -369,6 +369,7 @@ select {
   height: 62px;
   min-height: 62px;
   grid-column: 1;
+  margin-top: 8px;
   grid-template-areas:
     "label label"
     "data altitude";
