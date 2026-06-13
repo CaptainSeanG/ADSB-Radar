@@ -7,6 +7,7 @@ const panelToggle = document.querySelector("#panelToggle");
 const radarModeToggle = document.querySelector("#radarModeToggle");
 const wxToggle = document.querySelector("#wxToggle");
 const wxRangeButton = document.querySelector("#wxRangeButton");
+const bottomRangeButtons = document.querySelector("#bottomRangeButtons");
 const wxNearestTarget = document.querySelector("#wxNearestTarget");
 const airportSelect = document.querySelector("#airportSelect");
 const coordRow = document.querySelector("#coordRow");
@@ -290,6 +291,8 @@ let gpsActive = false;
 let gpsTrackDegrees = null;
 let gpsSpeedKts = 0;
 let gpsAltitudeFt = null;
+let stratusOwnshipActive = false;
+let lastStratusOwnshipAt = 0;
 let compassHeadingDegrees = null;
 let compassPermissionRequested = false;
 let gpsTrail = [];
@@ -299,6 +302,8 @@ let weatherMetaFetchedAt = 0;
 let weatherTiles = [];
 let weatherImageKey = "";
 let weatherImageLoading = false;
+let stratusWeatherData = null;
+let stratusAhrsData = null;
 let audioCtx = null;
 let audioMaster = null;
 let audioLimiter = null;
@@ -634,6 +639,7 @@ function updatePanelToggle() {
   panelToggle.setAttribute("aria-label", collapsed ? "Show panel" : "Hide panel");
   panelToggle.setAttribute("aria-expanded", String(!collapsed));
   updateProximityAlert();
+  updateBottomRangeButton();
 }
 
 function milesBetween(latA, lonA, latB, lonB) {
@@ -765,6 +771,13 @@ function normalizeAircraft(raw) {
     emergency: raw.emergency || null,
     category: raw.category || null
   };
+}
+
+function normalizeOwnship(raw) {
+  const normalized = normalizeAircraft(raw || {});
+  if (!normalized) return null;
+  normalized.geoAltitude = raw.geoAltitude ?? raw.alt_geom ?? null;
+  return normalized;
 }
 
 function bearingDegrees(latA, lonA, latB, lonB) {
@@ -997,6 +1010,7 @@ function updateProximityAlert() {
   highlightProximityTarget(alert);
   if (alert.diverging) {
     proximityAlertAudioLevel = 0;
+    proximityAlertSolid = true;
     if (returnToArcAfterThreat) {
       returnToArcAfterThreat = false;
       setWeatherMode(true);
@@ -1016,7 +1030,7 @@ function updateProximityAlert() {
     ${muteHint}
   `;
   proximityAlertEl.classList.toggle("diverging", alert.diverging);
-  proximityAlertEl.classList.toggle("solid", proximityAlertSolid);
+  proximityAlertEl.classList.toggle("solid", proximityAlertSolid || alert.diverging);
   proximityAlertEl.hidden = false;
 }
 
@@ -1050,6 +1064,10 @@ function activeTrackHeadingDegrees() {
   if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= 0.8) return gpsTrackDegrees;
   if (Number.isFinite(compassHeadingDegrees)) return compassHeadingDegrees;
   return null;
+}
+
+function gpsModeSelected() {
+  return airportSelect.value === "gps";
 }
 
 function radarRotationDegrees() {
@@ -1558,6 +1576,7 @@ async function fetchStaticTraffic() {
   ]);
 
   const aircraftRows = (trafficData.aircraft || trafficData.ac || []).map(normalizeAircraft).filter(Boolean);
+  applyStratusOwnship(trafficData);
 
   const airportContextMiles = radiusMiles * 1.7;
   const airportMatches = pruneLargeRangeAirports(
@@ -1579,6 +1598,54 @@ async function fetchStaticTraffic() {
     ageSeconds: trafficData.ageSeconds ?? 0,
     warning: trafficData.warning || ""
   };
+}
+
+function applyStratusOwnship(trafficData) {
+  if (trafficData.displaySource !== "Stratus" && trafficData.source !== "Stratus") return;
+  if (trafficData.stale || !gpsModeSelected()) return;
+
+  const ownship = normalizeOwnship(trafficData.ownship);
+  if (!ownship) return;
+
+  const now = Date.now();
+  const movedMiles = milesBetween(center.lat, center.lon, ownship.lat, ownship.lon);
+  const previousCenter = { ...center };
+  const shouldRefresh = movedMiles > 0.05 || !lastFetchAt;
+
+  gpsActive = true;
+  stratusOwnshipActive = true;
+  lastStratusOwnshipAt = now;
+  gpsSpeedKts = Number.isFinite(Number(ownship.speed)) ? Number(ownship.speed) : 0;
+  gpsAltitudeFt =
+    Number.isFinite(Number(ownship.geoAltitude))
+      ? Number(ownship.geoAltitude)
+      : Number.isFinite(Number(ownship.altitude))
+        ? Number(ownship.altitude)
+        : null;
+  if (Number.isFinite(Number(ownship.track))) {
+    gpsTrackDegrees = Number(ownship.track);
+  } else if (movedMiles > 0.003) {
+    gpsTrackDegrees = bearingDegrees(previousCenter.lat, previousCenter.lon, ownship.lat, ownship.lon);
+  }
+
+  latInput.value = ownship.lat.toFixed(4);
+  lonInput.value = ownship.lon.toFixed(4);
+  center = { lat: ownship.lat, lon: ownship.lon };
+  resetWeatherImage();
+
+  if (!lastGpsTrailAt || now - lastGpsTrailAt >= 30000) {
+    gpsTrail.push({ lat: ownship.lat, lon: ownship.lon, at: now });
+    gpsTrail = gpsTrail.slice(-120);
+    lastGpsTrailAt = now;
+  }
+
+  if (shouldRefresh) {
+    tracks.clear();
+    radarBlips.clear();
+    previousSweepAngle = null;
+    lastAirspaceKey = "";
+    fetchAirspace();
+  }
 }
 
 async function fetchAircraftFeed(baseUrl, { displaySource, timeoutMs = 6500 } = {}) {
@@ -1619,6 +1686,7 @@ async function fetchPreferredAircraftFeed() {
         const age = Number.isFinite(Number(stratusData.ageSeconds)) ? `${Math.round(Number(stratusData.ageSeconds))}s old` : "not receiving packets";
         throw new Error(`Stratus bridge is stale (${age})`);
       }
+      fetchStratusAuxiliaryData();
       return stratusData;
     } catch (error) {
       console.warn("Stratus traffic source unavailable; falling back to cellular source", error);
@@ -1632,6 +1700,32 @@ async function fetchPreferredAircraftFeed() {
   return fetchAircraftFeed(adsbProxyBaseUrl, {
     displaySource: "Cellular",
     timeoutMs: 6500
+  });
+}
+
+async function fetchStratusJson(path, timeoutMs = 1200) {
+  if (!stratusBridgeBaseUrl) return null;
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${stratusBridgeBaseUrl}${path}`, {
+      signal: controller.signal,
+      headers: { accept: "application/json" }
+    });
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+function fetchStratusAuxiliaryData() {
+  Promise.all([fetchStratusJson("/api/weather"), fetchStratusJson("/api/ahrs")]).then(([weather, ahrs]) => {
+    if (weather) stratusWeatherData = weather;
+    if (ahrs) stratusAhrsData = ahrs;
   });
 }
 
@@ -2751,6 +2845,13 @@ function setRange(nextRange) {
 
 function updateBottomRangeButton() {
   if (!wxRangeButton) return;
+  if (bottomRangeButtons) {
+    const showBottomRanges = shell.classList.contains("panel-collapsed") && !weatherMode && !trafficAlertActive;
+    bottomRangeButtons.hidden = !showBottomRanges;
+    for (const button of bottomRangeButtons.querySelectorAll("button")) {
+      button.classList.toggle("active", Number(button.dataset.range) === radiusMiles);
+    }
+  }
 
   if (weatherMode) {
     wxRangeButton.hidden = false;
@@ -2809,6 +2910,14 @@ function setPrecipitationLayer(enabled) {
 }
 
 rangeButtons.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-range]");
+  if (!button) return;
+  setRange(Number(button.dataset.range));
+  fetchAirspace();
+  fetchTraffic({ force: true });
+});
+
+bottomRangeButtons?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-range]");
   if (!button) return;
   setRange(Number(button.dataset.range));

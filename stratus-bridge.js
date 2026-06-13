@@ -16,10 +16,20 @@ let packetCount = 0;
 let frameCount = 0;
 let trafficFrameCount = 0;
 let ownshipFrameCount = 0;
+let ownshipGeoAltitudeFrameCount = 0;
+let fisbFrameCount = 0;
+let ahrsFrameCount = 0;
+let heartbeatFrameCount = 0;
 let decodeErrors = 0;
 let lastPacketAt = 0;
 let lastFrameAt = 0;
+let lastWeatherFrameAt = 0;
+let lastAhrsFrameAt = 0;
 let ownship = null;
+let ownshipGeoAltitude = null;
+let heartbeat = null;
+let lastFisbSummary = null;
+const messageCounts = new Map();
 
 function json(res, status, body) {
   res.writeHead(status, {
@@ -52,6 +62,42 @@ function decodeCallsign(buffer, offset = 19, length = 8) {
     .toString("ascii")
     .replace(/[^\x20-\x7e]/g, "")
     .trim();
+}
+
+function incrementMessageCount(messageId) {
+  messageCounts.set(messageId, (messageCounts.get(messageId) || 0) + 1);
+}
+
+function decodeHeartbeat(frame) {
+  if (frame.length < 7) return null;
+  return {
+    status1: frame[1],
+    status2: frame[2],
+    timestamp: frame[3] | (frame[4] << 8),
+    messageCounts: frame[5] | (frame[6] << 8),
+    updatedAt: Date.now()
+  };
+}
+
+function decodeOwnshipGeoAltitude(frame) {
+  if (frame.length < 4) return null;
+  const rawAltitude = (frame[1] << 8) | frame[2];
+  const altitude = rawAltitude === 0xffff ? null : rawAltitude * 5 - 1000;
+  return {
+    altitude,
+    verticalWarning: Boolean(frame[3] & 0x80),
+    metrics: Boolean(frame[3] & 0x01),
+    updatedAt: Date.now()
+  };
+}
+
+function summarizeFisb(frame) {
+  const payload = frame.subarray(1);
+  return {
+    byteLength: payload.length,
+    firstBytes: payload.subarray(0, 24).toString("hex").toUpperCase(),
+    updatedAt: Date.now()
+  };
 }
 
 function decodeTrafficReport(frame) {
@@ -94,6 +140,23 @@ function decodeTrafficReport(frame) {
 function decodeGdl90Frame(frame) {
   if (!frame.length) return;
   const messageId = frame[0];
+  incrementMessageCount(messageId);
+
+  if (messageId === 0) {
+    const report = decodeHeartbeat(frame);
+    if (report) {
+      heartbeat = report;
+      heartbeatFrameCount += 1;
+    }
+    return;
+  }
+
+  if (messageId === 7) {
+    lastFisbSummary = summarizeFisb(frame);
+    fisbFrameCount += 1;
+    lastWeatherFrameAt = Date.now();
+    return;
+  }
 
   if (messageId === 10) {
     const report = decodeTrafficReport(frame);
@@ -104,12 +167,33 @@ function decodeGdl90Frame(frame) {
     return;
   }
 
+  if (messageId === 11) {
+    ownshipGeoAltitude = decodeOwnshipGeoAltitude(frame);
+    if (ownshipGeoAltitude) {
+      ownshipFrameCount += 1;
+      ownshipGeoAltitudeFrameCount += 1;
+      if (ownship) {
+        ownship.geoAltitude = ownshipGeoAltitude.altitude;
+        ownship.updatedAt = Date.now();
+      }
+    }
+    return;
+  }
+
   if (messageId === 20) {
     const report = decodeTrafficReport(frame);
     if (report) {
       traffic.set(report.hex || `${report.lat},${report.lon}`, report);
       trafficFrameCount += 1;
     }
+    return;
+  }
+
+  // Stratus AHRS appears to use vendor-specific frames. Keep counters and last-seen
+  // metadata here so packet captures immediately show us which message IDs to decode.
+  if (messageId >= 0x65) {
+    ahrsFrameCount += 1;
+    lastAhrsFrameAt = Date.now();
   }
 }
 
@@ -172,7 +256,52 @@ function aircraftPayload() {
     aircraft,
     ac: aircraft,
     total: aircraft.length,
-    ownship
+    ownship: ownshipPayload().ownship
+  };
+}
+
+function ownshipPayload() {
+  const now = Date.now();
+  const ageSeconds = ownship?.updatedAt ? Math.round((now - ownship.updatedAt) / 1000) : null;
+  return {
+    source: "Stratus",
+    supported: true,
+    stale: ownship?.updatedAt ? now - ownship.updatedAt > staleAfterMs : true,
+    ageSeconds,
+    ownship: ownship
+      ? {
+          ...ownship,
+          seen: Math.max(0, (now - ownship.updatedAt) / 1000),
+          geoAltitude: ownshipGeoAltitude?.altitude ?? ownship.geoAltitude ?? null
+        }
+      : null,
+    heartbeat,
+    geoAltitude: ownshipGeoAltitude
+  };
+}
+
+function weatherPayload() {
+  return {
+    source: "Stratus",
+    supported: false,
+    stale: lastWeatherFrameAt ? Date.now() - lastWeatherFrameAt > staleAfterMs : true,
+    ageSeconds: lastWeatherFrameAt ? Math.round((Date.now() - lastWeatherFrameAt) / 1000) : null,
+    fisbFrameCount,
+    lastFisbSummary,
+    products: [],
+    message: "FIS-B frames are being counted, but weather product decoding is not implemented yet."
+  };
+}
+
+function ahrsPayload() {
+  return {
+    source: "Stratus",
+    supported: false,
+    stale: lastAhrsFrameAt ? Date.now() - lastAhrsFrameAt > staleAfterMs : true,
+    ageSeconds: lastAhrsFrameAt ? Math.round((Date.now() - lastAhrsFrameAt) / 1000) : null,
+    ahrsFrameCount,
+    attitude: null,
+    message: "Vendor-specific Stratus AHRS frames need packet captures or documentation before decoding."
   };
 }
 
@@ -238,10 +367,21 @@ createServer((req, res) => {
       frameCount,
       trafficFrameCount,
       ownshipFrameCount,
+      ownshipGeoAltitudeFrameCount,
+      fisbFrameCount,
+      ahrsFrameCount,
+      heartbeatFrameCount,
       decodeErrors,
       trafficCount: traffic.size,
       lastPacketAgeSeconds: lastPacketAt ? Math.round((Date.now() - lastPacketAt) / 1000) : null,
       lastFrameAgeSeconds: lastFrameAt ? Math.round((Date.now() - lastFrameAt) / 1000) : null,
+      lastWeatherFrameAgeSeconds: lastWeatherFrameAt ? Math.round((Date.now() - lastWeatherFrameAt) / 1000) : null,
+      lastAhrsFrameAgeSeconds: lastAhrsFrameAt ? Math.round((Date.now() - lastAhrsFrameAt) / 1000) : null,
+      messageCounts: Object.fromEntries(
+        Array.from(messageCounts.entries())
+          .sort((a, b) => a[0] - b[0])
+          .map(([id, count]) => [String(id), count])
+      ),
       portStats: Object.fromEntries(
         Array.from(portStats.entries()).map(([port, stats]) => [
           port,
@@ -258,6 +398,21 @@ createServer((req, res) => {
 
   if (url.pathname === "/api/aircraft") {
     json(res, 200, aircraftPayload());
+    return;
+  }
+
+  if (url.pathname === "/api/ownship") {
+    json(res, 200, ownshipPayload());
+    return;
+  }
+
+  if (url.pathname === "/api/weather") {
+    json(res, 200, weatherPayload());
+    return;
+  }
+
+  if (url.pathname === "/api/ahrs") {
+    json(res, 200, ahrsPayload());
     return;
   }
 

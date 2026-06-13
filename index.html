@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./public/styles.css?v=20260612-10" />
+    <link rel="stylesheet" href="./public/styles.css?v=20260612-11" />
   </head>
   <body>
     <main class="shell">
@@ -13,6 +13,15 @@
         <div class="scope-glass"></div>
         <button type="button" class="legend-button" id="legendOpen">Legend</button>
         <button type="button" class="wx-range-button" id="wxRangeButton" hidden>10 NM</button>
+        <div class="bottom-range-buttons" id="bottomRangeButtons" hidden aria-label="Radar range">
+          <button type="button" data-range="2">2</button>
+          <button type="button" data-range="5">5</button>
+          <button type="button" data-range="10" class="active">10</button>
+          <button type="button" data-range="15">15</button>
+          <button type="button" data-range="20">20</button>
+          <button type="button" data-range="50">50</button>
+          <button type="button" data-range="100">100</button>
+        </div>
       </section>
       <div class="wx-nearest" id="wxNearestTarget" hidden>Range to nearest target --</div>
       <div class="proximity-alert" id="proximityAlert" aria-live="polite" hidden></div>
@@ -206,6 +215,6 @@
     </div>
 
     <script src="./public/config.js?v=20260611-1"></script>
-    <script type="module" src="./public/app.js?v=20260612-14"></script>
+    <script type="module" src="./public/app.js?v=20260612-15"></script>
   </body>
 </html>

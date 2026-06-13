@@ -291,6 +291,10 @@ select {
   right: 28px;
 }
 
+.shell.wx-mode .panel-toggle {
+  display: none;
+}
+
 .shell.panel-collapsed .panel-toggle::after {
   right: auto;
   left: 12px;
@@ -325,11 +329,16 @@ select {
 
 .radar-mode-toggle:hover,
 .radar-mode-toggle.active,
-.wx-toggle:hover,
 .wx-toggle.active {
   border-color: var(--amber);
   background: rgba(255, 155, 64, 0.16);
   color: var(--amber);
+}
+
+.wx-toggle:hover:not(.active) {
+  border-color: var(--green);
+  background: rgba(77, 255, 155, 0.12);
+  color: var(--green);
 }
 
 .shell.panel-collapsed .radar-mode-toggle,
@@ -357,6 +366,43 @@ select {
 
 .wx-range-button:hover {
   border-color: var(--green);
+  color: var(--green);
+}
+
+.bottom-range-buttons {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  z-index: 4;
+  display: none;
+  width: min(430px, calc(100% - 32px));
+  transform: translateX(-50%);
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 5px;
+  border: 1px solid rgba(132, 255, 194, 0.2);
+  border-radius: 7px;
+  background: rgba(3, 8, 5, 0.82);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
+  padding: 5px;
+}
+
+.shell.panel-collapsed:not(.wx-mode) .bottom-range-buttons:not([hidden]) {
+  display: grid;
+}
+
+.bottom-range-buttons button {
+  min-height: 30px;
+  border: 1px solid rgba(132, 255, 194, 0.28);
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.16);
+  color: rgba(233, 255, 243, 0.76);
+  cursor: pointer;
+  font: 850 0.7rem ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.bottom-range-buttons button.active {
+  border-color: var(--green);
+  background: rgba(77, 255, 155, 0.18);
   color: var(--green);
 }
 
