@@ -327,6 +327,14 @@ select {
   top: 116px;
 }
 
+.shell.wx-mode .radar-mode-toggle {
+  top: 32px;
+}
+
+.shell.wx-mode .wx-toggle {
+  top: 74px;
+}
+
 .radar-mode-toggle:hover,
 .radar-mode-toggle.active {
   border-color: var(--amber);
@@ -792,10 +800,26 @@ fieldset {
   border-color: rgba(255, 80, 92, 0.76);
 }
 
-.legend-airspace {
+.legend-airspace,
+.legend-airspace-b,
+.legend-airspace-c,
+.legend-airspace-d {
   display: block;
   width: 34px;
   height: 22px;
+}
+
+.legend-airspace-b {
+  border: 2px solid rgba(87, 185, 255, 0.92);
+  border-radius: 50%;
+}
+
+.legend-airspace-c {
+  border: 2px solid rgba(255, 88, 232, 0.86);
+  border-radius: 50%;
+}
+
+.legend-airspace-d {
   border: 2px dashed rgba(35, 96, 202, 0.94);
   border-radius: 50%;
 }
@@ -1107,6 +1131,16 @@ fieldset {
     position: fixed;
     top: 100px;
     right: 16px;
+  }
+
+  .shell.wx-mode .radar-mode-toggle,
+  .shell.wx-mode.panel-collapsed .radar-mode-toggle {
+    top: 16px;
+  }
+
+  .shell.wx-mode .wx-toggle,
+  .shell.wx-mode.panel-collapsed .wx-toggle {
+    top: 58px;
   }
 }
 

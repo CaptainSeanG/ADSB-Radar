@@ -926,7 +926,7 @@ function clearProximityAlert() {
 }
 
 function nearestVisibleAircraft() {
-  const maxDistance = radiusMiles <= 5 ? closeRangeNearestTargetMiles : radiusMiles;
+  const maxDistance = radiusMiles <= 15 ? closeRangeNearestTargetMiles : radiusMiles;
   return visibleAircraft()
     .map((plane) => ({
       plane,
@@ -1659,7 +1659,7 @@ async function fetchAircraftFeed(baseUrl, { displaySource, timeoutMs = 6500 } = 
 
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-  const requestRadiusMiles = radiusMiles <= 5 ? closeRangeNearestTargetMiles : radiusMiles;
+  const requestRadiusMiles = radiusMiles <= 15 ? closeRangeNearestTargetMiles : radiusMiles;
   const aircraftUrl = `${baseUrl}/api/aircraft?lat=${center.lat}&lon=${center.lon}&radiusMiles=${requestRadiusMiles}`;
 
   try {
@@ -2255,7 +2255,7 @@ function drawAirspace(scope) {
 
   const styles = {
     B: { stroke: "rgba(87, 185, 255, 0.92)", fill: "rgba(87, 185, 255, 0.06)", dash: [] },
-    C: { stroke: "rgba(105, 224, 255, 0.78)", fill: "rgba(105, 224, 255, 0.045)", dash: [10, 7] },
+    C: { stroke: "rgba(255, 88, 232, 0.82)", fill: "rgba(255, 88, 232, 0.045)", dash: [] },
     D: { stroke: "rgba(35, 96, 202, 0.92)", fill: "rgba(35, 96, 202, 0.045)", dash: [10, 13] }
   };
 
@@ -2625,8 +2625,8 @@ function formatHeading(value) {
 function drawWeatherHeadingTape(scope) {
   const heading = weatherForwardBearing();
   const centerX = scope.cx;
-  const topY = 126;
-  const lineY = 145;
+  const topY = 42;
+  const lineY = 76;
   const spacing = Math.max(34, Math.min(52, scope.width / 16));
   const leftX = Math.max(24, centerX - spacing * 6.5);
   const rightX = Math.min(scope.width - 24, centerX + spacing * 6.5);
@@ -2747,6 +2747,12 @@ function drawWeatherSector(scope, sweepBearing, sweepProgress) {
   }
 
   const trailDirection = sweepProgress < 0.5 ? -1 : 1;
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.arc(0, 0, scope.radius, leftAngle, rightAngle, false);
+  ctx.closePath();
+  ctx.clip();
   for (let index = 0; index < 22; index += 1) {
     const progress = index / 20;
     const segmentAngle = sweepAngle + trailDirection * progress * 0.52;
@@ -2758,6 +2764,7 @@ function drawWeatherSector(scope, sweepBearing, sweepProgress) {
     ctx.fillStyle = `rgba(${palette.trail}, ${alpha})`;
     ctx.fill();
   }
+  ctx.restore();
 
   ctx.rotate(sweepAngle);
   ctx.strokeStyle = palette.line;
