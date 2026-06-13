@@ -2399,7 +2399,7 @@ function weatherSectorSweepBearing(progress) {
   return normalizedDegrees(weatherForwardBearing() + triangle * wxSectorDegrees);
 }
 
-function drawWeatherSector(scope, sweepBearing) {
+function drawWeatherSector(scope, sweepBearing, sweepProgress) {
   const { left: leftAngle, right: rightAngle } = weatherSectorAngles();
   const sweepAngle = screenAngleForBearing(sweepBearing);
   const palette = sweepPalettes[sweepColor] || sweepPalettes.green;
@@ -2471,9 +2471,10 @@ function drawWeatherSector(scope, sweepBearing) {
     ctx.fillText(`${value}`, x, y);
   }
 
+  const trailDirection = sweepProgress < 0.5 ? -1 : 1;
   for (let index = 0; index < 22; index += 1) {
     const progress = index / 20;
-    const segmentAngle = sweepAngle - progress * 0.52;
+    const segmentAngle = sweepAngle + trailDirection * progress * 0.52;
     const alpha = (1 - progress) ** 2 * 0.24;
     ctx.beginPath();
     ctx.moveTo(0, 0);
@@ -2546,7 +2547,7 @@ function render(now) {
       drawAircraft(scope);
       drawUserNavigation(scope);
     });
-    drawWeatherSector(scope, wxSweepBearing);
+    drawWeatherSector(scope, wxSweepBearing, wxProgress);
   } else {
     drawGrid(scope);
     drawPrecipitation(scope);
