@@ -340,7 +340,7 @@ select {
 .wx-range-button {
   position: absolute;
   left: 50%;
-  bottom: 22px;
+  bottom: 8px;
   z-index: 4;
   min-width: 92px;
   min-height: 36px;
@@ -366,8 +366,8 @@ select {
 
 .shell.wx-mode .wx-nearest:not([hidden]) {
   display: grid;
-  height: 48px;
-  min-height: 48px;
+  height: 62px;
+  min-height: 62px;
   grid-column: 1;
   grid-template-areas:
     "label label"

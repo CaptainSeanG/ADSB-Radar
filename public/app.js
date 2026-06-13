@@ -2290,27 +2290,29 @@ function drawUserNavigation(scope) {
     ctx.setLineDash([]);
   }
 
-  const heading = activeTrackHeadingDegrees() ?? gpsTrackDegrees ?? compassHeadingDegrees ?? 0;
-  const headingAngle = activeTrackHeadingDegrees() !== null ? -Math.PI / 2 : screenAngleForBearing(heading);
-  ctx.save();
-  ctx.translate(scope.cx, scope.cy);
-  ctx.rotate(headingAngle);
-  ctx.fillStyle = "rgba(5, 58, 38, 0.96)";
-  ctx.strokeStyle = "rgba(112, 255, 181, 0.9)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(14, 0);
-  ctx.quadraticCurveTo(1, -9, -8, -5);
-  ctx.quadraticCurveTo(-4, 0, -8, 5);
-  ctx.quadraticCurveTo(1, 9, 14, 0);
-  ctx.closePath();
-  ctx.stroke();
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(-1, 0, 2.6, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(2, 18, 12, 0.9)";
-  ctx.fill();
-  ctx.restore();
+  if (!weatherMode) {
+    const heading = activeTrackHeadingDegrees() ?? gpsTrackDegrees ?? compassHeadingDegrees ?? 0;
+    const headingAngle = activeTrackHeadingDegrees() !== null ? -Math.PI / 2 : screenAngleForBearing(heading);
+    ctx.save();
+    ctx.translate(scope.cx, scope.cy);
+    ctx.rotate(headingAngle);
+    ctx.fillStyle = "rgba(5, 58, 38, 0.96)";
+    ctx.strokeStyle = "rgba(112, 255, 181, 0.9)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(14, 0);
+    ctx.quadraticCurveTo(1, -9, -8, -5);
+    ctx.quadraticCurveTo(-4, 0, -8, 5);
+    ctx.quadraticCurveTo(1, 9, 14, 0);
+    ctx.closePath();
+    ctx.stroke();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(-1, 0, 2.6, 0, Math.PI * 2);
+    ctx.fillStyle = "rgba(2, 18, 12, 0.9)";
+    ctx.fill();
+    ctx.restore();
+  }
 
   if (gpsSpeedKts >= 2 && Number.isFinite(gpsTrackDegrees)) {
     const projected = destinationPoint(center.lat, center.lon, gpsTrackDegrees, (gpsSpeedKts / 3600) * 30 * 1.15078);
@@ -2329,6 +2331,41 @@ function drawUserNavigation(scope) {
     ctx.fill();
   }
 
+  ctx.restore();
+}
+
+function drawArcOwnship(scope) {
+  if (!weatherMode) return;
+
+  ctx.save();
+  ctx.translate(scope.cx, scope.cy - 18);
+  ctx.strokeStyle = "rgba(233, 255, 243, 0.92)";
+  ctx.fillStyle = "rgba(233, 255, 243, 0.92)";
+  ctx.lineWidth = 2.4;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
+  ctx.beginPath();
+  ctx.moveTo(0, -18);
+  ctx.lineTo(0, 18);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(-27, 0);
+  ctx.lineTo(27, 0);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(-12, 14);
+  ctx.lineTo(12, 14);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(0, -22);
+  ctx.lineTo(-5, -13);
+  ctx.lineTo(5, -13);
+  ctx.closePath();
+  ctx.fill();
   ctx.restore();
 }
 
@@ -2408,8 +2445,8 @@ function formatHeading(value) {
 function drawWeatherHeadingTape(scope) {
   const heading = weatherForwardBearing();
   const centerX = scope.cx;
-  const topY = 18;
-  const lineY = 48;
+  const topY = 126;
+  const lineY = 156;
   const spacing = Math.max(34, Math.min(52, scope.width / 16));
   const leftX = Math.max(24, centerX - spacing * 6.5);
   const rightX = Math.min(scope.width - 24, centerX + spacing * 6.5);
@@ -2605,6 +2642,7 @@ function render(now) {
     });
     drawWeatherSector(scope, wxSweepBearing, wxProgress);
     drawWeatherHeadingTape(scope);
+    drawArcOwnship(scope);
   } else {
     drawGrid(scope);
     drawPrecipitation(scope);
@@ -2656,6 +2694,11 @@ function setWeatherMode(enabled) {
     orientationMode = "track";
     orientationModeSelect.value = "track";
     queueCompassHeadingEnable();
+    if (!shell.classList.contains("panel-collapsed")) {
+      shell.classList.add("panel-collapsed");
+      updatePanelToggle();
+      window.setTimeout(resizeCanvas, 240);
+    }
   } else if (!enabled && weatherMode) {
     orientationMode = previousOrientationBeforeArc === "track" ? "track" : "north";
     orientationModeSelect.value = orientationMode;
