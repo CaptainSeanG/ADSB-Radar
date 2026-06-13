@@ -307,11 +307,11 @@ select {
   right: 32px;
   width: 34px;
   height: 34px;
-  border: 1px solid rgba(233, 255, 243, 0.34);
+  border: 1px solid rgba(255, 207, 106, 0.72);
   border-radius: 7px;
-  background: rgba(3, 8, 5, 0.82);
+  background: #2a1a05;
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.32);
-  color: rgba(233, 255, 243, 0.8);
+  color: var(--amber);
   cursor: pointer;
   font: 850 0.68rem ui-monospace, SFMono-Regular, Consolas, monospace;
   letter-spacing: 0.04em;
@@ -328,17 +328,26 @@ select {
 }
 
 .radar-mode-toggle:hover,
-.radar-mode-toggle.active,
-.wx-toggle.active {
+.radar-mode-toggle.active {
   border-color: var(--amber);
-  background: rgba(255, 155, 64, 0.16);
+  background: #4a2c06;
   color: var(--amber);
 }
 
-.wx-toggle:hover:not(.active) {
+.wx-toggle {
+  border-color: var(--amber);
+  background: #4a2c06;
+  color: var(--amber);
+}
+
+.wx-toggle.active {
   border-color: var(--green);
-  background: rgba(77, 255, 155, 0.12);
+  background: #06391c;
   color: var(--green);
+}
+
+.wx-toggle:hover {
+  filter: brightness(1.16);
 }
 
 .shell.panel-collapsed .radar-mode-toggle,
@@ -386,7 +395,7 @@ select {
   padding: 5px;
 }
 
-.shell.panel-collapsed:not(.wx-mode) .bottom-range-buttons:not([hidden]) {
+.shell.panel-collapsed .bottom-range-buttons:not([hidden]) {
   display: grid;
 }
 

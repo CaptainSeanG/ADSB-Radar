@@ -41,7 +41,8 @@ const wxSweepSeconds = 2.25;
 const wxSectorDegrees = 50;
 const radarFadeMs = sweepSeconds * 3 * 1000;
 const allowedRanges = [2, 5, 10, 15, 20, 50, 100];
-const wxRanges = [2, 5, 10, 20, 50, 100];
+const gpsTrackThresholdKts = 5 * 0.868976;
+const closeRangeNearestTargetMiles = 20;
 const sweepPalettes = {
   green: {
     trail: "77, 255, 155",
@@ -925,12 +926,14 @@ function clearProximityAlert() {
 }
 
 function nearestVisibleAircraft() {
+  const maxDistance = radiusMiles <= 5 ? closeRangeNearestTargetMiles : radiusMiles;
   return visibleAircraft()
     .map((plane) => ({
       plane,
       distance: milesBetween(center.lat, center.lon, plane.lat, plane.lon),
       bearing: bearingDegrees(center.lat, center.lon, plane.lat, plane.lon)
     }))
+    .filter((target) => target.distance <= maxDistance)
     .sort((a, b) => a.distance - b.distance)[0];
 }
 
@@ -998,6 +1001,9 @@ function updateProximityAlert() {
     if (weatherMode) {
       returnToArcAfterThreat = true;
       setWeatherMode(false);
+      orientationMode = "track";
+      orientationModeSelect.value = "track";
+      queueCompassHeadingEnable();
     }
     if (radiusMiles !== 5) {
       setRange(5);
@@ -1061,7 +1067,7 @@ function destinationPoint(lat, lon, bearing, distanceMiles) {
 
 function activeTrackHeadingDegrees() {
   if (!gpsActive || orientationMode !== "track") return null;
-  if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= 0.8) return gpsTrackDegrees;
+  if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= gpsTrackThresholdKts) return gpsTrackDegrees;
   if (Number.isFinite(compassHeadingDegrees)) return compassHeadingDegrees;
   return null;
 }
@@ -1653,7 +1659,8 @@ async function fetchAircraftFeed(baseUrl, { displaySource, timeoutMs = 6500 } = 
 
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
-  const aircraftUrl = `${baseUrl}/api/aircraft?lat=${center.lat}&lon=${center.lon}&radiusMiles=${radiusMiles}`;
+  const requestRadiusMiles = radiusMiles <= 5 ? closeRangeNearestTargetMiles : radiusMiles;
+  const aircraftUrl = `${baseUrl}/api/aircraft?lat=${center.lat}&lon=${center.lon}&radiusMiles=${requestRadiusMiles}`;
 
   try {
     const response = await fetch(aircraftUrl, {
@@ -2600,7 +2607,7 @@ function withWeatherSectorClip(scope, draw) {
 }
 
 function weatherForwardBearing() {
-  if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= 0.8) return gpsTrackDegrees;
+  if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= gpsTrackThresholdKts) return gpsTrackDegrees;
   if (Number.isFinite(compassHeadingDegrees)) return compassHeadingDegrees;
   return activeTrackHeadingDegrees() ?? 0;
 }
@@ -2619,14 +2626,14 @@ function drawWeatherHeadingTape(scope) {
   const heading = weatherForwardBearing();
   const centerX = scope.cx;
   const topY = 126;
-  const lineY = 156;
+  const lineY = 145;
   const spacing = Math.max(34, Math.min(52, scope.width / 16));
   const leftX = Math.max(24, centerX - spacing * 6.5);
   const rightX = Math.min(scope.width - 24, centerX + spacing * 6.5);
 
   ctx.save();
-  ctx.strokeStyle = "rgba(233, 255, 243, 0.58)";
-  ctx.fillStyle = "rgba(233, 255, 243, 0.74)";
+  ctx.strokeStyle = "rgba(98, 213, 255, 0.78)";
+  ctx.fillStyle = "rgba(98, 213, 255, 0.86)";
   ctx.lineWidth = 1.4;
   ctx.font = "850 12px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.textAlign = "center";
@@ -2646,22 +2653,22 @@ function drawWeatherHeadingTape(scope) {
     if (x < leftX || x > rightX) continue;
 
     ctx.beginPath();
-    ctx.moveTo(x, lineY - 7);
-    ctx.lineTo(x, lineY + 7);
+    ctx.moveTo(x, lineY - 14);
+    ctx.lineTo(x, lineY - 2);
     ctx.stroke();
-    ctx.fillText(formatHeading(tapeHeading), x, lineY + 21);
+    ctx.fillText(formatHeading(tapeHeading), x, lineY + 14);
   }
 
   const boxWidth = 64;
   const boxHeight = 28;
-  ctx.fillStyle = "rgba(3, 8, 5, 0.88)";
-  ctx.strokeStyle = "rgba(255, 207, 106, 0.8)";
+  ctx.fillStyle = "#000000";
+  ctx.strokeStyle = "rgba(98, 213, 255, 0.9)";
   ctx.lineWidth = 1.6;
   ctx.beginPath();
   ctx.rect(centerX - boxWidth / 2, topY, boxWidth, boxHeight);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = "rgba(255, 232, 150, 0.98)";
+  ctx.fillStyle = "rgba(98, 213, 255, 0.98)";
   ctx.font = "950 17px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.fillText(formatHeading(heading), centerX, topY + boxHeight / 2 + 1);
   ctx.restore();
@@ -2846,7 +2853,7 @@ function setRange(nextRange) {
 function updateBottomRangeButton() {
   if (!wxRangeButton) return;
   if (bottomRangeButtons) {
-    const showBottomRanges = shell.classList.contains("panel-collapsed") && !weatherMode && !trafficAlertActive;
+    const showBottomRanges = shell.classList.contains("panel-collapsed") && !trafficAlertActive;
     bottomRangeButtons.hidden = !showBottomRanges;
     for (const button of bottomRangeButtons.querySelectorAll("button")) {
       button.classList.toggle("active", Number(button.dataset.range) === radiusMiles);
@@ -2854,9 +2861,7 @@ function updateBottomRangeButton() {
   }
 
   if (weatherMode) {
-    wxRangeButton.hidden = false;
-    wxRangeButton.textContent = `${radiusMiles} NM`;
-    wxRangeButton.setAttribute("aria-label", "Change weather radar range");
+    wxRangeButton.hidden = true;
     return;
   }
 
@@ -2928,7 +2933,6 @@ bottomRangeButtons?.addEventListener("click", (event) => {
 radarModeToggle?.addEventListener("click", () => {
   if (!weatherMode) {
     previousRangeBeforeWx = radiusMiles;
-    if (!wxRanges.includes(radiusMiles)) setRange(10);
   } else if (allowedRanges.includes(previousRangeBeforeWx)) {
     setRange(previousRangeBeforeWx);
   }
@@ -2941,16 +2945,8 @@ wxToggle?.addEventListener("click", () => {
 });
 
 wxRangeButton?.addEventListener("click", () => {
-  if (!weatherMode) {
-    const nextRange = radiusMiles === 2 ? 5 : 2;
-    setRange(nextRange);
-    fetchAirspace();
-    fetchTraffic({ force: true });
-    return;
-  }
-
-  const currentIndex = wxRanges.indexOf(radiusMiles);
-  const nextRange = wxRanges[(currentIndex + 1) % wxRanges.length] || 5;
+  if (weatherMode) return;
+  const nextRange = radiusMiles === 2 ? 5 : 2;
   setRange(nextRange);
   fetchAirspace();
   fetchTraffic({ force: true });
