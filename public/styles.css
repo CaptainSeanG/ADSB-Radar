@@ -854,6 +854,10 @@ fieldset {
   font-size: 0.9rem;
 }
 
+.legend-item strong span {
+  display: inline;
+}
+
 .legend-item div span {
   margin-top: 2px;
   color: var(--muted);
@@ -874,9 +878,31 @@ fieldset {
   box-shadow: 0 0 12px rgba(233, 255, 243, 0.28);
 }
 
+.shell.light-theme .legend-aircraft-white {
+  background: #000000;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.26);
+}
+
 .legend-aircraft-orange {
   background: #ff9d35;
   box-shadow: 0 0 14px rgba(255, 157, 53, 0.34);
+}
+
+.shell.light-theme .legend-aircraft-orange {
+  background: #b54c00;
+  box-shadow: 0 0 12px rgba(181, 76, 0, 0.28);
+}
+
+.legend-item strong span.day-legend-text {
+  display: none;
+}
+
+.shell.light-theme .legend-item strong span.night-legend-text {
+  display: none;
+}
+
+.shell.light-theme .legend-item strong span.day-legend-text {
+  display: inline;
 }
 
 .legend-aircraft-red {

@@ -64,7 +64,14 @@ const radarThemes = {
     cardinalText: "rgba(233, 255, 243, 0.72)",
     aircraftText: "rgba(233, 255, 243, 0.92)",
     aircraftData: "rgba(77, 255, 155, 0.86)",
-    hud: "rgba(233, 255, 243, 0.75)"
+    hud: "rgba(233, 255, 243, 0.75)",
+    lowTarget: "rgba(233, 255, 243, 0.9)",
+    midTarget: "rgba(255, 157, 53, 0.9)",
+    arcPrimary: "rgba(233, 255, 243, 0.82)",
+    arcSecondary: "rgba(233, 255, 243, 0.34)",
+    arcText: "rgba(233, 255, 243, 0.78)",
+    arcHeadingTape: "rgba(98, 213, 255, 0.86)",
+    arcHeadingBox: "rgba(98, 213, 255, 0.98)"
   },
   light: {
     background: "#d8eadf",
@@ -75,7 +82,14 @@ const radarThemes = {
     cardinalText: "rgba(0, 45, 40, 0.86)",
     aircraftText: "rgba(0, 29, 24, 0.94)",
     aircraftData: "rgba(0, 112, 64, 0.9)",
-    hud: "rgba(0, 44, 35, 0.86)"
+    hud: "rgba(0, 44, 35, 0.86)",
+    lowTarget: "rgba(0, 0, 0, 0.9)",
+    midTarget: "rgba(181, 76, 0, 0.96)",
+    arcPrimary: "rgba(0, 0, 0, 0.82)",
+    arcSecondary: "rgba(0, 0, 0, 0.3)",
+    arcText: "rgba(0, 0, 0, 0.8)",
+    arcHeadingTape: "rgba(0, 58, 142, 0.92)",
+    arcHeadingBox: "rgba(98, 213, 255, 0.98)"
   }
 };
 const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
@@ -369,10 +383,11 @@ function aircraftHighlightState(key, now) {
   const elapsed = now - highlight.startsAt;
   const duration = highlight.endsAt - highlight.startsAt;
   const highlightMix = Math.max(0, 1 - elapsed / duration);
-  const pulseWindow = 3000;
-  const pulseProgress = Math.min(1, elapsed / pulseWindow);
-  const pulseWave = Math.max(0, Math.sin(pulseProgress * Math.PI));
-  const scale = 1 + pulseWave * 2;
+  const isProximityAlert = key === proximityAlertKey && trafficAlertActive;
+  const pulsePeriod = isProximityAlert ? 760 : 1500;
+  const pulseWave = (Math.sin((elapsed / pulsePeriod) * Math.PI * 2 - Math.PI / 2) + 1) / 2;
+  const baseScale = isProximityAlert ? 1.85 : 1;
+  const scale = baseScale + pulseWave * (isProximityAlert ? 1.25 : 2);
 
   return { scale, highlightMix, active: true };
 }
@@ -1343,6 +1358,7 @@ function isFlightLevelTraffic(plane) {
 }
 
 function altitudeColorStyle(plane) {
+  const theme = currentRadarTheme();
   const altitude = Number(plane.altitude);
   if (Number.isFinite(altitude) && altitude >= 18000) {
     return {
@@ -1352,12 +1368,12 @@ function altitudeColorStyle(plane) {
   }
   if (Number.isFinite(altitude) && altitude >= 10000) {
     return {
-      target: "#ff9d35",
-      trail: "rgba(255, 157, 53, 0.66)"
+      target: theme.midTarget,
+      trail: lightTheme ? "rgba(181, 76, 0, 0.66)" : "rgba(255, 157, 53, 0.66)"
     };
   }
   return {
-    target: "#e9fff3",
+    target: theme.lowTarget,
     trail: "rgba(98, 213, 255, 0.45)"
   };
 }
@@ -2669,6 +2685,7 @@ function formatHeading(value) {
 }
 
 function drawWeatherHeadingTape(scope) {
+  const theme = currentRadarTheme();
   const heading = weatherForwardBearing();
   const centerX = scope.cx;
   const topY = 82;
@@ -2678,8 +2695,8 @@ function drawWeatherHeadingTape(scope) {
   const rightX = Math.min(scope.width - 24, centerX + spacing * 6.5);
 
   ctx.save();
-  ctx.strokeStyle = "rgba(98, 213, 255, 0.78)";
-  ctx.fillStyle = "rgba(98, 213, 255, 0.86)";
+  ctx.strokeStyle = theme.arcHeadingTape;
+  ctx.fillStyle = theme.arcHeadingTape;
   ctx.lineWidth = 1.4;
   ctx.font = "850 12px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.textAlign = "center";
@@ -2708,19 +2725,20 @@ function drawWeatherHeadingTape(scope) {
   const boxWidth = 64;
   const boxHeight = 28;
   ctx.fillStyle = "#000000";
-  ctx.strokeStyle = "rgba(98, 213, 255, 0.9)";
+  ctx.strokeStyle = theme.arcHeadingBox;
   ctx.lineWidth = 1.6;
   ctx.beginPath();
   ctx.rect(centerX - boxWidth / 2, topY, boxWidth, boxHeight);
   ctx.fill();
   ctx.stroke();
-  ctx.fillStyle = "rgba(98, 213, 255, 0.98)";
+  ctx.fillStyle = theme.arcHeadingBox;
   ctx.font = "950 17px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.fillText(formatHeading(heading), centerX, topY + boxHeight / 2 + 1);
   ctx.restore();
 }
 
 function drawWeatherSector(scope, sweepBearing, sweepProgress) {
+  const theme = currentRadarTheme();
   const { left: leftAngle, right: rightAngle } = weatherSectorAngles();
   const sweepAngle = screenAngleForBearing(sweepBearing);
   const palette = sweepPalettes[sweepColor] || sweepPalettes.green;
@@ -2728,7 +2746,7 @@ function drawWeatherSector(scope, sweepBearing, sweepProgress) {
   ctx.save();
   ctx.translate(scope.cx, scope.cy);
 
-  ctx.strokeStyle = "rgba(233, 255, 243, 0.82)";
+  ctx.strokeStyle = theme.arcPrimary;
   ctx.lineWidth = 2;
   for (const angle of [leftAngle, rightAngle]) {
     ctx.beginPath();
@@ -2737,7 +2755,7 @@ function drawWeatherSector(scope, sweepBearing, sweepProgress) {
     ctx.stroke();
   }
 
-  ctx.strokeStyle = "rgba(233, 255, 243, 0.34)";
+  ctx.strokeStyle = theme.arcSecondary;
   ctx.setLineDash([2, 10]);
   for (const fraction of [0.25, 0.5, 0.75, 1]) {
     ctx.beginPath();
@@ -2746,8 +2764,8 @@ function drawWeatherSector(scope, sweepBearing, sweepProgress) {
   }
   ctx.setLineDash([]);
 
-  ctx.strokeStyle = "rgba(233, 255, 243, 0.62)";
-  ctx.fillStyle = "rgba(233, 255, 243, 0.78)";
+  ctx.strokeStyle = theme.arcPrimary;
+  ctx.fillStyle = theme.arcText;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = "850 12px ui-monospace, SFMono-Regular, Consolas, monospace";
@@ -2781,7 +2799,7 @@ function drawWeatherSector(scope, sweepBearing, sweepProgress) {
   }
 
   const labelValues = [2, 5, 10, 20, 50, 100].filter((value) => value <= radiusMiles);
-  ctx.fillStyle = "rgba(233, 255, 243, 0.74)";
+  ctx.fillStyle = theme.arcText;
   ctx.font = "800 11px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
