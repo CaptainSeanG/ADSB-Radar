@@ -74,12 +74,13 @@ const radarThemes = {
     arcHeadingBox: "rgba(98, 213, 255, 0.98)"
   },
   light: {
-    background: "#d8eadf",
+    background: "#8fa79a",
+    scopeBackground: "#d8eadf",
     grid: "rgba(0, 95, 58, 0.28)",
     boundary: "rgba(0, 92, 145, 0.55)",
     headingTicks: "rgba(0, 55, 48, 0.48)",
-    headingText: "rgba(0, 55, 48, 0.74)",
-    cardinalText: "rgba(0, 45, 40, 0.86)",
+    headingText: "rgba(0, 42, 38, 0.84)",
+    cardinalText: "rgba(0, 25, 22, 0.94)",
     aircraftText: "rgba(0, 29, 24, 0.94)",
     aircraftData: "rgba(0, 112, 64, 0.9)",
     hud: "rgba(0, 44, 35, 0.86)",
@@ -2147,7 +2148,7 @@ function drawGrid(scope) {
   drawHeadingTicks(scope);
 
   ctx.fillStyle = theme.cardinalText;
-  ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
+  ctx.font = "850 16px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.textAlign = "center";
   for (const cardinal of [
     { label: "N", bearing: 0 },
@@ -2186,7 +2187,7 @@ function drawHeadingTicks(scope) {
     if (isLabeled) {
       const label = String(bearing).padStart(3, "0");
       const labelRadius = scope.radius + 18;
-      ctx.font = "700 11px ui-monospace, SFMono-Regular, Consolas, monospace";
+      ctx.font = "850 14px ui-monospace, SFMono-Regular, Consolas, monospace";
       ctx.fillText(label, Math.cos(angle) * labelRadius, Math.sin(angle) * labelRadius);
     }
   }
@@ -2879,8 +2880,18 @@ function render(now) {
   }
 
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = currentRadarTheme().background;
+  const theme = currentRadarTheme();
+  ctx.fillStyle = theme.background;
   ctx.fillRect(0, 0, width, height);
+  if (!weatherMode && theme.scopeBackground) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
+    ctx.clip();
+    ctx.fillStyle = theme.scopeBackground;
+    ctx.fillRect(0, 0, width, height);
+    ctx.restore();
+  }
 
   pruneExpiredRadarBlips();
   if (weatherMode) updateRadarBlipsForWeatherSweep(wxAngle);

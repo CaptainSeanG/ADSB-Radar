@@ -53,10 +53,10 @@ body::before {
 }
 
 .shell.light-theme {
-  --panel: rgba(238, 249, 241, 0.88);
-  --panel-strong: rgba(224, 242, 233, 0.94);
-  --text: #08261d;
-  --muted: #315e50;
+  --panel: rgba(217, 234, 224, 0.94);
+  --panel-strong: rgba(192, 216, 204, 0.96);
+  --text: #02150f;
+  --muted: #17382f;
   --shadow: rgba(31, 55, 47, 0.24);
 }
 
@@ -114,8 +114,8 @@ select {
 .shell.light-theme .radar-wrap {
   border-color: rgba(74, 95, 84, 0.76);
   background:
-    linear-gradient(145deg, rgba(255, 255, 255, 0.62), rgba(183, 207, 196, 0.68)),
-    radial-gradient(circle at center, rgba(218, 239, 226, 0.96), #b8d3c8 72%);
+    linear-gradient(145deg, rgba(67, 86, 77, 0.72), rgba(122, 148, 136, 0.66)),
+    radial-gradient(circle at center, rgba(196, 220, 207, 0.88), #718a7f 78%);
   box-shadow:
     0 24px 60px rgba(56, 78, 69, 0.34),
     inset 0 0 0 12px rgba(204, 217, 207, 0.94),
@@ -452,19 +452,53 @@ select {
 
 .shell.light-theme .panel,
 .shell.light-theme .settings-modal {
-  border-color: rgba(0, 92, 62, 0.22);
-  background: rgba(239, 249, 243, 0.94);
+  border-color: rgba(0, 57, 40, 0.34);
+  background: rgba(214, 232, 221, 0.96);
 }
 
 .shell.light-theme input,
 .shell.light-theme select {
-  background-color: rgba(255, 255, 255, 0.72);
+  border-color: rgba(0, 57, 40, 0.34);
+  background-color: rgba(232, 243, 236, 0.9);
   color: var(--text);
 }
 
 .shell.light-theme select option {
   background: #eff9f3;
   color: var(--text);
+}
+
+.shell.light-theme h1,
+.shell.light-theme h2,
+.shell.light-theme .detail-title,
+.shell.light-theme .plane-head span:first-child {
+  color: #000f0a;
+}
+
+.shell.light-theme .eyebrow,
+.shell.light-theme .settings-button,
+.shell.light-theme .plane-head span:last-child {
+  color: #004f36;
+}
+
+.shell.light-theme #status,
+.shell.light-theme label,
+.shell.light-theme legend,
+.shell.light-theme .plane-meta,
+.shell.light-theme .section-title span,
+.shell.light-theme .aircraft-detail dt {
+  color: #17382f;
+}
+
+.shell.light-theme #aircraftList li,
+.shell.light-theme .aircraft-detail div,
+.shell.light-theme .legend-item {
+  border-color: rgba(0, 57, 40, 0.28);
+  background: rgba(177, 204, 190, 0.72);
+}
+
+.shell.light-theme .aircraft-row:hover {
+  background: rgba(0, 86, 55, 0.12);
 }
 
 .wx-range-button {
