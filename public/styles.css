@@ -562,7 +562,8 @@ select {
 }
 
 .shell.wx-mode .bottom-range-buttons {
-  bottom: 92px;
+  top: calc(48% + 32px);
+  bottom: auto;
 }
 
 .altitude-bracket-button {
@@ -623,7 +624,8 @@ select {
 
 .shell.wx-mode .altitude-bracket-button,
 .shell.wx-mode.panel-collapsed .altitude-bracket-button {
-  bottom: 146px;
+  top: calc(48% + 78px);
+  bottom: auto;
 }
 
 .wx-nearest {
@@ -639,7 +641,8 @@ select {
   position: absolute;
   z-index: 4;
   right: 28px;
-  bottom: 18px;
+  top: calc(48% + 128px);
+  bottom: auto;
   left: 28px;
   height: 62px;
   min-height: 62px;
@@ -667,7 +670,7 @@ select {
   position: absolute;
   z-index: 6;
   right: 28px;
-  bottom: 18px;
+  bottom: max(18px, calc(20% - 72px));
   left: 28px;
 }
 
