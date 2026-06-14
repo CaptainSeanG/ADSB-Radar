@@ -2669,6 +2669,17 @@ function withWeatherSectorClip(scope, draw) {
   ctx.restore();
 }
 
+function drawWeatherScopeBackground(scope) {
+  const theme = currentRadarTheme();
+  if (!theme.scopeBackground) return;
+
+  ctx.save();
+  weatherSectorPath(scope);
+  ctx.fillStyle = theme.scopeBackground;
+  ctx.fill();
+  ctx.restore();
+}
+
 function weatherForwardBearing() {
   if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= gpsTrackThresholdKts) return gpsTrackDegrees;
   if (Number.isFinite(compassHeadingDegrees)) return compassHeadingDegrees;
@@ -2898,6 +2909,7 @@ function render(now) {
   else updateRadarBlipsForSweep(angle);
   prepareAircraftLabels(scope, Date.now());
   if (weatherMode) {
+    drawWeatherScopeBackground(scope);
     withWeatherSectorClip(scope, () => {
       drawPrecipitation(scope);
       drawAirspace(scope);
@@ -2936,7 +2948,7 @@ function setRange(nextRange) {
 function updateBottomRangeButton() {
   if (!wxRangeButton) return;
   if (bottomRangeButtons) {
-    const showBottomRanges = shell.classList.contains("panel-collapsed") && !trafficAlertActive;
+    const showBottomRanges = shell.classList.contains("panel-collapsed");
     bottomRangeButtons.hidden = !showBottomRanges;
     for (const button of bottomRangeButtons.querySelectorAll("button")) {
       button.classList.toggle("active", Number(button.dataset.range) === radiusMiles);
