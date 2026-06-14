@@ -52,6 +52,26 @@ body::before {
   opacity: 0.55;
 }
 
+.shell.light-theme {
+  --panel: rgba(238, 249, 241, 0.88);
+  --panel-strong: rgba(224, 242, 233, 0.94);
+  --text: #08261d;
+  --muted: #315e50;
+  --shadow: rgba(31, 55, 47, 0.24);
+}
+
+body.light-theme {
+  background:
+    radial-gradient(circle at 48% 44%, rgba(70, 156, 102, 0.16), transparent 28rem),
+    linear-gradient(90deg, rgba(0, 62, 47, 0.035) 1px, transparent 1px) 0 0 / 42px 42px,
+    linear-gradient(rgba(0, 62, 47, 0.03) 1px, transparent 1px) 0 0 / 42px 42px,
+    linear-gradient(125deg, #e5f1e9 0%, #d5e7dc 46%, #c9ddd4 100%);
+}
+
+body.light-theme::before {
+  opacity: 0.28;
+}
+
 button,
 input,
 select {
@@ -91,6 +111,18 @@ select {
     inset 0 0 90px rgba(88, 255, 160, 0.08);
 }
 
+.shell.light-theme .radar-wrap {
+  border-color: rgba(74, 95, 84, 0.76);
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.62), rgba(183, 207, 196, 0.68)),
+    radial-gradient(circle at center, rgba(218, 239, 226, 0.96), #b8d3c8 72%);
+  box-shadow:
+    0 24px 60px rgba(56, 78, 69, 0.34),
+    inset 0 0 0 12px rgba(204, 217, 207, 0.94),
+    inset 0 0 0 15px rgba(89, 118, 104, 0.18),
+    inset 0 0 90px rgba(0, 100, 64, 0.08);
+}
+
 .radar-wrap::after {
   content: "";
   pointer-events: none;
@@ -108,6 +140,19 @@ select {
     inset 0 0 0 1px rgba(255, 248, 210, 0.08),
     inset 0 0 0 18px rgba(0, 0, 0, 0.24),
     inset 0 0 52px rgba(0, 0, 0, 0.56);
+}
+
+.shell.light-theme .radar-wrap::after {
+  background:
+    radial-gradient(circle at 18px 18px, rgba(35, 47, 42, 0.55) 0 4px, rgba(255, 255, 255, 0.62) 4px 6px, transparent 7px),
+    radial-gradient(circle at calc(100% - 18px) 18px, rgba(35, 47, 42, 0.55) 0 4px, rgba(255, 255, 255, 0.62) 4px 6px, transparent 7px),
+    radial-gradient(circle at 18px calc(100% - 18px), rgba(35, 47, 42, 0.55) 0 4px, rgba(255, 255, 255, 0.62) 4px 6px, transparent 7px),
+    radial-gradient(circle at calc(100% - 18px) calc(100% - 18px), rgba(35, 47, 42, 0.55) 0 4px, rgba(255, 255, 255, 0.62) 4px 6px, transparent 7px),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.24), transparent 14%, transparent 84%, rgba(34, 69, 55, 0.12));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.5),
+    inset 0 0 0 18px rgba(255, 255, 255, 0.16),
+    inset 0 0 52px rgba(22, 79, 55, 0.16);
 }
 
 #radar {
@@ -128,6 +173,14 @@ select {
     linear-gradient(rgba(255, 255, 255, 0.025) 50%, rgba(0, 0, 0, 0.025) 50%) 0 0 / 100% 4px,
     radial-gradient(circle at center, transparent 58%, rgba(0, 0, 0, 0.38) 100%);
   mix-blend-mode: screen;
+}
+
+.shell.light-theme .scope-glass {
+  background:
+    radial-gradient(circle at 50% 46%, transparent 54%, rgba(255, 255, 255, 0.2) 74%, rgba(91, 126, 111, 0.24) 100%),
+    linear-gradient(rgba(0, 40, 28, 0.018) 50%, rgba(255, 255, 255, 0.018) 50%) 0 0 / 100% 4px,
+    radial-gradient(circle at center, transparent 60%, rgba(48, 93, 75, 0.16) 100%);
+  mix-blend-mode: multiply;
 }
 
 .legend-button {
@@ -300,6 +353,7 @@ select {
   left: 12px;
 }
 
+.theme-toggle,
 .radar-mode-toggle,
 .wx-toggle {
   position: absolute;
@@ -319,6 +373,13 @@ select {
   transition: right 220ms ease, background 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
+.theme-toggle {
+  top: 32px;
+  right: 74px;
+  width: 42px;
+  min-width: 42px;
+}
+
 .radar-mode-toggle {
   top: 74px;
 }
@@ -331,15 +392,28 @@ select {
   top: 32px;
 }
 
+.shell.wx-mode .theme-toggle {
+  top: 32px;
+  right: 74px;
+}
+
 .shell.wx-mode .wx-toggle {
   top: 74px;
 }
 
+.theme-toggle:hover,
+.theme-toggle.active,
 .radar-mode-toggle:hover,
 .radar-mode-toggle.active {
   border-color: var(--amber);
   background: #4a2c06;
   color: var(--amber);
+}
+
+.theme-toggle.active {
+  border-color: var(--green);
+  background: #06391c;
+  color: var(--green);
 }
 
 .wx-toggle {
@@ -358,9 +432,39 @@ select {
   filter: brightness(1.16);
 }
 
+.shell.panel-collapsed .theme-toggle,
 .shell.panel-collapsed .radar-mode-toggle,
 .shell.panel-collapsed .wx-toggle {
   right: 28px;
+}
+
+.shell.panel-collapsed .theme-toggle {
+  right: 70px;
+}
+
+.shell.light-theme .theme-toggle,
+.shell.light-theme .radar-mode-toggle,
+.shell.light-theme .wx-toggle,
+.shell.light-theme .panel-toggle,
+.shell.light-theme .legend-button {
+  box-shadow: 0 12px 26px rgba(34, 67, 54, 0.22);
+}
+
+.shell.light-theme .panel,
+.shell.light-theme .settings-modal {
+  border-color: rgba(0, 92, 62, 0.22);
+  background: rgba(239, 249, 243, 0.94);
+}
+
+.shell.light-theme input,
+.shell.light-theme select {
+  background-color: rgba(255, 255, 255, 0.72);
+  color: var(--text);
+}
+
+.shell.light-theme select option {
+  background: #eff9f3;
+  color: var(--text);
 }
 
 .wx-range-button {
@@ -1119,6 +1223,13 @@ fieldset {
     order: -1;
   }
 
+  .theme-toggle,
+  .shell.panel-collapsed .theme-toggle {
+    position: fixed;
+    top: 16px;
+    right: 58px;
+  }
+
   .radar-mode-toggle,
   .shell.panel-collapsed .radar-mode-toggle {
     position: fixed;
@@ -1136,6 +1247,13 @@ fieldset {
   .shell.wx-mode .radar-mode-toggle,
   .shell.wx-mode.panel-collapsed .radar-mode-toggle {
     top: 16px;
+    right: 16px;
+  }
+
+  .shell.wx-mode .theme-toggle,
+  .shell.wx-mode.panel-collapsed .theme-toggle {
+    top: 16px;
+    right: 58px;
   }
 
   .shell.wx-mode .wx-toggle,

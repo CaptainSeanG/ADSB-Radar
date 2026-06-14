@@ -4,6 +4,7 @@ const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
 const form = document.querySelector("#controls");
 const panelToggle = document.querySelector("#panelToggle");
+const themeToggle = document.querySelector("#themeToggle");
 const radarModeToggle = document.querySelector("#radarModeToggle");
 const wxToggle = document.querySelector("#wxToggle");
 const wxRangeButton = document.querySelector("#wxRangeButton");
@@ -51,6 +52,30 @@ const sweepPalettes = {
   orange: {
     trail: "255, 155, 64",
     line: "rgba(255, 180, 92, 0.96)"
+  }
+};
+const radarThemes = {
+  dark: {
+    background: "#020503",
+    grid: "rgba(90, 255, 163, 0.22)",
+    boundary: "rgba(98, 213, 255, 0.38)",
+    headingTicks: "rgba(233, 255, 243, 0.42)",
+    headingText: "rgba(233, 255, 243, 0.64)",
+    cardinalText: "rgba(233, 255, 243, 0.72)",
+    aircraftText: "rgba(233, 255, 243, 0.92)",
+    aircraftData: "rgba(77, 255, 155, 0.86)",
+    hud: "rgba(233, 255, 243, 0.75)"
+  },
+  light: {
+    background: "#d8eadf",
+    grid: "rgba(0, 95, 58, 0.28)",
+    boundary: "rgba(0, 92, 145, 0.55)",
+    headingTicks: "rgba(0, 55, 48, 0.48)",
+    headingText: "rgba(0, 55, 48, 0.74)",
+    cardinalText: "rgba(0, 45, 40, 0.86)",
+    aircraftText: "rgba(0, 29, 24, 0.94)",
+    aircraftData: "rgba(0, 112, 64, 0.9)",
+    hud: "rgba(0, 44, 35, 0.86)"
   }
 };
 const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
@@ -262,6 +287,7 @@ let showGroundTraffic = false;
 let showFlightLevelsTraffic = true;
 let showRadarData = true;
 let showPrecipitation = false;
+let lightTheme = window.localStorage.getItem("ADSB_RADAR_THEME") === "light";
 let radarSoundsEnabled = true;
 let radarSoundStyle = "softTick";
 let orientationMode = "north";
@@ -633,6 +659,23 @@ function resizeCanvas() {
   canvas.width = Math.max(1, Math.floor(rect.width * pixelRatio));
   canvas.height = Math.max(1, Math.floor(rect.height * pixelRatio));
   ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+}
+
+function currentRadarTheme() {
+  return lightTheme ? radarThemes.light : radarThemes.dark;
+}
+
+function setLightTheme(enabled) {
+  lightTheme = Boolean(enabled);
+  window.localStorage.setItem("ADSB_RADAR_THEME", lightTheme ? "light" : "dark");
+  document.body.classList.toggle("light-theme", lightTheme);
+  shell.classList.toggle("light-theme", lightTheme);
+  if (themeToggle) {
+    themeToggle.classList.toggle("active", lightTheme);
+    themeToggle.textContent = lightTheme ? "NITE" : "DAY";
+    themeToggle.setAttribute("aria-pressed", String(lightTheme));
+    themeToggle.setAttribute("aria-label", lightTheme ? "Use dark cockpit theme" : "Use light cockpit theme");
+  }
 }
 
 function updatePanelToggle() {
@@ -2059,9 +2102,10 @@ function renderList() {
 }
 
 function drawGrid(scope) {
+  const theme = currentRadarTheme();
   ctx.save();
   ctx.translate(scope.cx, scope.cy);
-  ctx.strokeStyle = "rgba(90, 255, 163, 0.22)";
+  ctx.strokeStyle = theme.grid;
   ctx.lineWidth = 1;
 
   for (let ring = 1; ring <= 4; ring += 1) {
@@ -2078,7 +2122,7 @@ function drawGrid(scope) {
     ctx.stroke();
   }
 
-  ctx.strokeStyle = "rgba(98, 213, 255, 0.38)";
+  ctx.strokeStyle = theme.boundary;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(0, 0, scope.radius, 0, Math.PI * 2);
@@ -2086,7 +2130,7 @@ function drawGrid(scope) {
 
   drawHeadingTicks(scope);
 
-  ctx.fillStyle = "rgba(233, 255, 243, 0.72)";
+  ctx.fillStyle = theme.cardinalText;
   ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.textAlign = "center";
   for (const cardinal of [
@@ -2102,9 +2146,10 @@ function drawGrid(scope) {
 }
 
 function drawHeadingTicks(scope) {
+  const theme = currentRadarTheme();
   ctx.save();
-  ctx.strokeStyle = "rgba(233, 255, 243, 0.42)";
-  ctx.fillStyle = "rgba(233, 255, 243, 0.64)";
+  ctx.strokeStyle = theme.headingTicks;
+  ctx.fillStyle = theme.headingText;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
@@ -2364,6 +2409,7 @@ function drawTrack(scope, plane, alpha = 1) {
 }
 
 function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
+  const theme = currentRadarTheme();
   const highlightMix = highlight?.highlightMix || 0;
   const heading = Number.isFinite(Number(plane.track))
     ? ((Number(plane.track) - radarRotationDegrees() - 90) * Math.PI) / 180
@@ -2388,13 +2434,13 @@ function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   ctx.fill();
   ctx.restore();
 
-  ctx.fillStyle = "rgba(233, 255, 243, 0.92)";
+  ctx.fillStyle = theme.aircraftText;
   if (showRadarData) {
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.fillText(compactLabel ? aircraftCompactLabel(plane) : aircraftDisplayLabel(plane), point.x + 13, point.y - 11);
     if (!compactLabel) {
-      ctx.fillStyle = "rgba(77, 255, 155, 0.86)";
+      ctx.fillStyle = theme.aircraftData;
       ctx.fillText(`${formatAltitude(plane.altitude)} ${formatSpeed(plane.speed)}`, point.x + 13, point.y + 4);
     }
     ctx.restore();
@@ -2777,8 +2823,9 @@ function drawWeatherSector(scope, sweepBearing, sweepProgress) {
 }
 
 function drawHud(scope) {
+  const theme = currentRadarTheme();
   ctx.save();
-  ctx.fillStyle = "rgba(233, 255, 243, 0.75)";
+  ctx.fillStyle = theme.hud;
   ctx.font = "700 12px ui-monospace, SFMono-Regular, Consolas, monospace";
   ctx.textAlign = "left";
   ctx.fillText(`${visibleRadarAircraft().length} TRACKS`, 22, 28);
@@ -2814,7 +2861,7 @@ function render(now) {
   }
 
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#020503";
+  ctx.fillStyle = currentRadarTheme().background;
   ctx.fillRect(0, 0, width, height);
 
   pruneExpiredRadarBlips();
@@ -3120,6 +3167,10 @@ panelToggle.addEventListener("click", () => {
   window.setTimeout(resizeCanvas, 240);
 });
 
+themeToggle?.addEventListener("click", () => {
+  setLightTheme(!lightTheme);
+});
+
 proximityAlertEl?.addEventListener("click", () => {
   if (!trafficAlertActive || !proximityAlertKey) return;
   proximityAlertSolid = true;
@@ -3169,6 +3220,7 @@ radarDataToggle.addEventListener("change", () => {
 });
 
 radarSoundStyleSelect.value = radarSoundStyle;
+setLightTheme(lightTheme);
 setWeatherMode(false);
 setPrecipitationLayer(showPrecipitation);
 installRadarAudioRecovery();
