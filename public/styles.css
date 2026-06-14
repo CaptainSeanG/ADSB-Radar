@@ -561,6 +561,49 @@ select {
   color: var(--green);
 }
 
+.shell.wx-mode .bottom-range-buttons {
+  bottom: -4px;
+}
+
+.altitude-bracket-button {
+  position: absolute;
+  right: 30px;
+  bottom: 22px;
+  z-index: 5;
+  min-width: 76px;
+  min-height: 34px;
+  border: 1px solid rgba(132, 255, 194, 0.28);
+  border-radius: 6px;
+  background: rgba(3, 8, 5, 0.82);
+  color: rgba(233, 255, 243, 0.78);
+  cursor: pointer;
+  font: 900 0.72rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.altitude-bracket-button.active {
+  border-color: var(--amber);
+  background: #4a2c06;
+  color: var(--amber);
+}
+
+.shell.light-theme .altitude-bracket-button {
+  border-color: rgba(0, 57, 40, 0.34);
+  background: rgba(232, 243, 236, 0.88);
+  color: #02150f;
+}
+
+.shell.light-theme .altitude-bracket-button.active {
+  border-color: #b54c00;
+  background: rgba(181, 76, 0, 0.16);
+  color: #7a3100;
+}
+
+.shell.panel-collapsed .altitude-bracket-button {
+  bottom: 52px;
+}
+
 .wx-nearest {
   display: none;
 }
@@ -912,7 +955,7 @@ fieldset {
   box-shadow: 0 0 12px rgba(233, 255, 243, 0.28);
 }
 
-.shell.light-theme .legend-aircraft-white {
+body.light-theme .legend-aircraft-white {
   background: #000000;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.26);
 }
@@ -922,7 +965,7 @@ fieldset {
   box-shadow: 0 0 14px rgba(255, 157, 53, 0.34);
 }
 
-.shell.light-theme .legend-aircraft-orange {
+body.light-theme .legend-aircraft-orange {
   background: #b54c00;
   box-shadow: 0 0 12px rgba(181, 76, 0, 0.28);
 }
@@ -931,11 +974,11 @@ fieldset {
   display: none;
 }
 
-.shell.light-theme .legend-item strong span.night-legend-text {
+body.light-theme .legend-item strong span.night-legend-text {
   display: none;
 }
 
-.shell.light-theme .legend-item strong span.day-legend-text {
+body.light-theme .legend-item strong span.day-legend-text {
   display: inline;
 }
 
@@ -1323,9 +1366,17 @@ fieldset {
 }
 
 @media (max-width: 1180px), (pointer: coarse) {
+  .shell.panel-collapsed {
+    min-height: 100dvh;
+  }
+
   .shell.panel-collapsed .radar-wrap,
   .shell.panel-collapsed .proximity-alert {
     grid-column: 1 / -1;
+  }
+
+  .shell.panel-collapsed .radar-wrap {
+    min-height: calc(100dvh - 96px);
   }
 
   .shell.panel-collapsed .proximity-alert:not([hidden]) {

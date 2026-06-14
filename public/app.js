@@ -9,6 +9,7 @@ const radarModeToggle = document.querySelector("#radarModeToggle");
 const wxToggle = document.querySelector("#wxToggle");
 const wxRangeButton = document.querySelector("#wxRangeButton");
 const bottomRangeButtons = document.querySelector("#bottomRangeButtons");
+const altitudeBracketButton = document.querySelector("#altitudeBracketButton");
 const wxNearestTarget = document.querySelector("#wxNearestTarget");
 const airportSelect = document.querySelector("#airportSelect");
 const coordRow = document.querySelector("#coordRow");
@@ -67,6 +68,7 @@ const radarThemes = {
     hud: "rgba(233, 255, 243, 0.75)",
     lowTarget: "rgba(233, 255, 243, 0.9)",
     midTarget: "rgba(255, 157, 53, 0.9)",
+    lowTrail: "rgba(98, 213, 255, 0.45)",
     arcPrimary: "rgba(233, 255, 243, 0.82)",
     arcSecondary: "rgba(233, 255, 243, 0.34)",
     arcText: "rgba(233, 255, 243, 0.78)",
@@ -86,6 +88,7 @@ const radarThemes = {
     hud: "rgba(0, 44, 35, 0.86)",
     lowTarget: "rgba(0, 0, 0, 0.9)",
     midTarget: "rgba(181, 76, 0, 0.96)",
+    lowTrail: "rgba(0, 0, 0, 0.56)",
     arcPrimary: "rgba(0, 0, 0, 0.82)",
     arcSecondary: "rgba(0, 0, 0, 0.3)",
     arcText: "rgba(0, 0, 0, 0.8)",
@@ -301,7 +304,7 @@ let sweepColor = "orange";
 let showGroundTraffic = false;
 let showFlightLevelsTraffic = true;
 let showRadarData = true;
-let showPrecipitation = false;
+let showPrecipitation = true;
 let lightTheme = window.localStorage.getItem("ADSB_RADAR_THEME") === "light";
 let radarSoundsEnabled = true;
 let radarSoundStyle = "softTick";
@@ -358,6 +361,7 @@ let proximityAlertAudioLevel = 1;
 let proximityHighlightLastAt = 0;
 let trafficAlertActive = false;
 let returnToArcAfterThreat = false;
+let altitudeBracketFt = null;
 
 function scheduleAircraftHighlight(key, { delayMs = 1000, durationMs = 10000 } = {}) {
   if (!key) return;
@@ -949,8 +953,52 @@ function alertRangeForClosure(closureKts) {
   return 2;
 }
 
+function altitudeBracketLabel() {
+  return altitudeBracketFt ? `${altitudeBracketFt}'` : "OFF";
+}
+
+function updateAltitudeBracketButton() {
+  if (!altitudeBracketButton) return;
+  altitudeBracketButton.textContent = `ALT ${altitudeBracketLabel()}`;
+  altitudeBracketButton.classList.toggle("active", Boolean(altitudeBracketFt));
+  altitudeBracketButton.setAttribute(
+    "aria-label",
+    altitudeBracketFt
+      ? `Traffic alert altitude bracket ${altitudeBracketFt} feet`
+      : "Traffic alert altitude bracket off"
+  );
+}
+
+function cycleAltitudeBracket() {
+  altitudeBracketFt = altitudeBracketFt === 500 ? 1000 : altitudeBracketFt === 1000 ? null : 500;
+  updateAltitudeBracketButton();
+  updateProximityAlert();
+}
+
+function altitudeBracketAllowsAlert(plane) {
+  if (!altitudeBracketFt) return true;
+
+  const ownAltitude = Number(gpsAltitudeFt);
+  const targetAltitude = Number(plane.altitude);
+  if (!Number.isFinite(ownAltitude) || !Number.isFinite(targetAltitude)) return true;
+
+  const delta = targetAltitude - ownAltitude;
+  if (Math.abs(delta) <= altitudeBracketFt) return true;
+
+  const verticalRate = Number(plane.verticalRate);
+  if (!Number.isFinite(verticalRate) || Math.abs(verticalRate) < 50) return false;
+
+  const movingTowardBand = (delta > 0 && verticalRate < 0) || (delta < 0 && verticalRate > 0);
+  if (!movingTowardBand) return false;
+
+  const lookaheadSeconds = 90;
+  const projectedDelta = delta + (verticalRate * lookaheadSeconds) / 60;
+  return Math.abs(projectedDelta) <= altitudeBracketFt || Math.sign(projectedDelta) !== Math.sign(delta);
+}
+
 function proximityCandidate(plane) {
   if (isGroundTraffic(plane)) return null;
+  if (!altitudeBracketAllowsAlert(plane)) return null;
 
   const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
   const closureKts = closureRateKts(plane, distance);
@@ -1375,7 +1423,7 @@ function altitudeColorStyle(plane) {
   }
   return {
     target: theme.lowTarget,
-    trail: "rgba(98, 213, 255, 0.45)"
+    trail: theme.lowTrail
   };
 }
 
@@ -2945,6 +2993,23 @@ function setRange(nextRange) {
   updateBottomRangeButton();
 }
 
+function rangeForDistance(distance) {
+  return allowedRanges.find((range) => distance <= range) || allowedRanges[allowedRanges.length - 1];
+}
+
+function zoomToAircraftIfNeeded(plane) {
+  if (!plane) return;
+  const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
+  if (!Number.isFinite(distance) || distance <= radiusMiles) return;
+
+  const nextRange = rangeForDistance(distance + 0.4);
+  if (nextRange !== radiusMiles) {
+    setRange(nextRange);
+    fetchAirspace();
+    fetchTraffic({ force: true });
+  }
+}
+
 function updateBottomRangeButton() {
   if (!wxRangeButton) return;
   if (bottomRangeButtons) {
@@ -3026,6 +3091,10 @@ bottomRangeButtons?.addEventListener("click", (event) => {
 });
 
 radarModeToggle?.addEventListener("click", () => {
+  if (!weatherMode && !gpsModeSelected()) {
+    window.alert("Unavailable without GPS location enabled");
+    return;
+  }
   if (!weatherMode) {
     previousRangeBeforeWx = radiusMiles;
   } else if (allowedRanges.includes(previousRangeBeforeWx)) {
@@ -3046,6 +3115,8 @@ wxRangeButton?.addEventListener("click", () => {
   fetchAirspace();
   fetchTraffic({ force: true });
 });
+
+altitudeBracketButton?.addEventListener("click", cycleAltitudeBracket);
 
 airspaceToggles.addEventListener("change", () => {
   if (!getVisibleAirspaceClasses().size) {
@@ -3264,6 +3335,7 @@ radarSoundStyleSelect.value = radarSoundStyle;
 setLightTheme(lightTheme);
 setWeatherMode(false);
 setPrecipitationLayer(showPrecipitation);
+updateAltitudeBracketButton();
 installRadarAudioRecovery();
 queueRadarAudioUnlock();
 
@@ -3302,7 +3374,10 @@ orientationModeSelect.addEventListener("change", () => {
 aircraftListEl.addEventListener("click", (event) => {
   const button = event.target.closest("[data-aircraft-key]");
   if (!button) return;
-  scheduleAircraftHighlight(button.dataset.aircraftKey);
+  const key = button.dataset.aircraftKey;
+  const plane = aircraft.find((candidate) => aircraftKey(candidate) === key) || radarBlips.get(key);
+  zoomToAircraftIfNeeded(plane);
+  scheduleAircraftHighlight(key);
 });
 
 canvas.addEventListener("click", (event) => {
