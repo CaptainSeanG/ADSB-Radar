@@ -954,18 +954,18 @@ function alertRangeForClosure(closureKts) {
 }
 
 function altitudeBracketLabel() {
-  return altitudeBracketFt ? `${altitudeBracketFt}'` : "OFF";
+  return altitudeBracketFt ? `${altitudeBracketFt}'` : "ALL";
 }
 
 function updateAltitudeBracketButton() {
   if (!altitudeBracketButton) return;
-  altitudeBracketButton.textContent = `ALT ${altitudeBracketLabel()}`;
+  altitudeBracketButton.textContent = `VFR ${altitudeBracketLabel()}`;
   altitudeBracketButton.classList.toggle("active", Boolean(altitudeBracketFt));
   altitudeBracketButton.setAttribute(
     "aria-label",
     altitudeBracketFt
-      ? `Traffic alert altitude bracket ${altitudeBracketFt} feet`
-      : "Traffic alert altitude bracket off"
+      ? `Vertical traffic alert filter ${altitudeBracketFt} feet`
+      : "Vertical traffic alert filter all altitudes"
   );
 }
 
@@ -1217,8 +1217,8 @@ function radarScope(width, height) {
 
 function weatherScope(width, height) {
   const framePad = Math.max(22, Math.min(width, height) * 0.035);
-  const cy = height - framePad - 18;
-  const radius = Math.max(120, Math.min(width * 0.64, height * 0.9));
+  const radius = Math.max(120, Math.min(width * 0.61, height * 0.78));
+  const cy = height - framePad - 58;
   return {
     width,
     height,
