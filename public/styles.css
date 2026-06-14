@@ -562,7 +562,7 @@ select {
 }
 
 .shell.wx-mode .bottom-range-buttons {
-  bottom: -4px;
+  bottom: 92px;
 }
 
 .altitude-bracket-button {
@@ -582,6 +582,19 @@ select {
   text-transform: uppercase;
 }
 
+.altitude-bracket-button::before {
+  content: "ALERTS";
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 5px);
+  width: 100%;
+  color: rgba(233, 255, 243, 0.72);
+  font: 950 0.64rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.06em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
 .altitude-bracket-button.active {
   border-color: var(--amber);
   background: #4a2c06;
@@ -594,6 +607,10 @@ select {
   color: #02150f;
 }
 
+.shell.light-theme .altitude-bracket-button::before {
+  color: #000000;
+}
+
 .shell.light-theme .altitude-bracket-button.active {
   border-color: #b54c00;
   background: rgba(181, 76, 0, 0.16);
@@ -604,16 +621,30 @@ select {
   bottom: 52px;
 }
 
+.shell.wx-mode .altitude-bracket-button,
+.shell.wx-mode.panel-collapsed .altitude-bracket-button {
+  bottom: 146px;
+}
+
 .wx-nearest {
   display: none;
 }
 
+.shell.wx-mode {
+  position: relative;
+}
+
 .shell.wx-mode .wx-nearest:not([hidden]) {
   display: grid;
+  position: absolute;
+  z-index: 4;
+  right: 28px;
+  bottom: 18px;
+  left: 28px;
   height: 62px;
   min-height: 62px;
   grid-column: 1;
-  margin-top: 8px;
+  margin-top: 0;
   grid-template-areas:
     "label label"
     "data altitude";
@@ -630,6 +661,14 @@ select {
   text-transform: uppercase;
   overflow: hidden;
   padding: 5px 12px;
+}
+
+.shell.wx-mode .proximity-alert:not([hidden]) {
+  position: absolute;
+  z-index: 6;
+  right: 28px;
+  bottom: 18px;
+  left: 28px;
 }
 
 .wx-nearest-label {
@@ -1377,6 +1416,10 @@ body.light-theme .legend-item strong span.day-legend-text {
 
   .shell.panel-collapsed .radar-wrap {
     min-height: calc(100dvh - 96px);
+  }
+
+  .shell.wx-mode.panel-collapsed .radar-wrap {
+    min-height: calc(100dvh - 40px);
   }
 
   .shell.panel-collapsed .proximity-alert:not([hidden]) {
