@@ -226,6 +226,20 @@ select {
   }
 }
 
+@keyframes tracking-text-blink {
+  0%,
+  42% {
+    color: #e9fff3;
+    text-shadow: 0 0 8px rgba(77, 255, 155, 0.55);
+  }
+
+  58%,
+  100% {
+    color: rgba(132, 255, 194, 0.34);
+    text-shadow: none;
+  }
+}
+
 .proximity-alert.solid {
   animation: none !important;
   opacity: 1 !important;
@@ -787,7 +801,12 @@ h1 {
 }
 
 .tracking-button.active {
+  animation: tracking-text-blink 1.05s steps(2, end) infinite;
   box-shadow: inset 0 0 0 1px rgba(77, 255, 155, 0.38), 0 0 16px rgba(77, 255, 155, 0.18);
+}
+
+.shell.light-theme .tracking-button.active {
+  animation-name: tracking-text-blink;
 }
 
 .secondary-button {
