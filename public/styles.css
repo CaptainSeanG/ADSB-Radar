@@ -624,7 +624,7 @@ select {
 
 .shell.wx-mode .altitude-bracket-button,
 .shell.wx-mode.panel-collapsed .altitude-bracket-button {
-  top: calc(48% + 154px);
+  top: calc(48% - 18px);
   bottom: auto;
 }
 

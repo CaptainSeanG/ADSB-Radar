@@ -1218,7 +1218,8 @@ function radarScope(width, height) {
 function weatherScope(width, height) {
   const framePad = Math.max(22, Math.min(width, height) * 0.035);
   const radius = Math.max(120, Math.min(width * 0.58, height * 0.72));
-  const cy = Math.min(height - framePad - 132, Math.max(230, height * 0.48));
+  const centerFactor = width >= 700 ? 0.52 : 0.48;
+  const cy = Math.min(height - framePad - 132, Math.max(230, height * centerFactor));
   return {
     width,
     height,
