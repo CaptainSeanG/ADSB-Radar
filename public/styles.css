@@ -885,6 +885,18 @@ fieldset {
   cursor: pointer;
 }
 
+.shell.light-theme .range-buttons button,
+.shell.light-theme .bottom-range-buttons button {
+  color: #ffffff;
+  font-size: 0.92rem;
+  font-weight: 900;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55);
+}
+
+.shell.light-theme .bottom-range-buttons button {
+  font-size: 0.82rem;
+}
+
 .range-buttons button {
   background: rgba(0, 0, 0, 0.24);
 }
@@ -897,9 +909,9 @@ fieldset {
 
 .shell.light-theme .range-buttons button.active,
 .shell.light-theme .bottom-range-buttons button.active {
-  border-color: rgba(0, 82, 52, 0.72);
-  background: rgba(0, 82, 52, 0.5);
-  color: #001b12;
+  border-color: rgba(31, 177, 104, 0.78);
+  background: rgba(31, 177, 104, 0.36);
+  color: #ffffff;
 }
 
 .airspace-toggles {

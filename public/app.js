@@ -2556,9 +2556,9 @@ function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   ctx.scale(highlight?.scale || 1, highlight?.scale || 1);
   if (tracked) {
     ctx.save();
-    ctx.strokeStyle = "rgba(77, 255, 155, 0.96)";
+    ctx.strokeStyle = trackedAircraftColor(0.96);
     ctx.lineWidth = 2.4;
-    ctx.shadowColor = "rgba(77, 255, 155, 0.68)";
+    ctx.shadowColor = trackedAircraftColor(0.68);
     ctx.shadowBlur = 12;
     ctx.beginPath();
     ctx.arc(0, 0, 17, 0, Math.PI * 2);
@@ -2633,10 +2633,10 @@ function drawTrackedAircraftGuide(scope) {
   ctx.beginPath();
   ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
   ctx.clip();
-  ctx.strokeStyle = "rgba(77, 255, 155, 0.78)";
+  ctx.strokeStyle = trackedAircraftColor(0.78);
   ctx.lineWidth = 2;
   ctx.setLineDash([10, 8]);
-  ctx.shadowColor = "rgba(77, 255, 155, 0.5)";
+  ctx.shadowColor = trackedAircraftColor(0.5);
   ctx.shadowBlur = 10;
   ctx.beginPath();
   ctx.moveTo(scope.cx, scope.cy);
@@ -3296,6 +3296,10 @@ function trackedAircraftMetrics(plane) {
   const speedKts = aircraftSpeed(plane);
   const etaMinutes = speedKts > 1 ? (distanceNm / speedKts) * 60 : Infinity;
   return { distanceMiles, distanceNm, speedKts, etaMinutes };
+}
+
+function trackedAircraftColor(alpha = 1) {
+  return lightTheme ? `rgba(215, 28, 40, ${alpha})` : `rgba(77, 255, 155, ${alpha})`;
 }
 
 function updateTrackedAircraftAlert() {
