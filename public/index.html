@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./styles.css?v=20260615-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260615-2" />
   </head>
   <body>
     <main class="shell">
@@ -26,6 +26,7 @@
       </section>
       <div class="wx-nearest" id="wxNearestTarget" hidden>Range to nearest target --</div>
       <div class="proximity-alert" id="proximityAlert" aria-live="polite" hidden></div>
+      <div class="tracking-alert" id="trackingAlert" aria-live="polite" hidden></div>
 
       <aside class="panel" aria-label="Radar controls and aircraft list">
         <header>
@@ -34,7 +35,10 @@
           <p id="status">Radar sweep active. Updating aircraft every pass.</p>
         </header>
 
-        <button type="button" class="settings-button" id="settingsOpen">Radar Settings</button>
+        <div class="panel-action-row">
+          <button type="button" class="settings-button tracking-button" id="trackingOpen">N-Number Tracking</button>
+          <button type="button" class="settings-button compact-settings-button" id="settingsOpen">Radar Settings</button>
+        </div>
 
         <form id="controls" class="controls">
           <label>
@@ -173,6 +177,37 @@
       </section>
     </div>
 
+    <div class="modal-backdrop" id="trackingModal" hidden>
+      <section class="settings-modal tracking-modal" role="dialog" aria-modal="true" aria-labelledby="trackingTitle">
+        <header class="settings-header">
+          <h2 id="trackingTitle">N-Number Tracking</h2>
+          <button type="button" class="icon-button" id="trackingClose" aria-label="Close N-number tracking">x</button>
+        </header>
+        <form class="tracking-form" id="trackingForm">
+          <label>
+            N Number
+            <input id="trackingNNumber" name="nNumber" autocomplete="off" placeholder="N123AB" />
+          </label>
+          <label>
+            Alert when
+            <select id="trackingCriterion" name="criterion">
+              <option value="distance">Within distance</option>
+              <option value="time">Minutes away</option>
+            </select>
+          </label>
+          <label>
+            Distance (NM) or time (min)
+            <input id="trackingValue" name="value" inputmode="decimal" value="10" />
+          </label>
+          <div class="tracking-actions">
+            <button type="submit" class="settings-button">Track Aircraft</button>
+            <button type="button" class="settings-button secondary-button" id="trackingClear">Clear</button>
+          </div>
+          <p class="tracking-status" id="trackingStatus">No aircraft selected.</p>
+        </form>
+      </section>
+    </div>
+
     <div class="modal-backdrop" id="legendModal" hidden>
       <section class="settings-modal legend-modal" role="dialog" aria-modal="true" aria-labelledby="legendTitle">
         <header class="settings-header">
@@ -213,6 +248,6 @@
     </div>
 
     <script src="./config.js?v=20260611-1"></script>
-    <script type="module" src="./app.js?v=20260615-1"></script>
+    <script type="module" src="./app.js?v=20260615-2"></script>
   </body>
 </html>

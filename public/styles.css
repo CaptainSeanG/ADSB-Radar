@@ -481,6 +481,12 @@ select {
   color: #004f36;
 }
 
+.shell.light-theme .settings-button {
+  border-color: rgba(0, 79, 54, 0.46);
+  background: linear-gradient(135deg, rgba(0, 93, 59, 0.44), rgba(0, 73, 98, 0.28));
+  color: #002a1d;
+}
+
 .shell.light-theme #status,
 .shell.light-theme label,
 .shell.light-theme legend,
@@ -759,10 +765,34 @@ h1 {
   text-transform: uppercase;
 }
 
+.panel-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(118px, 0.8fr);
+  gap: 8px;
+}
+
+.compact-settings-button,
+.tracking-button {
+  min-height: 42px;
+  padding: 0 10px;
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+}
+
 .settings-button:hover,
+.settings-button.active,
 .icon-button:hover {
   border-color: var(--green);
   background: rgba(77, 255, 155, 0.14);
+}
+
+.tracking-button.active {
+  box-shadow: inset 0 0 0 1px rgba(77, 255, 155, 0.38), 0 0 16px rgba(77, 255, 155, 0.18);
+}
+
+.secondary-button {
+  background: rgba(0, 0, 0, 0.18);
+  color: var(--muted);
 }
 
 #status {
@@ -865,6 +895,13 @@ fieldset {
   color: #d9ffe8;
 }
 
+.shell.light-theme .range-buttons button.active,
+.shell.light-theme .bottom-range-buttons button.active {
+  border-color: rgba(0, 82, 52, 0.72);
+  background: rgba(0, 82, 52, 0.5);
+  color: #001b12;
+}
+
 .airspace-toggles {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -960,6 +997,60 @@ fieldset {
 
 .legend-modal {
   width: min(460px, 100%);
+}
+
+.tracking-modal {
+  width: min(420px, 100%);
+}
+
+.tracking-form {
+  display: grid;
+  gap: 12px;
+}
+
+.tracking-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.tracking-status {
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.tracking-alert {
+  position: absolute;
+  left: 50%;
+  bottom: 96px;
+  z-index: 7;
+  min-width: min(560px, calc(100% - 36px));
+  transform: translateX(-50%);
+  border: 1px solid rgba(77, 255, 155, 0.58);
+  border-radius: 7px;
+  background: rgba(0, 42, 25, 0.9);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.38);
+  color: #7dffb8;
+  padding: 12px 16px;
+  text-align: center;
+  font: 900 0.94rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.tracking-alert strong {
+  color: #e9fff3;
+}
+
+.shell.light-theme .tracking-alert {
+  border-color: rgba(0, 82, 52, 0.7);
+  background: rgba(218, 236, 224, 0.96);
+  color: #003d29;
+}
+
+.shell.light-theme .tracking-alert strong {
+  color: #00160f;
 }
 
 .legend-list {
