@@ -1026,6 +1026,41 @@ fieldset {
   gap: 12px;
 }
 
+.settings-meta {
+  margin-top: 4px;
+  border-top: 1px solid rgba(132, 255, 194, 0.16);
+  padding-top: 10px;
+  color: rgba(233, 255, 243, 0.56);
+  font: 700 0.68rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.settings-version {
+  color: rgba(233, 255, 243, 0.76);
+}
+
+.settings-version span {
+  color: var(--green);
+}
+
+.settings-copyright {
+  margin-top: 3px;
+}
+
+.shell.light-theme .settings-meta {
+  border-top-color: rgba(0, 57, 40, 0.18);
+  color: rgba(23, 56, 47, 0.72);
+}
+
+.shell.light-theme .settings-version {
+  color: rgba(0, 42, 38, 0.82);
+}
+
+.shell.light-theme .settings-version span {
+  color: #005a3b;
+}
+
 .legend-modal {
   width: min(460px, 100%);
 }

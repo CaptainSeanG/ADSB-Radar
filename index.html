@@ -4,9 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ADSB Radar</title>
-    <link rel="stylesheet" href="./public/styles.css?v=20260615-4" />
+    <meta name="author" content="CaptainSeanG" />
+    <meta name="copyright" content="Copyright 2026 CaptainSeanG. All rights reserved." />
+    <meta name="rights" content="Unauthorized reproduction or redistribution prohibited." />
+    <link rel="stylesheet" href="./public/styles.css?v=20260616-1" />
   </head>
-  <body>
+  <body data-copyright-owner="CaptainSeanG" data-product="ADSB Radar" data-build-series="2026-rollout">
     <main class="shell">
       <section class="radar-wrap" aria-label="ADS-B radar display">
         <canvas id="radar" aria-label="Radar screen"></canvas>
@@ -163,6 +166,11 @@
               <span>Orange</span>
             </label>
           </fieldset>
+
+          <div class="settings-meta" aria-label="Version and copyright information">
+            <div class="settings-version">Rollout <span id="settingsVersion">2026.06.16-r1</span></div>
+            <div class="settings-copyright">Copyright 2026 CaptainSeanG. All rights reserved.</div>
+          </div>
         </div>
       </section>
     </div>
@@ -248,6 +256,6 @@
     </div>
 
     <script src="./public/config.js?v=20260611-1"></script>
-    <script type="module" src="./public/app.js?v=20260615-3"></script>
+    <script type="module" src="./public/app.js?v=20260616-1"></script>
   </body>
 </html>

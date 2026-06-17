@@ -1,5 +1,7 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
+const APP_ROLLOUT_VERSION = "2026.06.16-r1";
+const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
 const form = document.querySelector("#controls");
@@ -38,6 +40,7 @@ const radarDataToggle = document.querySelector("#radarDataToggle");
 const radarSoundStyleSelect = document.querySelector("#radarSoundStyle");
 const orientationModeSelect = document.querySelector("#orientationMode");
 const sweepColorToggle = document.querySelector("#sweepColorToggle");
+const settingsVersionEl = document.querySelector("#settingsVersion");
 const aircraftModal = document.querySelector("#aircraftModal");
 const aircraftTitle = document.querySelector("#aircraftTitle");
 const aircraftClose = document.querySelector("#aircraftClose");
@@ -47,6 +50,13 @@ const lastUpdateEl = document.querySelector("#lastUpdate");
 const aircraftListEl = document.querySelector("#aircraftList");
 const proximityAlertEl = document.querySelector("#proximityAlert");
 const trackingAlertEl = document.querySelector("#trackingAlert");
+
+window.ADSB_RADAR_OWNERSHIP = Object.freeze({
+  product: "ADSB Radar",
+  rollout: APP_ROLLOUT_VERSION,
+  copyright: APP_COPYRIGHT_NOTICE,
+  owner: "CaptainSeanG"
+});
 
 const sweepSeconds = 4.2;
 const wxSweepSeconds = 2.25;
@@ -3553,6 +3563,7 @@ radarDataToggle.addEventListener("change", () => {
 });
 
 radarSoundStyleSelect.value = radarSoundStyle;
+if (settingsVersionEl) settingsVersionEl.textContent = APP_ROLLOUT_VERSION;
 setLightTheme(lightTheme);
 setWeatherMode(false);
 setPrecipitationLayer(showPrecipitation);
