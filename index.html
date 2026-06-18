@@ -207,6 +207,10 @@
             Distance (NM) or time (min)
             <input id="trackingValue" name="value" inputmode="decimal" value="10" />
           </label>
+          <label class="switch-row">
+            <span>Hide other traffic</span>
+            <input id="trackingIsolateToggle" name="trackingIsolate" type="checkbox" />
+          </label>
           <div class="tracking-actions">
             <button type="submit" class="settings-button">Track Aircraft</button>
             <button type="button" class="settings-button secondary-button" id="trackingClear">Clear</button>
@@ -256,6 +260,6 @@
     </div>
 
     <script src="./public/config.js?v=20260611-1"></script>
-    <script type="module" src="./public/app.js?v=20260616-1"></script>
+    <script type="module" src="./public/app.js?v=20260618-1"></script>
   </body>
 </html>

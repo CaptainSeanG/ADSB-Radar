@@ -29,6 +29,7 @@ const trackingForm = document.querySelector("#trackingForm");
 const trackingNNumberInput = document.querySelector("#trackingNNumber");
 const trackingCriterionSelect = document.querySelector("#trackingCriterion");
 const trackingValueInput = document.querySelector("#trackingValue");
+const trackingIsolateToggle = document.querySelector("#trackingIsolateToggle");
 const trackingClear = document.querySelector("#trackingClear");
 const trackingStatus = document.querySelector("#trackingStatus");
 const legendOpen = document.querySelector("#legendOpen");
@@ -320,6 +321,8 @@ const kdvtFallbackCenter = { lat: 33.6883, lon: -112.083 };
 let center = { lat: 33.7292, lon: -111.9918 };
 let radiusMiles = 10;
 const breadcrumbBaseLimit = 12;
+const trackedBreadcrumbLimit = 240;
+const trackedBreadcrumbRangeMiles = 100;
 let sweepColor = "orange";
 let showGroundTraffic = false;
 let showFlightLevelsTraffic = true;
@@ -1286,6 +1289,7 @@ function aircraftSpeed(plane) {
 }
 
 function breadcrumbLimitForAircraft(plane) {
+  if (isTrackedAircraft(plane)) return trackedBreadcrumbLimit;
   const speed = aircraftSpeed(plane);
   const speedFactor = speed <= 60 ? 0.45 : speed <= 160 ? 0.75 : speed <= 300 ? 1 : speed <= 450 ? 1.35 : 1.7;
   return Math.max(2, Math.min(45, Math.round(breadcrumbBaseLimit * speedFactor)));
@@ -1324,8 +1328,9 @@ function loadTrackedAircraft() {
     const nNumber = normalizeNNumber(saved?.nNumber);
     const criterion = saved?.criterion === "time" ? "time" : "distance";
     const value = Number(saved?.value);
+    const isolate = Boolean(saved?.isolate);
     if (!nNumber || !Number.isFinite(value) || value <= 0) return null;
-    return { nNumber, criterion, value, alerted: false };
+    return { nNumber, criterion, value, isolate, alerted: false };
   } catch {
     return null;
   }
@@ -1342,7 +1347,8 @@ function saveTrackedAircraft() {
     JSON.stringify({
       nNumber: trackedAircraft.nNumber,
       criterion: trackedAircraft.criterion,
-      value: trackedAircraft.value
+      value: trackedAircraft.value,
+      isolate: Boolean(trackedAircraft.isolate)
     })
   );
 }
@@ -1362,6 +1368,19 @@ function findTrackedAircraft() {
 
 function milesToNauticalMiles(miles) {
   return miles * 0.868976;
+}
+
+function clearTrackedAircraftHistory(state = trackedAircraft) {
+  if (!state?.nNumber) return;
+
+  for (const [key] of tracks.entries()) {
+    const livePlane = radarBlips.get(key) || aircraft.find((candidate) => aircraftKey(candidate) === key);
+    const keyMatches = normalizeNNumber(key) === state.nNumber;
+    const planeMatches = livePlane ? trackedAircraftKeyValue(livePlane) === state.nNumber : false;
+    if (keyMatches || planeMatches) {
+      tracks.delete(key);
+    }
+  }
 }
 
 function planeLabel(plane) {
@@ -1507,6 +1526,7 @@ function altitudeColorStyle(plane) {
 }
 
 function isVisibleTraffic(plane) {
+  if (trackedAircraft?.isolate) return isTrackedAircraft(plane);
   if (!showGroundTraffic && isGroundTraffic(plane)) return false;
   if (!showFlightLevelsTraffic && isFlightLevelTraffic(plane)) return false;
   return true;
@@ -1595,6 +1615,14 @@ function updateTrackHistory(nextAircraft) {
       tracks.delete(key);
     }
   }
+}
+
+function updateTrackedAircraftHistory(nextAircraft) {
+  if (!trackedAircraft?.nNumber) return;
+  const trackedPlane = nextAircraft.find((plane) => isTrackedAircraft(plane));
+  if (!trackedPlane) return;
+  if (milesBetween(center.lat, center.lon, trackedPlane.lat, trackedPlane.lon) > trackedBreadcrumbRangeMiles) return;
+  appendTrackHistory(trackedPlane);
 }
 
 function appendTrackHistory(plane) {
@@ -2193,6 +2221,7 @@ async function fetchTraffic({ force = false } = {}) {
           ? `${lastDataSource} traffic active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
           : `${lastDataSource} traffic returned no aircraft for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
     }
+    updateTrackedAircraftHistory(aircraft);
     resolveMissingAircraftTypes(aircraft);
     pruneRadarBlips(aircraft);
     lastFetchAt = Date.now();
@@ -2538,8 +2567,10 @@ function drawTrack(scope, plane, alpha = 1) {
   ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
   ctx.clip();
   ctx.globalAlpha = alpha;
-  ctx.strokeStyle = altitudeColorStyle(plane).trail;
-  ctx.lineWidth = 2;
+  const tracked = isTrackedAircraft(plane);
+  ctx.strokeStyle = tracked ? "rgba(255, 157, 53, 0.9)" : altitudeColorStyle(plane).trail;
+  ctx.lineWidth = tracked ? 2.4 : 2;
+  ctx.setLineDash(tracked ? [3, 7] : []);
   ctx.beginPath();
 
   history.forEach((sample, index) => {
@@ -2549,6 +2580,7 @@ function drawTrack(scope, plane, alpha = 1) {
   });
 
   ctx.stroke();
+  ctx.setLineDash([]);
   ctx.restore();
 }
 
@@ -3265,6 +3297,7 @@ function updateTrackingControls() {
   if (trackingNNumberInput) trackingNNumberInput.value = trackedAircraft?.nNumber || "";
   if (trackingCriterionSelect) trackingCriterionSelect.value = trackedAircraft?.criterion || "distance";
   if (trackingValueInput) trackingValueInput.value = trackedAircraft?.value ?? "10";
+  if (trackingIsolateToggle) trackingIsolateToggle.checked = Boolean(trackedAircraft?.isolate);
   updateTrackingStatus();
 }
 
@@ -3279,10 +3312,12 @@ function closeTracking() {
 }
 
 function clearTrackedAircraft() {
+  clearTrackedAircraftHistory(trackedAircraft);
   trackedAircraft = null;
   saveTrackedAircraft();
   if (trackingAlertEl) trackingAlertEl.hidden = true;
   updateTrackingControls();
+  renderList();
 }
 
 function updateTrackingStatus(message = "") {
@@ -3296,7 +3331,7 @@ function updateTrackingStatus(message = "") {
     return;
   }
   const units = trackedAircraft.criterion === "time" ? "minutes away" : "NM away";
-  trackingStatus.textContent = `Tracking ${trackedAircraft.nNumber}; alert at ${trackedAircraft.value} ${units}.`;
+  trackingStatus.textContent = `Tracking ${trackedAircraft.nNumber}; alert at ${trackedAircraft.value} ${units}${trackedAircraft.isolate ? "; other traffic hidden" : ""}.`;
 }
 
 function trackedAircraftMetrics(plane) {
@@ -3525,6 +3560,7 @@ trackingForm?.addEventListener("submit", (event) => {
   const nNumber = normalizeNNumber(trackingNNumberInput?.value);
   const value = Number(trackingValueInput?.value);
   const criterion = trackingCriterionSelect?.value === "time" ? "time" : "distance";
+  const isolate = Boolean(trackingIsolateToggle?.checked);
 
   if (!nNumber) {
     updateTrackingStatus("Enter an N-number to track.");
@@ -3538,10 +3574,14 @@ trackingForm?.addEventListener("submit", (event) => {
     return;
   }
 
-  trackedAircraft = { nNumber, criterion, value, alerted: false };
+  if (!trackedAircraft || trackedAircraft.nNumber !== nNumber) {
+    clearTrackedAircraftHistory(trackedAircraft);
+  }
+  trackedAircraft = { nNumber, criterion, value, isolate, alerted: false };
   saveTrackedAircraft();
   updateTrackingControls();
   closeTracking();
+  renderList();
 });
 
 sweepColorToggle.addEventListener("change", () => {
