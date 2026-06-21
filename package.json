@@ -2,12 +2,16 @@
   "name": "adsb-plane-tracker-radar",
   "version": "0.1.0",
   "description": "A laptop-friendly ADS-B radar display using adsb.fi open data.",
-  "main": "server.js",
+  "main": "electron/main.js",
   "type": "module",
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "stratus": "node stratus-bridge.js"
+    "stratus": "node stratus-bridge.js",
+    "desktop": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^37.2.0"
   },
   "engines": {
     "node": ">=18"
