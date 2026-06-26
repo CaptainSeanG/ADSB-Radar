@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.06.26-r1";
+const APP_ROLLOUT_VERSION = "2026.06.26-r2";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -1406,7 +1406,7 @@ function isAlertDisplayDevice() {
 }
 
 function isDesktopArcDisplay() {
-  return weatherMode && window.matchMedia("(min-width: 1181px) and (pointer: fine)").matches;
+  return weatherMode && window.matchMedia("(min-width: 1181px)").matches;
 }
 
 function closureRateKts(plane, currentDistance) {
@@ -1840,7 +1840,7 @@ function radarScope(width, height) {
 
 function weatherScope(width, height) {
   const framePad = Math.max(22, Math.min(width, height) * 0.035);
-  const desktopArc = window.matchMedia("(min-width: 1181px) and (pointer: fine)").matches;
+  const desktopArc = window.matchMedia("(min-width: 1181px)").matches;
   const arcDropPx = window.matchMedia("(pointer: coarse)").matches ? 38 : 30;
   const cy = desktopArc
     ? Math.min(height - framePad - 160, Math.max(560, height * 0.7))
