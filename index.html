@@ -7,7 +7,7 @@
     <meta name="author" content="CaptainSeanG" />
     <meta name="copyright" content="Copyright 2026 CaptainSeanG. All rights reserved." />
     <meta name="rights" content="Unauthorized reproduction or redistribution prohibited." />
-    <link rel="stylesheet" href="./public/styles.css?v=20260616-1" />
+    <link rel="stylesheet" href="./public/styles.css?v=20260625-2" />
   </head>
   <body data-copyright-owner="CaptainSeanG" data-product="ADSB Radar" data-build-series="2026-rollout">
     <main class="shell">
@@ -15,6 +15,10 @@
         <canvas id="radar" aria-label="Radar screen"></canvas>
         <div class="scope-glass"></div>
         <button type="button" class="legend-button" id="legendOpen">Legend</button>
+        <div class="data-source-indicator" id="dataSourceIndicator" hidden aria-label="ADS-B data source status">
+          <span class="data-source-dot"></span>
+          <span class="data-source-label" id="dataSourceLabel">ADS-B</span>
+        </div>
         <button type="button" class="wx-range-button" id="wxRangeButton" hidden>10 NM</button>
         <div class="bottom-range-buttons" id="bottomRangeButtons" hidden aria-label="Radar range">
           <button type="button" data-range="2">2</button>
@@ -27,7 +31,11 @@
         </div>
         <button type="button" class="altitude-bracket-button" id="altitudeBracketButton" aria-label="Vertical traffic alert filter all altitudes">VFR ALL</button>
       </section>
-      <div class="wx-nearest" id="wxNearestTarget" hidden>Range to nearest target --</div>
+      <div class="wx-nearest" id="wxNearestTarget" role="button" tabindex="0" hidden>Range to nearest target --</div>
+      <div class="quick-notes" id="quickNotes" hidden aria-label="Quick notes pad">
+        <canvas id="quickNotesCanvas" aria-label="Write quick notes with finger or Apple Pencil"></canvas>
+        <button type="button" id="quickNotesClear" aria-label="Clear quick notes">Clear</button>
+      </div>
       <div class="proximity-alert" id="proximityAlert" aria-live="polite" hidden></div>
       <div class="tracking-alert" id="trackingAlert" aria-live="polite" hidden></div>
 
@@ -36,6 +44,7 @@
           <p class="eyebrow">ADS-B Radar</p>
           <h1>Local Airspace</h1>
           <p id="status">Radar sweep active. Updating aircraft every pass.</p>
+          <div class="stratus-diagnostics" id="stratusDiagnostics" hidden aria-label="Stratus receiver diagnostics"></div>
         </header>
 
         <div class="panel-action-row">
@@ -133,6 +142,20 @@
             <input id="radarDataToggle" type="checkbox" checked />
           </label>
 
+          <label class="switch-row">
+            <span>Reduced load</span>
+            <input id="reducedLoadToggle" type="checkbox" />
+          </label>
+
+          <div class="performance-telemetry" id="performanceTelemetry" aria-label="Device load estimate">
+            <span><b>Load</b> starting</span>
+            <span><b>FPS</b> --</span>
+            <span><b>Frame</b> --</span>
+            <span><b>Slow</b> --</span>
+            <span><b>Thermal</b> --</span>
+            <span><b>Pixels</b> --</span>
+          </div>
+
           <label>
             Sound style
             <select id="radarSoundStyle">
@@ -168,7 +191,7 @@
           </fieldset>
 
           <div class="settings-meta" aria-label="Version and copyright information">
-            <div class="settings-version">Rollout <span id="settingsVersion">2026.06.16-r1</span></div>
+            <div class="settings-version">Rollout <span id="settingsVersion">2026.06.25-r2</span></div>
             <div class="settings-copyright">Copyright 2026 CaptainSeanG. All rights reserved.</div>
           </div>
         </div>
@@ -223,7 +246,7 @@
     <div class="modal-backdrop" id="legendModal" hidden>
       <section class="settings-modal legend-modal" role="dialog" aria-modal="true" aria-labelledby="legendTitle">
         <header class="settings-header">
-          <h2 id="legendTitle">Radar Legend</h2>
+          <h2 id="legendTitle">Radar Legend <span class="device-thermal" id="deviceThermalStatus" hidden>Device --</span></h2>
           <button type="button" class="icon-button" id="legendClose" aria-label="Close legend">x</button>
         </header>
         <div class="legend-list">
@@ -238,6 +261,10 @@
           <div class="legend-item">
             <span class="legend-aircraft legend-aircraft-red"></span>
             <div><strong>Red target</strong><span>Aircraft at or above 18,000'.</span></div>
+          </div>
+          <div class="legend-item">
+            <span class="legend-trend legend-trend-up"></span>
+            <div><strong>Vertical trend</strong><span>Arrow up/down means climbing or descending; flat bar means level.</span></div>
           </div>
           <div class="legend-item">
             <span class="legend-airspace-b"></span>
@@ -255,11 +282,23 @@
             <span class="legend-runway"></span>
             <div><strong>Amber runway</strong><span>Airport runway reference at close ranges.</span></div>
           </div>
+          <div class="legend-item">
+            <span class="legend-source-dot legend-source-stratus"></span>
+            <div><strong>Green blinking dot</strong><span>Traffic is coming from Stratus.</span></div>
+          </div>
+          <div class="legend-item">
+            <span class="legend-source-dot legend-source-wifi"></span>
+            <div><strong>Yellow blinking dot</strong><span>Traffic is coming from WiFi ADS-B.</span></div>
+          </div>
+          <div class="legend-item">
+            <span class="legend-source-dot legend-source-cellular"></span>
+            <div><strong>Solid blue dot</strong><span>Traffic is coming from cellular data.</span></div>
+          </div>
         </div>
       </section>
     </div>
 
-    <script src="./public/config.js?v=20260611-1"></script>
-    <script type="module" src="./public/app.js?v=20260618-1"></script>
+    <script src="./public/config.js?v=20260625-2"></script>
+    <script type="module" src="./public/app.js?v=20260625-2"></script>
   </body>
 </html>

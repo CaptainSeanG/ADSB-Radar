@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.06.16-r1";
+const APP_ROLLOUT_VERSION = "2026.06.25-r2";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
