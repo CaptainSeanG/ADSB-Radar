@@ -13,6 +13,9 @@ const wxRangeButton = document.querySelector("#wxRangeButton");
 const bottomRangeButtons = document.querySelector("#bottomRangeButtons");
 const altitudeBracketButton = document.querySelector("#altitudeBracketButton");
 const wxNearestTarget = document.querySelector("#wxNearestTarget");
+const quickNotes = document.querySelector("#quickNotes");
+const quickNotesCanvas = document.querySelector("#quickNotesCanvas");
+const quickNotesClear = document.querySelector("#quickNotesClear");
 const airportSelect = document.querySelector("#airportSelect");
 const coordRow = document.querySelector("#coordRow");
 const latInput = document.querySelector("#lat");
@@ -35,9 +38,12 @@ const trackingStatus = document.querySelector("#trackingStatus");
 const legendOpen = document.querySelector("#legendOpen");
 const legendClose = document.querySelector("#legendClose");
 const legendModal = document.querySelector("#legendModal");
+const deviceThermalStatus = document.querySelector("#deviceThermalStatus");
 const groundTrafficToggle = document.querySelector("#groundTrafficToggle");
 const flightLevelsToggle = document.querySelector("#flightLevelsToggle");
 const radarDataToggle = document.querySelector("#radarDataToggle");
+const reducedLoadToggle = document.querySelector("#reducedLoadToggle");
+const performanceTelemetry = document.querySelector("#performanceTelemetry");
 const radarSoundStyleSelect = document.querySelector("#radarSoundStyle");
 const orientationModeSelect = document.querySelector("#orientationMode");
 const sweepColorToggle = document.querySelector("#sweepColorToggle");
@@ -47,6 +53,9 @@ const aircraftTitle = document.querySelector("#aircraftTitle");
 const aircraftClose = document.querySelector("#aircraftClose");
 const aircraftDetail = document.querySelector("#aircraftDetail");
 const statusEl = document.querySelector("#status");
+const stratusDiagnosticsEl = document.querySelector("#stratusDiagnostics");
+const dataSourceIndicator = document.querySelector("#dataSourceIndicator");
+const dataSourceLabel = document.querySelector("#dataSourceLabel");
 const lastUpdateEl = document.querySelector("#lastUpdate");
 const aircraftListEl = document.querySelector("#aircraftList");
 const proximityAlertEl = document.querySelector("#proximityAlert");
@@ -59,8 +68,8 @@ window.ADSB_RADAR_OWNERSHIP = Object.freeze({
   owner: "CaptainSeanG"
 });
 
-const sweepSeconds = 4.2;
-const wxSweepSeconds = 2.25;
+const sweepSeconds = 3.4;
+const wxSweepSeconds = 2.6;
 const wxSectorDegrees = 50;
 const radarFadeMs = sweepSeconds * 3 * 1000;
 const allowedRanges = [2, 5, 10, 15, 20, 50, 100];
@@ -90,6 +99,10 @@ const radarThemes = {
     lowTarget: "rgba(233, 255, 243, 0.9)",
     midTarget: "rgba(255, 157, 53, 0.9)",
     lowTrail: "rgba(98, 213, 255, 0.45)",
+    navTrail: "rgba(233, 255, 243, 0.72)",
+    navProjection: "rgba(255, 255, 255, 0.82)",
+    verticalTrendSafe: "rgba(132, 255, 194, 0.9)",
+    verticalTrendConflict: "rgba(255, 80, 92, 0.95)",
     arcPrimary: "rgba(233, 255, 243, 0.82)",
     arcSecondary: "rgba(233, 255, 243, 0.34)",
     arcText: "rgba(233, 255, 243, 0.78)",
@@ -110,6 +123,10 @@ const radarThemes = {
     lowTarget: "rgba(0, 0, 0, 0.9)",
     midTarget: "rgba(181, 76, 0, 0.96)",
     lowTrail: "rgba(0, 0, 0, 0.56)",
+    navTrail: "rgba(37, 42, 156, 0.8)",
+    navProjection: "rgba(78, 24, 151, 0.86)",
+    verticalTrendSafe: "rgba(0, 128, 72, 0.92)",
+    verticalTrendConflict: "rgba(190, 0, 32, 0.95)",
     arcPrimary: "rgba(0, 0, 0, 0.82)",
     arcSecondary: "rgba(0, 0, 0, 0.3)",
     arcText: "rgba(0, 0, 0, 0.8)",
@@ -144,6 +161,9 @@ const stratusBridgeBaseUrl = (
   window.ADSB_RADAR_STRATUS_URL ||
   ""
 ).replace(/\/$/, "");
+const nativeStratusHandler = window.webkit?.messageHandlers?.stratus || null;
+let nativeStratusRequestId = 0;
+document.body.classList.toggle("native-app", Boolean(nativeStratusHandler));
 const tracks = new Map();
 const aircraftTypeCache = new Map();
 const radarBlips = new Map();
@@ -320,7 +340,7 @@ const kdvtFallbackCenter = { lat: 33.6883, lon: -112.083 };
 
 let center = { lat: 33.7292, lon: -111.9918 };
 let radiusMiles = 10;
-const breadcrumbBaseLimit = 12;
+const breadcrumbBaseLimit = 20;
 const trackedBreadcrumbLimit = 240;
 const trackedBreadcrumbRangeMiles = 100;
 let sweepColor = "orange";
@@ -328,6 +348,7 @@ let showGroundTraffic = false;
 let showFlightLevelsTraffic = true;
 let showRadarData = true;
 let showPrecipitation = true;
+let reducedLoad = window.localStorage.getItem("ADSB_RADAR_REDUCED_LOAD") === "true";
 let lightTheme = window.localStorage.getItem("ADSB_RADAR_THEME") === "light";
 let radarSoundsEnabled = true;
 let radarSoundStyle = "softTick";
@@ -350,6 +371,8 @@ let nextTrafficFetchAt = 0;
 let pixelRatio = window.devicePixelRatio || 1;
 let airportsCachePromise = null;
 let runwaysCachePromise = null;
+let airportCacheRetryAt = 0;
+let runwayCacheRetryAt = 0;
 let lastAirspaceKey = "";
 let aircraftHitAreas = [];
 let currentAircraftContacts = [];
@@ -361,6 +384,13 @@ let gpsSpeedKts = 0;
 let gpsAltitudeFt = null;
 let stratusOwnshipActive = false;
 let lastStratusOwnshipAt = 0;
+let stratusTrackDegrees = null;
+let stratusTrackSpeedKts = 0;
+let stratusHeadingDegrees = null;
+let lastStratusHeadingAt = 0;
+let stratusAutoTrackUpEnabled = false;
+let arcForwardHeadingDegrees = null;
+let lastArcForwardHeadingAt = 0;
 let compassHeadingDegrees = null;
 let compassPermissionRequested = false;
 let gpsTrail = [];
@@ -384,8 +414,30 @@ let proximityAlertAudioLevel = 1;
 let proximityHighlightLastAt = 0;
 let trafficAlertActive = false;
 let returnToArcAfterThreat = false;
+let manualThreatFocusKey = "";
+let returnToArcAfterManualThreat = false;
+let dismissedTrafficAlertKey = "";
 let altitudeBracketFt = null;
 let trackedAircraft = loadTrackedAircraft();
+let quickNoteStrokes = [];
+let activeQuickNoteStroke = null;
+let quickNotesClearTimer = null;
+let quickNotesClearStartedAt = 0;
+let lastRenderedAt = 0;
+let lastWeatherEnsureAt = 0;
+let latestDeviceStatus = null;
+let deviceStatusRefreshInFlight = false;
+let lastDeviceStatusRefreshAt = 0;
+const renderStats = {
+  frames: 0,
+  slowFrames: 0,
+  totalRenderMs: 0,
+  lastFrameAt: 0,
+  lastReportAt: 0,
+  fps: 0,
+  averageRenderMs: 0,
+  slowPercent: 0
+};
 
 function scheduleAircraftHighlight(key, { delayMs = 1000, durationMs = 10000 } = {}) {
   if (!key) return;
@@ -549,10 +601,10 @@ async function enableCompassHeading() {
 }
 
 function queueCompassHeadingEnable() {
-  if (!gpsActive || compassPermissionRequested) return;
+  if (compassPermissionRequested) return;
 
   const requestCompass = () => {
-    if (gpsActive && orientationMode === "track") enableCompassHeading();
+    if (orientationMode === "track") enableCompassHeading();
   };
 
   if (typeof DeviceOrientationEvent === "undefined" || typeof DeviceOrientationEvent.requestPermission !== "function") {
@@ -577,7 +629,7 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function scheduleNextTrafficFetch({ failed = false } = {}) {
+function scheduleNextTrafficFetch({ failed = false, source = lastDataSource, stale = false } = {}) {
   if (failed) {
     trafficBackoffMs = trafficBackoffMs ? Math.min(60000, trafficBackoffMs * 2) : 5000;
     nextTrafficFetchAt = Date.now() + trafficBackoffMs + randomJitter(750, 3000);
@@ -585,7 +637,308 @@ function scheduleNextTrafficFetch({ failed = false } = {}) {
   }
 
   trafficBackoffMs = 0;
-  nextTrafficFetchAt = Date.now() + 6500 + randomJitter(500, 2500);
+  const liveStratus = String(source || "").toLowerCase().includes("stratus") && !stale;
+  const baseDelay = liveStratus ? 2800 : 6500;
+  const jitter = liveStratus ? randomJitter(150, 450) : randomJitter(500, 2500);
+  nextTrafficFetchAt = Date.now() + baseDelay + jitter;
+}
+
+function formatCounter(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? String(Math.trunc(number)) : "--";
+}
+
+function formatPortStats(portStats = {}) {
+  return ["4000", "4001", "43211"]
+    .map((port) => `${port}:${formatCounter(portStats[port])}`)
+    .join(" ");
+}
+
+function formatMessageCounts(messageCounts = {}) {
+  return Object.entries(messageCounts)
+    .sort((a, b) => Number(a[0]) - Number(b[0]))
+    .slice(0, 8)
+    .map(([id, count]) => `${id}:${formatCounter(count)}`)
+    .join(" ") || "--";
+}
+
+function formatBattery(data = {}) {
+  const percent = Number(data.batteryPercent);
+  const raw = data.batteryRaw ?? data.batteryVoltage ?? data.batteryMv ?? data.externalPower ?? null;
+  const rawText = raw === null || raw === undefined || raw === "" ? "" : ` raw ${raw}`;
+  if (!Number.isFinite(percent)) return `bat --${rawText}`;
+  const power = data.powerStatus ? ` ${data.powerStatus}` : "";
+  return `bat ${Math.round(percent)}%${power}${rawText}`;
+}
+
+function formatVendorSamples(samples = {}) {
+  const entries = Object.entries(samples || {}).slice(0, 6);
+  if (!entries.length) return "vendor --";
+  return entries.map(([id, sample]) => `${id}:${String(sample).slice(0, 40)}`).join(" ");
+}
+
+function formatRawPacketSamples(samples = {}) {
+  const entries = Object.entries(samples || {}).slice(0, 4);
+  if (!entries.length) return "raw --";
+  return entries.map(([port, sample]) => `${port}:${String(sample).slice(0, 40)}`).join(" ");
+}
+
+function formatRawAsciiSamples(samples = {}) {
+  const entries = Object.entries(samples || {}).slice(0, 4);
+  if (!entries.length) return "ascii --";
+  return entries.map(([port, sample]) => `${port}:${String(sample).slice(0, 32)}`).join(" ");
+}
+
+function formatRawLengths(lengths = {}) {
+  const entries = Object.entries(lengths || {}).slice(0, 4);
+  if (!entries.length) return "len --";
+  return entries.map(([port, length]) => `${port}:${formatCounter(length)}`).join(" ");
+}
+
+function formatFrameSamples(samples = {}) {
+  const entries = Object.entries(samples || {}).slice(0, 8);
+  if (!entries.length) return "frmhex --";
+  return entries.map(([id, sample]) => `${id}:${String(sample).slice(0, 36)}`).join(" ");
+}
+
+function formatRecentMessageIds(ids = []) {
+  if (!Array.isArray(ids) || !ids.length) return "ids --";
+  return `ids ${ids.slice(-24).join(",")}`;
+}
+
+function formatObjectEntries(value = {}, { limit = 8, prefix = "--" } = {}) {
+  const entries = Object.entries(value || {}).slice(0, limit);
+  if (!entries.length) return prefix;
+  return entries.map(([key, item]) => `${key}:${String(item).slice(0, 28)}`).join(" ");
+}
+
+function formatPayloadKeys(data = {}) {
+  const keys = Object.keys(data || {}).filter((key) => !["aircraft", "ac", "ownship"].includes(key));
+  return keys.length ? keys.slice(0, 32).join(",") : "--";
+}
+
+function formatHeadingValue(value) {
+  const heading = Number(value);
+  return Number.isFinite(heading) ? String(Math.round(normalizedDegrees(heading))).padStart(3, "0") : "--";
+}
+
+function isLocalNetworkHost(hostname) {
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname.endsWith(".local") ||
+    /^10\./.test(hostname) ||
+    /^192\.168\./.test(hostname) ||
+    /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname)
+  );
+}
+
+function isLocalNetworkUrl(url) {
+  try {
+    return isLocalNetworkHost(new URL(url, window.location.href).hostname);
+  } catch {
+    return false;
+  }
+}
+
+function internetTrafficSourceLabel() {
+  return isLocalNetworkUrl(adsbProxyBaseUrl) ? "WiFi ADS-B" : "Cellular";
+}
+
+function classifyTrafficSource(data = {}) {
+  const source = String(data.displaySource || data.source || "").toLowerCase();
+  if (source.includes("stratus")) return { type: "stratus", label: "STRATUS" };
+  if (source.includes("wifi")) return { type: "wifi", label: "WIFI ADS-B" };
+  if (source.includes("cellular")) return { type: "cellular", label: "CELLULAR" };
+  if (isLocalNetworkUrl(adsbProxyBaseUrl)) return { type: "wifi", label: "WIFI ADS-B" };
+  return { type: "cellular", label: "CELLULAR" };
+}
+
+function updateDataSourceIndicator(data = null) {
+  if (!dataSourceIndicator || !dataSourceLabel) return;
+
+  if (!data || data.stale) {
+    dataSourceIndicator.hidden = true;
+    return;
+  }
+
+  const source = classifyTrafficSource(data);
+  dataSourceIndicator.hidden = false;
+  dataSourceIndicator.classList.toggle("stratus", source.type === "stratus");
+  dataSourceIndicator.classList.toggle("wifi", source.type === "wifi");
+  dataSourceIndicator.classList.toggle("cellular", source.type === "cellular");
+  dataSourceIndicator.classList.toggle("steady", source.type === "cellular");
+  dataSourceLabel.textContent = source.label;
+}
+
+function activeTrackHeadingSource() {
+  if (orientationMode !== "track") return "north";
+  if (Number.isFinite(stratusTrackDegrees) && Date.now() - lastStratusOwnshipAt < 15000) return "stratus trk";
+  if (Number.isFinite(stratusHeadingDegrees) && Date.now() - lastStratusHeadingAt < 15000) return "stratus hdg";
+  if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= gpsTrackThresholdKts) return "iphone gps";
+  if (Number.isFinite(compassHeadingDegrees)) return "iphone cmp";
+  return "no hdg";
+}
+
+function updateStratusDiagnostics(data = null) {
+  if (!stratusDiagnosticsEl) return;
+
+  const isStratus = data && (data.displaySource === "Stratus" || data.source === "Stratus");
+  stratusDiagnosticsEl.hidden = !isStratus;
+  if (!isStratus) return;
+
+  const age = Number.isFinite(Number(data.ageSeconds)) ? `${Math.round(Number(data.ageSeconds))}s` : "--";
+  const status = data.stale ? "WAITING" : "LIVE";
+  const ownship = data.ownship ? "YES" : "NO";
+  const diagnosticRows = [
+    ["state", status],
+    ["source", data.source || data.displaySource || "--"],
+    ["age", age],
+    ["total", formatCounter(data.total)],
+    ["pkts", formatCounter(data.packetCount)],
+    ["frames", formatCounter(data.frameCount)],
+    ["traffic", formatCounter(data.trafficFrameCount)],
+    ["own", formatCounter(data.ownshipFrameCount)],
+    ["trk", formatHeadingValue(stratusTrackDegrees)],
+    ["hb", formatCounter(data.heartbeatFrameCount)],
+    ["battery", formatBattery(data)],
+    ["power", data.powerStatus || data.externalPower || data.batteryState || "--"],
+    ["batraw", formatObjectEntries(data.batteryCandidates, { prefix: "--" })],
+    ["vendor", formatVendorSamples(data.vendorFrameSamples)],
+    ["vascii", formatObjectEntries(data.vendorAsciiSamples, { limit: 6, prefix: "--" })],
+    ["raw", formatRawPacketSamples(data.rawPacketSamples)],
+    ["tail", formatObjectEntries(data.rawPacketTailSamples, { limit: 4, prefix: "--" })],
+    ["ascii", formatRawAsciiSamples(data.rawPacketAsciiSamples)],
+    ["len", formatRawLengths(data.rawPacketLengths)],
+    ["frmhex", formatFrameSamples(data.frameSamples)],
+    ["frmlen", formatObjectEntries(data.frameLengths, { limit: 10, prefix: "--" })],
+    ["ids", formatRecentMessageIds(data.recentMessageIds)],
+    ["keys", formatPayloadKeys(data)],
+    ["hdg", activeTrackHeadingSource()],
+    ["devhdg", formatHeadingValue(data.deviceHeading)],
+    ["devacc", formatCounter(data.deviceHeadingAccuracy)],
+    ["deverr", formatCounter(data.decodeErrors)],
+    ["ownship", ownship],
+    ["ports", formatPortStats(data.portStats)],
+    ["msg", formatMessageCounts(data.messageCounts)],
+    ["listen", data.listenerStatus || "--"],
+    ["warn", data.warning || "--"]
+  ];
+  stratusDiagnosticsEl.innerHTML = `
+    ${diagnosticRows.map(([label, value]) => `<span><b>${label}</b> ${escapeHtml(value)}</span>`).join("")}
+  `;
+}
+
+function setOrientationMode(mode, { persist = true } = {}) {
+  orientationMode = mode === "track" ? "track" : "north";
+  if (orientationModeSelect) orientationModeSelect.value = orientationMode;
+  if (persist) window.localStorage.setItem("ADSB_RADAR_ORIENTATION", orientationMode);
+  if (orientationMode === "track") queueCompassHeadingEnable();
+}
+
+function ensureStratusTrackUp() {
+  stratusAutoTrackUpEnabled = true;
+  if (orientationMode !== "track") setOrientationMode("track", { persist: false });
+}
+
+function parseHeadingDegrees(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number)) return normalizedDegrees(number);
+  }
+  return null;
+}
+
+function extractStratusHeading(data = {}) {
+  const attitude = data.attitude || data.ahrs || {};
+  return parseHeadingDegrees(
+    data.heading,
+    data.trueHeading,
+    data.magneticHeading,
+    data.compassHeading,
+    data.trackHeading,
+    attitude.heading,
+    attitude.trueHeading,
+    attitude.magneticHeading,
+    attitude.compassHeading,
+    attitude.yaw
+  );
+}
+
+function applyStratusHeading(data = {}) {
+  const heading = extractStratusHeading(data);
+  if (!Number.isFinite(heading)) return;
+  stratusHeadingDegrees = heading;
+  lastStratusHeadingAt = Date.now();
+}
+
+function applyNativeDeviceHeading(data = {}) {
+  const headingAge = Number(data.deviceHeadingAgeSeconds);
+  const heading = parseHeadingDegrees(data.deviceHeading);
+  if (!Number.isFinite(heading)) return;
+  if (Number.isFinite(headingAge) && headingAge > 15) return;
+  compassHeadingDegrees = heading;
+}
+
+function updateDeviceThermalBadge(data = null) {
+  if (!deviceThermalStatus) return;
+  if (!data) {
+    deviceThermalStatus.hidden = true;
+    return;
+  }
+
+  latestDeviceStatus = data;
+  const state = String(data.thermalState || "unknown").toLowerCase();
+  const label = data.thermalLabel || state || "Unknown";
+  deviceThermalStatus.hidden = false;
+  deviceThermalStatus.classList.toggle("warm", state === "fair");
+  deviceThermalStatus.classList.toggle("hot", state === "serious");
+  deviceThermalStatus.classList.toggle("critical", state === "critical");
+  deviceThermalStatus.textContent = `Device ${label}`;
+  if ((state === "serious" || state === "critical") && !reducedLoad) {
+    setReducedLoad(true, { automatic: true });
+  }
+}
+
+async function refreshDeviceThermalStatus() {
+  if (!nativeStratusHandler) {
+    updateDeviceThermalBadge(null);
+    return null;
+  }
+  if (deviceStatusRefreshInFlight) return latestDeviceStatus;
+
+  const requestId = `${Date.now()}-device-${++nativeStratusRequestId}`;
+  deviceStatusRefreshInFlight = true;
+  try {
+    const payload = await new Promise((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        window.removeEventListener("adsb-native-stratus-response", handleResponse);
+        reject(new Error("Native device status timed out"));
+      }, 900);
+
+      function handleResponse(event) {
+        const detail = event.detail || {};
+        if (detail.id !== requestId || detail.type !== "deviceStatus") return;
+        window.clearTimeout(timeout);
+        window.removeEventListener("adsb-native-stratus-response", handleResponse);
+        if (detail.error) reject(new Error(detail.error));
+        else resolve(detail.payload || {});
+      }
+
+      window.addEventListener("adsb-native-stratus-response", handleResponse);
+      nativeStratusHandler.postMessage({ id: requestId, type: "deviceStatus" });
+    });
+    updateDeviceThermalBadge(payload);
+    lastDeviceStatusRefreshAt = Date.now();
+    deviceStatusRefreshInFlight = false;
+    return payload;
+  } catch {
+    const fallback = { thermalState: "unknown", thermalLabel: "Unknown" };
+    updateDeviceThermalBadge(fallback);
+    lastDeviceStatusRefreshAt = Date.now();
+    deviceStatusRefreshInFlight = false;
+    return fallback;
+  }
 }
 
 function playTone({ frequency, type = "sine", duration = 0.05, gain = 0.05, slideTo = null, delay = 0 }) {
@@ -699,7 +1052,7 @@ function playContactBlip() {
 
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
-  pixelRatio = window.devicePixelRatio || 1;
+  pixelRatio = reducedLoad ? Math.min(window.devicePixelRatio || 1, 1.5) : window.devicePixelRatio || 1;
   canvas.width = Math.max(1, Math.floor(rect.width * pixelRatio));
   canvas.height = Math.max(1, Math.floor(rect.height * pixelRatio));
   ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
@@ -720,6 +1073,76 @@ function setLightTheme(enabled) {
     themeToggle.setAttribute("aria-pressed", String(lightTheme));
     themeToggle.setAttribute("aria-label", lightTheme ? "Use dark cockpit theme" : "Use light cockpit theme");
   }
+  window.requestAnimationFrame(drawQuickNotes);
+}
+
+function thermalLabel() {
+  if (!nativeStratusHandler) return "browser";
+  return latestDeviceStatus?.thermalLabel || "--";
+}
+
+function updatePerformanceTelemetry() {
+  if (!performanceTelemetry) return;
+
+  const targetFps = reducedLoad ? 24 : 60;
+  const mode = reducedLoad ? "reduced" : "normal";
+  const lowPower = latestDeviceStatus?.lowPowerMode ? " low power" : "";
+  performanceTelemetry.innerHTML = `
+    <span><b>Load</b> ${mode}${lowPower}</span>
+    <span><b>FPS</b> ${Math.round(renderStats.fps) || "--"} / ${targetFps}</span>
+    <span><b>Frame</b> ${renderStats.averageRenderMs ? renderStats.averageRenderMs.toFixed(1) : "--"}ms</span>
+    <span><b>Slow</b> ${renderStats.slowPercent ? `${Math.round(renderStats.slowPercent)}%` : "0%"}</span>
+    <span><b>Thermal</b> ${escapeHtml(thermalLabel())}</span>
+    <span><b>Pixels</b> ${pixelRatio.toFixed(2)}x</span>
+  `;
+}
+
+function setReducedLoad(enabled, { automatic = false } = {}) {
+  reducedLoad = Boolean(enabled);
+  window.localStorage.setItem("ADSB_RADAR_REDUCED_LOAD", reducedLoad ? "true" : "false");
+  document.body.classList.toggle("reduced-load", reducedLoad);
+  shell.classList.toggle("reduced-load", reducedLoad);
+  if (reducedLoadToggle) reducedLoadToggle.checked = reducedLoad;
+  if (automatic && performanceTelemetry) {
+    performanceTelemetry.dataset.notice = "Reduced load enabled after iOS reported high thermal pressure.";
+  } else if (performanceTelemetry) {
+    delete performanceTelemetry.dataset.notice;
+  }
+  lastRenderedAt = 0;
+  lastWeatherEnsureAt = 0;
+  resizeCanvas();
+  updatePerformanceTelemetry();
+}
+
+function recordRenderStats(frameStartedAt, frameTimestamp) {
+  const renderMs = performance.now() - frameStartedAt;
+  const targetMs = reducedLoad ? 1000 / 24 : 1000 / 60;
+  const frameGap = renderStats.lastFrameAt ? frameTimestamp - renderStats.lastFrameAt : targetMs;
+
+  renderStats.frames += 1;
+  renderStats.totalRenderMs += renderMs;
+  if (renderMs > targetMs * 0.85 || frameGap > targetMs * 1.65) renderStats.slowFrames += 1;
+  renderStats.lastFrameAt = frameTimestamp;
+
+  if (!renderStats.lastReportAt) renderStats.lastReportAt = frameTimestamp;
+  const elapsed = frameTimestamp - renderStats.lastReportAt;
+  if (elapsed < 1000) return;
+
+  renderStats.fps = (renderStats.frames * 1000) / elapsed;
+  renderStats.averageRenderMs = renderStats.totalRenderMs / Math.max(1, renderStats.frames);
+  renderStats.slowPercent = (renderStats.slowFrames / Math.max(1, renderStats.frames)) * 100;
+  renderStats.frames = 0;
+  renderStats.slowFrames = 0;
+  renderStats.totalRenderMs = 0;
+  renderStats.lastReportAt = frameTimestamp;
+  updatePerformanceTelemetry();
+}
+
+function maybeRefreshDeviceStatus() {
+  if (!nativeStratusHandler) return;
+  const now = Date.now();
+  if (now - lastDeviceStatusRefreshAt < 15000) return;
+  refreshDeviceThermalStatus();
 }
 
 function updatePanelToggle() {
@@ -845,10 +1268,11 @@ function normalizeAircraft(raw) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
   return {
-    hex: raw.hex || raw.icao || "",
-    nNumber: (raw.nNumber || raw.r || raw.reg || raw.registration || "").trim(),
-    callsign: (raw.callsign || raw.flight || raw.call || "").trim(),
-    type: (raw.t || raw.type || "").trim(),
+    hex: String(raw.hex || raw.icao || ""),
+    nNumber: String(raw.nNumber || raw.r || raw.reg || raw.registration || "").trim(),
+    callsign: String(raw.callsign || raw.flight || raw.call || "").trim(),
+    type: String(raw.t || raw.type || "").trim(),
+    sourceType: String(raw.sourceType || raw.source || raw.messagesource || raw.mlat_source || "").trim(),
     lat,
     lon,
     altitude: raw.altitude ?? raw.alt_baro ?? raw.alt_geom ?? null,
@@ -859,6 +1283,57 @@ function normalizeAircraft(raw) {
     emergency: raw.emergency || null,
     category: raw.category || null
   };
+}
+
+function isTisbOtherAircraft(plane) {
+  const fields = [plane.type, plane.category, plane.sourceType, plane.hex, plane.callsign]
+    .map((value) => String(value || "").toLowerCase());
+  return fields.some((value) => value.includes("tisb_other") || value.includes("tisb other"));
+}
+
+function hasUsefulAircraftIdentity(plane) {
+  const callsign = String(plane.callsign || "").trim().toUpperCase();
+  return Boolean(
+    String(plane.nNumber || "").trim() ||
+      (callsign && !["UNKNOWN", "TISB_OTHER", "TIS-B"].includes(callsign)) ||
+      String(plane.type || "").trim()
+  );
+}
+
+function isLikelyTisbDuplicate(candidate, target) {
+  if (!isTisbOtherAircraft(candidate)) return false;
+  if (!hasUsefulAircraftIdentity(target) || isTisbOtherAircraft(target)) return false;
+
+  const distanceNm = milesToNauticalMiles(milesBetween(candidate.lat, candidate.lon, target.lat, target.lon));
+  if (!Number.isFinite(distanceNm) || distanceNm > 0.12) return false;
+
+  const candidateAltitude = Number(candidate.altitude);
+  const targetAltitude = Number(target.altitude);
+  if (Number.isFinite(candidateAltitude) && Number.isFinite(targetAltitude) && Math.abs(candidateAltitude - targetAltitude) > 300) {
+    return false;
+  }
+
+  const candidateSpeed = Number(candidate.speed);
+  const targetSpeed = Number(target.speed);
+  if (Number.isFinite(candidateSpeed) && Number.isFinite(targetSpeed) && Math.abs(candidateSpeed - targetSpeed) > 45) {
+    return false;
+  }
+
+  const candidateTrack = Number(candidate.track);
+  const targetTrack = Number(target.track);
+  if (Number.isFinite(candidateTrack) && Number.isFinite(targetTrack)) {
+    const trackDelta = Math.abs(normalizedDegrees(candidateTrack - targetTrack + 180) - 180);
+    if (trackDelta > 35) return false;
+  }
+
+  return true;
+}
+
+function dropDuplicateTisbOtherTargets(rows) {
+  return rows.filter((candidate) => {
+    if (!isTisbOtherAircraft(candidate)) return true;
+    return !rows.some((target) => target !== candidate && isLikelyTisbDuplicate(candidate, target));
+  });
 }
 
 function normalizeOwnship(raw) {
@@ -927,7 +1402,11 @@ function formatClosureRate(closureKts) {
 }
 
 function isAlertDisplayDevice() {
-  return window.matchMedia("(max-width: 1180px), (pointer: coarse)").matches;
+  return true;
+}
+
+function isDesktopArcDisplay() {
+  return weatherMode && window.matchMedia("(min-width: 1181px) and (pointer: fine)").matches;
 }
 
 function closureRateKts(plane, currentDistance) {
@@ -1044,16 +1523,52 @@ function proximityCandidate(plane) {
 function clearProximityAlert() {
   proximityAlertEl.hidden = true;
   proximityAlertEl.textContent = "";
-  proximityAlertEl.classList.remove("diverging", "solid");
+  proximityAlertEl.classList.remove("diverging", "manual-focus", "solid");
   proximityAlertKey = "";
   proximityAlertSolid = false;
   proximityAlertAudioLevel = 1;
   trafficAlertActive = false;
+  manualThreatFocusKey = "";
   if (returnToArcAfterThreat) {
     returnToArcAfterThreat = false;
     setWeatherMode(true);
   }
+  if (returnToArcAfterManualThreat) {
+    returnToArcAfterManualThreat = false;
+    setWeatherMode(true);
+  }
   updateBottomRangeButton();
+}
+
+function clearManualThreatFocus() {
+  manualThreatFocusKey = "";
+  returnToArcAfterManualThreat = false;
+  if (proximityAlertKey && !returnToArcAfterThreat) proximityAlertKey = "";
+  proximityAlertSolid = false;
+  proximityAlertAudioLevel = 1;
+  trafficAlertActive = false;
+  proximityAlertEl.hidden = true;
+  proximityAlertEl.textContent = "";
+  proximityAlertEl.classList.remove("diverging", "manual-focus", "solid");
+  updateBottomRangeButton();
+  updateWxNearestTarget();
+}
+
+function clearActiveTrafficAlert() {
+  if (manualThreatFocusKey) {
+    clearManualThreatFocus();
+    return;
+  }
+
+  if (proximityAlertKey) dismissedTrafficAlertKey = proximityAlertKey;
+  proximityAlertEl.hidden = true;
+  proximityAlertEl.textContent = "";
+  proximityAlertEl.classList.remove("diverging", "manual-focus", "solid");
+  proximityAlertSolid = false;
+  proximityAlertAudioLevel = 1;
+  trafficAlertActive = false;
+  updateBottomRangeButton();
+  updateWxNearestTarget();
 }
 
 function nearestVisibleAircraft() {
@@ -1077,6 +1592,11 @@ function updateWxNearestTarget() {
     return;
   }
 
+  if (trafficAlertActive && proximityAlertKey && !proximityAlertEl.hidden) {
+    wxNearestTarget.hidden = true;
+    return;
+  }
+
   const nearest = nearestVisibleAircraft();
   if (!nearest) {
     wxNearestTarget.innerHTML = `<span class="wx-nearest-label">Range to nearest target</span><strong class="wx-nearest-data">--</strong>`;
@@ -1091,6 +1611,34 @@ function updateWxNearestTarget() {
     <span class="wx-nearest-altitude">${relativeAltitudeDetail(nearest.plane.altitude)}</span>
   `;
   wxNearestTarget.hidden = false;
+}
+
+function focusNearestTargetFromArc() {
+  if (!weatherMode) return;
+  const nearest = nearestVisibleAircraft();
+  if (!nearest) return;
+
+  const key = aircraftKey(nearest.plane);
+  if (!key) return;
+
+  manualThreatFocusKey = key;
+  proximityAlertKey = key;
+  proximityAlertSolid = true;
+  proximityAlertAudioLevel = 0;
+  proximityHighlightLastAt = 0;
+  trafficAlertActive = true;
+  returnToArcAfterManualThreat = true;
+
+  setWeatherMode(false);
+  const nextRange = rangeForDistance(nearest.distance + 0.6);
+  if (nextRange !== radiusMiles) {
+    setRange(nextRange);
+    fetchAirspace();
+    fetchTraffic({ force: true });
+  }
+  scheduleAircraftHighlight(key, { delayMs: 0, durationMs: 12000 });
+  updateBottomRangeButton();
+  updateProximityAlert();
 }
 
 function highlightProximityTarget(alert) {
@@ -1109,6 +1657,39 @@ function highlightProximityTarget(alert) {
   }
 }
 
+function renderManualThreatFocus() {
+  if (!manualThreatFocusKey) return false;
+  const manualPlane = visibleAircraft().find((plane) => aircraftKey(plane) === manualThreatFocusKey);
+  if (!manualPlane) return false;
+
+  const distance = milesBetween(center.lat, center.lon, manualPlane.lat, manualPlane.lon);
+  if (distance > closeRangeNearestTargetMiles) return false;
+
+  const closureKts = closureRateKts(manualPlane, distance);
+  trafficAlertActive = true;
+  proximityAlertKey = manualThreatFocusKey;
+  if (!proximityHighlightLastAt || Date.now() - proximityHighlightLastAt > 8500) {
+    scheduleAircraftHighlight(manualThreatFocusKey, { delayMs: 0, durationMs: 10000 });
+    proximityHighlightLastAt = Date.now();
+  }
+  proximityAlertEl.hidden = false;
+  proximityAlertEl.classList.add("manual-focus", "solid");
+  proximityAlertEl.classList.remove("diverging");
+  proximityAlertEl.innerHTML = `
+    <strong class="traffic-alert-main">
+      Tracking nearest traffic
+      <span class="traffic-alert-number">${formatRangeToTarget(distance)}</span>
+      ${altitudeRelation(manualPlane.altitude)}
+      <span class="traffic-alert-number">${formatAltitude(manualPlane.altitude)}</span>
+      <span class="traffic-alert-closure">${formatClosureRate(closureKts)}</span>
+    </strong>
+    <button type="button" class="traffic-alert-clear" aria-label="Clear nearest traffic tracking">Clear</button>
+  `;
+  updateBottomRangeButton();
+  updateWxNearestTarget();
+  return true;
+}
+
 function updateProximityAlert() {
   if (!proximityAlertEl) return;
   const panelHidden = shell.classList.contains("panel-collapsed");
@@ -1117,26 +1698,38 @@ function updateProximityAlert() {
     return;
   }
 
+  if (renderManualThreatFocus()) return;
+
   const alert = visibleAircraft()
     .map(proximityCandidate)
     .filter(Boolean)
     .sort((a, b) => a.distance - b.distance)[0];
 
   if (!alert) {
+    dismissedTrafficAlertKey = "";
     clearProximityAlert();
     return;
   }
 
   const alertKey = aircraftKey(alert.plane);
+  if (dismissedTrafficAlertKey && dismissedTrafficAlertKey !== alertKey) {
+    dismissedTrafficAlertKey = "";
+  }
+  if (alertKey === dismissedTrafficAlertKey) {
+    proximityAlertEl.hidden = true;
+    trafficAlertActive = false;
+    updateBottomRangeButton();
+    updateWxNearestTarget();
+    return;
+  }
+
   if (alertKey !== proximityAlertKey) {
-    if (weatherMode) {
+    if (weatherMode && !isDesktopArcDisplay()) {
       returnToArcAfterThreat = true;
       setWeatherMode(false);
-      orientationMode = "track";
-      orientationModeSelect.value = "track";
-      queueCompassHeadingEnable();
+      setOrientationMode("track", { persist: false });
     }
-    if (radiusMiles !== 5) {
+    if (!isDesktopArcDisplay() && radiusMiles !== 5) {
       setRange(5);
       fetchAirspace();
       fetchTraffic({ force: true });
@@ -1165,10 +1758,13 @@ function updateProximityAlert() {
       <span class="traffic-alert-closure">${formatClosureRate(alert.closureKts)}</span>
     </strong>
     ${muteHint}
+    <button type="button" class="traffic-alert-clear" aria-label="Clear traffic alert">Clear</button>
   `;
   proximityAlertEl.classList.toggle("diverging", alert.diverging);
   proximityAlertEl.classList.toggle("solid", proximityAlertSolid || alert.diverging);
+  proximityAlertEl.classList.remove("manual-focus");
   proximityAlertEl.hidden = false;
+  updateWxNearestTarget();
 }
 
 function destinationPoint(lat, lon, bearing, distanceMiles) {
@@ -1197,7 +1793,9 @@ function destinationPoint(lat, lon, bearing, distanceMiles) {
 }
 
 function activeTrackHeadingDegrees() {
-  if (!gpsActive || orientationMode !== "track") return null;
+  if (orientationMode !== "track") return null;
+  if (Number.isFinite(stratusTrackDegrees) && Date.now() - lastStratusOwnshipAt < 15000) return stratusTrackDegrees;
+  if (Number.isFinite(stratusHeadingDegrees) && Date.now() - lastStratusHeadingAt < 15000) return stratusHeadingDegrees;
   if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= gpsTrackThresholdKts) return gpsTrackDegrees;
   if (Number.isFinite(compassHeadingDegrees)) return compassHeadingDegrees;
   return null;
@@ -1208,6 +1806,7 @@ function gpsModeSelected() {
 }
 
 function radarRotationDegrees() {
+  if (weatherMode && Number.isFinite(arcForwardHeadingDegrees)) return arcForwardHeadingDegrees;
   return activeTrackHeadingDegrees() ?? 0;
 }
 
@@ -1241,10 +1840,15 @@ function radarScope(width, height) {
 
 function weatherScope(width, height) {
   const framePad = Math.max(22, Math.min(width, height) * 0.035);
-  const radius = Math.max(120, Math.min(width * 0.58, height * 0.72));
   const desktopArc = window.matchMedia("(min-width: 1181px) and (pointer: fine)").matches;
-  const centerFactor = desktopArc ? 0.74 : width >= 700 ? 0.52 : 0.48;
-  const cy = Math.min(height - framePad - 132, Math.max(230, height * centerFactor));
+  const arcDropPx = window.matchMedia("(pointer: coarse)").matches ? 38 : 30;
+  const cy = desktopArc
+    ? Math.min(height - framePad - 36, Math.max(520, height * 0.94))
+    : Math.min(height - framePad - 96, Math.max(230, height * (width >= 700 ? 0.52 : 0.48) + arcDropPx));
+  const headingTapeClearance = desktopArc ? Math.max(250, height * 0.24) : 0;
+  const radius = desktopArc
+    ? Math.max(120, Math.min(width * 0.42, height * 0.58, cy - headingTapeClearance))
+    : Math.max(120, Math.min(width * 0.58, height * 0.72));
   return {
     width,
     height,
@@ -1291,8 +1895,8 @@ function aircraftSpeed(plane) {
 function breadcrumbLimitForAircraft(plane) {
   if (isTrackedAircraft(plane)) return trackedBreadcrumbLimit;
   const speed = aircraftSpeed(plane);
-  const speedFactor = speed <= 60 ? 0.45 : speed <= 160 ? 0.75 : speed <= 300 ? 1 : speed <= 450 ? 1.35 : 1.7;
-  return Math.max(2, Math.min(45, Math.round(breadcrumbBaseLimit * speedFactor)));
+  const speedFactor = speed <= 60 ? 0.5 : speed <= 160 ? 0.85 : speed <= 300 ? 1.2 : speed <= 450 ? 1.8 : 2.5;
+  return Math.max(4, Math.min(90, Math.round(breadcrumbBaseLimit * speedFactor)));
 }
 
 function formatAirspaceAltitude(value, code) {
@@ -1381,6 +1985,130 @@ function clearTrackedAircraftHistory(state = trackedAircraft) {
       tracks.delete(key);
     }
   }
+}
+
+function quickNotesContext() {
+  return quickNotesCanvas?.getContext("2d") || null;
+}
+
+function quickNotesPoint(event) {
+  if (!quickNotesCanvas) return null;
+  const rect = quickNotesCanvas.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  return {
+    x: Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)),
+    y: Math.max(0, Math.min(1, (event.clientY - rect.top) / rect.height)),
+    pressure: Number.isFinite(event.pressure) && event.pressure > 0 ? event.pressure : 0.55
+  };
+}
+
+function resizeQuickNotesCanvas() {
+  if (!quickNotesCanvas) return;
+  const rect = quickNotesCanvas.getBoundingClientRect();
+  const ratio = window.devicePixelRatio || 1;
+  const width = Math.max(1, Math.round(rect.width * ratio));
+  const height = Math.max(1, Math.round(rect.height * ratio));
+  if (quickNotesCanvas.width !== width || quickNotesCanvas.height !== height) {
+    quickNotesCanvas.width = width;
+    quickNotesCanvas.height = height;
+  }
+  drawQuickNotes();
+}
+
+function drawQuickNotes() {
+  const noteCtx = quickNotesContext();
+  if (!noteCtx || !quickNotesCanvas) return;
+  const width = quickNotesCanvas.width;
+  const height = quickNotesCanvas.height;
+  noteCtx.clearRect(0, 0, width, height);
+  noteCtx.lineCap = "round";
+  noteCtx.lineJoin = "round";
+  noteCtx.strokeStyle = lightTheme ? "rgba(43, 35, 145, 0.88)" : "rgba(255, 232, 150, 0.9)";
+
+  for (const stroke of quickNoteStrokes) {
+    if (!stroke.points.length) continue;
+    const pressure = stroke.points.reduce((sum, point) => sum + point.pressure, 0) / stroke.points.length;
+    noteCtx.lineWidth = Math.max(2, Math.min(7, pressure * 6)) * (window.devicePixelRatio || 1);
+    noteCtx.beginPath();
+    stroke.points.forEach((point, index) => {
+      const x = point.x * width;
+      const y = point.y * height;
+      if (index === 0) noteCtx.moveTo(x, y);
+      else noteCtx.lineTo(x, y);
+    });
+    noteCtx.stroke();
+  }
+}
+
+function setQuickNotesVisible(visible) {
+  if (!quickNotes) return;
+  quickNotes.hidden = !visible;
+  if (visible) window.requestAnimationFrame(resizeQuickNotesCanvas);
+}
+
+function beginQuickNote(event) {
+  if (!weatherMode) return;
+  const point = quickNotesPoint(event);
+  if (!point) return;
+  event.preventDefault();
+  quickNotesCanvas?.setPointerCapture?.(event.pointerId);
+  activeQuickNoteStroke = { points: [point] };
+  quickNoteStrokes.push(activeQuickNoteStroke);
+  drawQuickNotes();
+}
+
+function continueQuickNote(event) {
+  if (!activeQuickNoteStroke) return;
+  const point = quickNotesPoint(event);
+  if (!point) return;
+  event.preventDefault();
+  activeQuickNoteStroke.points.push(point);
+  drawQuickNotes();
+}
+
+function endQuickNote(event) {
+  if (!activeQuickNoteStroke) return;
+  quickNotesCanvas?.releasePointerCapture?.(event.pointerId);
+  activeQuickNoteStroke = null;
+}
+
+function clearQuickNotes() {
+  quickNoteStrokes = [];
+  activeQuickNoteStroke = null;
+  drawQuickNotes();
+}
+
+function cancelQuickNotesClearHold() {
+  if (quickNotesClearTimer) {
+    window.clearTimeout(quickNotesClearTimer);
+    quickNotesClearTimer = null;
+  }
+  quickNotesClearStartedAt = 0;
+  quickNotesClear?.classList.remove("holding");
+}
+
+function beginQuickNotesClearHold(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  cancelQuickNotesClearHold();
+  quickNotesClearStartedAt = Date.now();
+  quickNotesClear?.classList.add("holding");
+  quickNotesClear?.setPointerCapture?.(event.pointerId);
+  quickNotesClearTimer = window.setTimeout(() => {
+    quickNotesClearTimer = null;
+    clearQuickNotes();
+    cancelQuickNotesClearHold();
+  }, 1050);
+}
+
+function finishQuickNotesClearHold(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  quickNotesClear?.releasePointerCapture?.(event.pointerId);
+  if (quickNotesClearStartedAt && Date.now() - quickNotesClearStartedAt >= 1000) {
+    clearQuickNotes();
+  }
+  cancelQuickNotesClearHold();
 }
 
 function planeLabel(plane) {
@@ -1651,21 +2379,54 @@ function pruneRadarBlips(nextAircraft) {
 
     if (outOfRange || stale || faded) {
       radarBlips.delete(key);
-      tracks.delete(key);
     }
+  }
+}
+
+function refreshLiveStratusBlips(nextAircraft, data = {}) {
+  const source = String(data.source || data.displaySource || "").toLowerCase();
+  if (!source.includes("stratus") || data.stale) return;
+
+  for (const plane of nextAircraft) {
+    if (!isVisibleTraffic(plane)) continue;
+    if (milesBetween(center.lat, center.lon, plane.lat, plane.lon) > radiusMiles + 1) continue;
+
+    const key = aircraftKey(plane);
+    const previous = radarBlips.get(key);
+    if (previous) {
+      radarBlips.set(key, {
+        ...previous,
+        speed: plane.speed ?? previous.speed,
+        track: plane.track ?? previous.track,
+        verticalRate: plane.verticalRate ?? previous.verticalRate,
+        altitude: plane.altitude ?? previous.altitude,
+        geoAltitude: plane.geoAltitude ?? previous.geoAltitude,
+        seen: plane.seen ?? previous.seen,
+        liveUpdatedAt: Date.now()
+      });
+    } else {
+      radarBlips.set(key, {
+        ...plane,
+        radarSeenAt: 0,
+        liveUpdatedAt: Date.now()
+      });
+    }
+    appendTrackHistory(plane);
   }
 }
 
 function radarBlipAlpha(plane, now = Date.now()) {
   const age = now - (plane.radarSeenAt || 0);
-  return Math.max(0, Math.min(1, 1 - age / radarFadeMs));
+  const sweepAlpha = Math.max(0, Math.min(1, 1 - age / radarFadeMs));
+  const liveAge = now - (plane.liveUpdatedAt || 0);
+  const liveAlpha = liveAge <= 3500 ? 0.58 : liveAge <= 9000 ? Math.max(0, 0.58 * (1 - (liveAge - 3500) / 5500)) : 0;
+  return Math.max(sweepAlpha, liveAlpha);
 }
 
 function pruneExpiredRadarBlips(now = Date.now()) {
   for (const [key, plane] of radarBlips.entries()) {
     if (radarBlipAlpha(plane, now) <= 0) {
       radarBlips.delete(key);
-      tracks.delete(key);
     }
   }
 }
@@ -1730,19 +2491,27 @@ async function getJson(url) {
 }
 
 async function loadAirportCache() {
+  if (!airportsCachePromise && Date.now() < airportCacheRetryAt) return [];
   if (!airportsCachePromise) {
     airportsCachePromise = fetch(airportsCsvUrl)
       .then((response) => {
         if (!response.ok) throw new Error(`Airport data returned ${response.status}`);
         return response.text();
       })
-      .then(parseAirportsCsv);
+      .then(parseAirportsCsv)
+      .catch((error) => {
+        console.warn("Unable to load airport data", error);
+        airportsCachePromise = null;
+        airportCacheRetryAt = Date.now() + 60000;
+        return [];
+      });
   }
 
   return airportsCachePromise;
 }
 
 async function loadRunwayCache() {
+  if (!runwaysCachePromise && Date.now() < runwayCacheRetryAt) return [];
   if (!runwaysCachePromise) {
     runwaysCachePromise = fetch(runwaysCsvUrl)
       .then((response) => {
@@ -1752,6 +2521,8 @@ async function loadRunwayCache() {
       .then(parseRunwaysCsv)
       .catch((error) => {
         console.warn("Unable to load runway data", error);
+        runwaysCachePromise = null;
+        runwayCacheRetryAt = Date.now() + 60000;
         return [];
       });
   }
@@ -1796,7 +2567,14 @@ async function fetchStaticTraffic() {
     loadRunwayCache()
   ]);
 
-  const aircraftRows = (trafficData.aircraft || trafficData.ac || []).map(normalizeAircraft).filter(Boolean);
+  const aircraftRows = dropDuplicateTisbOtherTargets(
+    (trafficData.aircraft || trafficData.ac || []).map(normalizeAircraft).filter(Boolean)
+  );
+  applyNativeDeviceHeading(trafficData);
+  applyStratusHeading(trafficData);
+  if ((trafficData.displaySource === "Stratus" || trafficData.source === "Stratus") && !trafficData.stale) {
+    ensureStratusTrackUp();
+  }
   applyStratusOwnship(trafficData);
 
   const airportContextMiles = radiusMiles * 1.7;
@@ -1812,6 +2590,7 @@ async function fetchStaticTraffic() {
   );
 
   return {
+    ...trafficData,
     aircraft: aircraftRows,
     airports: airportMatches,
     source: trafficData.displaySource || trafficData.source || "Cellular",
@@ -1826,7 +2605,12 @@ function applyStratusOwnship(trafficData) {
   if (trafficData.stale || !gpsModeSelected()) return;
 
   const ownship = normalizeOwnship(trafficData.ownship);
-  if (!ownship) return;
+  if (!ownship) {
+    stratusTrackDegrees = null;
+    stratusTrackSpeedKts = 0;
+    return;
+  }
+  ensureStratusTrackUp();
 
   const now = Date.now();
   const movedMiles = milesBetween(center.lat, center.lon, ownship.lat, ownship.lon);
@@ -1836,7 +2620,8 @@ function applyStratusOwnship(trafficData) {
   gpsActive = true;
   stratusOwnshipActive = true;
   lastStratusOwnshipAt = now;
-  gpsSpeedKts = Number.isFinite(Number(ownship.speed)) ? Number(ownship.speed) : 0;
+  stratusTrackSpeedKts = Number.isFinite(Number(ownship.speed)) ? Number(ownship.speed) : 0;
+  gpsSpeedKts = stratusTrackSpeedKts;
   gpsAltitudeFt =
     Number.isFinite(Number(ownship.geoAltitude))
       ? Number(ownship.geoAltitude)
@@ -1844,9 +2629,9 @@ function applyStratusOwnship(trafficData) {
         ? Number(ownship.altitude)
         : null;
   if (Number.isFinite(Number(ownship.track))) {
-    gpsTrackDegrees = Number(ownship.track);
+    stratusTrackDegrees = normalizedDegrees(Number(ownship.track));
   } else if (movedMiles > 0.003) {
-    gpsTrackDegrees = bearingDegrees(previousCenter.lat, previousCenter.lon, ownship.lat, ownship.lon);
+    stratusTrackDegrees = bearingDegrees(previousCenter.lat, previousCenter.lon, ownship.lat, ownship.lon);
   }
 
   latInput.value = ownship.lat.toFixed(4);
@@ -1897,7 +2682,62 @@ async function fetchAircraftFeed(baseUrl, { displaySource, timeoutMs = 6500 } = 
   }
 }
 
+async function fetchNativeStratusFeed({ timeoutMs = 900 } = {}) {
+  if (!nativeStratusHandler) throw new Error("Native Stratus bridge is not available");
+
+  const requestId = `${Date.now()}-${++nativeStratusRequestId}`;
+  const requestRadiusMiles = radiusMiles <= 15 ? closeRangeNearestTargetMiles : radiusMiles;
+
+  return new Promise((resolve, reject) => {
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener("adsb-native-stratus-response", handleResponse);
+      reject(new Error("Native Stratus bridge timed out"));
+    }, timeoutMs);
+
+    function handleResponse(event) {
+      const detail = event.detail || {};
+      if (detail.id !== requestId || detail.type !== "aircraft") return;
+
+      window.clearTimeout(timeout);
+      window.removeEventListener("adsb-native-stratus-response", handleResponse);
+
+      if (detail.error) {
+        reject(new Error(detail.error));
+        return;
+      }
+
+      resolve({
+        ...(detail.payload || {}),
+        displaySource: "Stratus"
+      });
+    }
+
+    window.addEventListener("adsb-native-stratus-response", handleResponse);
+    nativeStratusHandler.postMessage({
+      id: requestId,
+      type: "aircraft",
+      lat: center.lat,
+      lon: center.lon,
+      radiusMiles: requestRadiusMiles
+    });
+  });
+}
+
 async function fetchPreferredAircraftFeed() {
+  if (nativeStratusHandler) {
+    try {
+      const nativeData = await fetchNativeStratusFeed({ timeoutMs: 900 });
+      applyNativeDeviceHeading(nativeData);
+      if (nativeData.stale) {
+        const age = Number.isFinite(Number(nativeData.ageSeconds)) ? `${Math.round(Number(nativeData.ageSeconds))}s old` : "not receiving packets";
+        throw new Error(`Native Stratus receiver is stale (${age})`);
+      }
+      return nativeData;
+    } catch (error) {
+      console.warn("Native Stratus traffic source unavailable; falling back to cellular/configured sources", error);
+    }
+  }
+
   if (stratusBridgeBaseUrl) {
     try {
       const stratusData = await fetchAircraftFeed(stratusBridgeBaseUrl, {
@@ -1920,7 +2760,7 @@ async function fetchPreferredAircraftFeed() {
   }
 
   return fetchAircraftFeed(adsbProxyBaseUrl, {
-    displaySource: "Cellular",
+    displaySource: internetTrafficSourceLabel(),
     timeoutMs: 6500
   });
 }
@@ -1947,7 +2787,10 @@ async function fetchStratusJson(path, timeoutMs = 1200) {
 function fetchStratusAuxiliaryData() {
   Promise.all([fetchStratusJson("/api/weather"), fetchStratusJson("/api/ahrs")]).then(([weather, ahrs]) => {
     if (weather) stratusWeatherData = weather;
-    if (ahrs) stratusAhrsData = ahrs;
+    if (ahrs) {
+      stratusAhrsData = ahrs;
+      applyStratusHeading(ahrs);
+    }
   });
 }
 
@@ -2003,7 +2846,7 @@ function weatherTileEnvelope(zoom) {
     }
   }
 
-  return tiles.slice(0, 64);
+  return tiles.slice(0, reducedLoad ? 28 : 64);
 }
 
 function loadWeatherTile(url, tile) {
@@ -2060,7 +2903,11 @@ async function ensureWeatherImage() {
 
 function drawPrecipitation(scope) {
   if (!showPrecipitation) return;
-  ensureWeatherImage();
+  const now = Date.now();
+  if (!reducedLoad || !weatherTiles.length || now - lastWeatherEnsureAt > 30000) {
+    lastWeatherEnsureAt = now;
+    ensureWeatherImage();
+  }
   if (!weatherTiles.length) return;
 
   ctx.save();
@@ -2075,7 +2922,7 @@ function drawPrecipitation(scope) {
 }
 
 function drawProjectedWeatherTile(tile, scope) {
-  const steps = 5;
+  const steps = reducedLoad ? 3 : 5;
   const sourceWidth = tile.image.naturalWidth || tile.image.width;
   const sourceHeight = tile.image.naturalHeight || tile.image.height;
   if (!sourceWidth || !sourceHeight) return;
@@ -2164,6 +3011,83 @@ function normalizeAirspaceFeature(feature) {
   };
 }
 
+const airspaceCachePrefix = "ADSB_RADAR_AIRSPACE_";
+const recentAirspaceCacheKey = "ADSB_RADAR_AIRSPACE_RECENT";
+
+function airspaceStorageKey(key) {
+  return `${airspaceCachePrefix}${key}`;
+}
+
+function parseAirspaceCacheKey(storageKey) {
+  if (!storageKey.startsWith(airspaceCachePrefix)) return null;
+  const key = storageKey.slice(airspaceCachePrefix.length);
+  if (!key.startsWith("smooth2:")) return null;
+  const [, coords = ""] = key.split(":");
+  const [latText, lonText, radiusText] = coords.split(",");
+  const lat = Number(latText);
+  const lon = Number(lonText);
+  const radius = Number(radiusText);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radius)) return null;
+  return { key, lat, lon, radius };
+}
+
+function loadCachedAirspace(key) {
+  try {
+    const cached = JSON.parse(window.localStorage.getItem(airspaceStorageKey(key)) || "null");
+    return Array.isArray(cached) ? cached : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCachedAirspace(key, rows) {
+  try {
+    window.localStorage.setItem(airspaceStorageKey(key), JSON.stringify(rows.slice(0, 160)));
+    window.localStorage.setItem(recentAirspaceCacheKey, key);
+  } catch {
+    // Storage may be unavailable or full; keep the live session copy.
+  }
+}
+
+function loadNearestCachedAirspace(key) {
+  const exact = loadCachedAirspace(key);
+  if (exact?.length) return { key, rows: exact };
+
+  try {
+    const requested = parseAirspaceCacheKey(airspaceStorageKey(key));
+    if (!requested) return null;
+
+    const candidates = [];
+    for (let index = 0; index < window.localStorage.length; index += 1) {
+      const storageKey = window.localStorage.key(index);
+      const parsed = storageKey ? parseAirspaceCacheKey(storageKey) : null;
+      if (!parsed) continue;
+      const distance = milesBetween(requested.lat, requested.lon, parsed.lat, parsed.lon);
+      if (distance <= Math.max(35, requested.radius * 2.5, parsed.radius * 2.5)) {
+        candidates.push({ ...parsed, distance });
+      }
+    }
+
+    const recentKey = window.localStorage.getItem(recentAirspaceCacheKey);
+    candidates.sort((a, b) => {
+      if (a.key === recentKey) return -1;
+      if (b.key === recentKey) return 1;
+      if (a.radius === requested.radius && b.radius !== requested.radius) return -1;
+      if (b.radius === requested.radius && a.radius !== requested.radius) return 1;
+      return a.distance - b.distance;
+    });
+
+    for (const candidate of candidates) {
+      const rows = loadCachedAirspace(candidate.key);
+      if (rows?.length) return { key: candidate.key, rows };
+    }
+  } catch {
+    // Best-effort offline fallback only.
+  }
+
+  return null;
+}
+
 async function fetchAirspace() {
   const visibleClasses = getVisibleAirspaceClasses();
   if (!visibleClasses.size) {
@@ -2172,8 +3096,13 @@ async function fetchAirspace() {
     return;
   }
 
-  const key = `${center.lat.toFixed(4)},${center.lon.toFixed(4)},${radiusMiles}`;
+  const key = `smooth2:${center.lat.toFixed(4)},${center.lon.toFixed(4)},${radiusMiles}`;
   if (key === lastAirspaceKey && airspaces.length) return;
+  const cachedAirspace = loadNearestCachedAirspace(key);
+  if (cachedAirspace?.rows?.length) {
+    airspaces = cachedAirspace.rows;
+    lastAirspaceKey = key;
+  }
 
   const params = new URLSearchParams({
     f: "json",
@@ -2185,16 +3114,22 @@ async function fetchAirspace() {
     spatialRel: "esriSpatialRelIntersects",
     outSR: "4326",
     returnGeometry: "true",
-    maxAllowableOffset: "0.0015",
+    maxAllowableOffset: radiusMiles <= 20 ? "0.00025" : "0.0006",
     resultRecordCount: "120"
   });
 
   try {
     const data = await getJson(`${airspaceQueryUrl}?${params}`);
-    airspaces = (data.features || []).map(normalizeAirspaceFeature).filter(Boolean);
+    const fetchedAirspaces = (data.features || []).map(normalizeAirspaceFeature).filter(Boolean);
+    if (!fetchedAirspaces.length && airspaces.length) {
+      console.warn("FAA airspace request returned no usable boundaries; keeping cached/session airspace.");
+      lastAirspaceKey = key;
+      return;
+    }
+    airspaces = fetchedAirspaces;
     lastAirspaceKey = key;
+    if (airspaces.length) saveCachedAirspace(key, airspaces);
   } catch (error) {
-    airspaces = [];
     console.warn("Unable to fetch FAA airspace boundaries", error);
   }
 }
@@ -2211,9 +3146,11 @@ async function fetchTraffic({ force = false } = {}) {
     aircraft = data.aircraft;
     airports = data.airports;
     lastDataSource = data.source;
+    updateStratusDiagnostics(data);
+    updateDataSourceIndicator(data);
     if (data.stale) {
       const age = Number.isFinite(Number(data.ageSeconds)) ? `${Math.round(Number(data.ageSeconds))}s old` : "stale";
-      statusEl.textContent = `${lastDataSource} traffic source degraded. Showing cached aircraft data (${age}).`;
+      statusEl.textContent = `${lastDataSource} receiver waiting. Last packet ${age}.`;
     } else {
       statusEl.textContent = gpsActive
         ? `${lastDataSource} traffic active. GPS center at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
@@ -2224,10 +3161,13 @@ async function fetchTraffic({ force = false } = {}) {
     updateTrackedAircraftHistory(aircraft);
     resolveMissingAircraftTypes(aircraft);
     pruneRadarBlips(aircraft);
+    refreshLiveStratusBlips(aircraft, data);
     lastFetchAt = Date.now();
-    scheduleNextTrafficFetch();
+    scheduleNextTrafficFetch({ source: data.source, stale: data.stale });
   } catch (error) {
     lastDataSource = "offline";
+    updateStratusDiagnostics(null);
+    updateDataSourceIndicator(null);
     scheduleNextTrafficFetch({ failed: true });
     const retrySeconds = Math.max(1, Math.round((nextTrafficFetchAt - Date.now()) / 1000));
     const keepDataHint = aircraft.length ? " Keeping last radar picture." : "";
@@ -2499,7 +3439,7 @@ function drawAirspace(scope) {
       if (ring.length < 2) continue;
       const projectedRing = ring.map((point) => project(point.lat, point.lon, scope));
       labelPoints.push(...projectedRing);
-      drawAirspaceRingPath(projectedRing, airspace.classCode === "D");
+      drawAirspaceRingPath(projectedRing, ["B", "C", "D"].includes(airspace.classCode));
       ctx.fill();
       ctx.stroke();
     }
@@ -2635,6 +3575,49 @@ function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   }
 }
 
+function drawVerticalTrendCue(plane, point, alpha = 1) {
+  const theme = currentRadarTheme();
+  const verticalRate = Number(plane.verticalRate);
+  if (!Number.isFinite(verticalRate)) return;
+
+  const climbing = verticalRate > 500;
+  const descending = verticalRate < -500;
+  if (!climbing && !descending) return;
+
+  const ownAltitude = Number(gpsAltitudeFt);
+  const targetAltitude = Number(plane.altitude);
+  const movingTowardOwnAltitude =
+    Number.isFinite(ownAltitude) &&
+    Number.isFinite(targetAltitude) &&
+    ((targetAltitude > ownAltitude && descending) || (targetAltitude < ownAltitude && climbing));
+  const x = point.x - 16;
+  const y = point.y + 6;
+
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, Math.max(0.25, alpha));
+  ctx.lineWidth = 1.7;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.strokeStyle = movingTowardOwnAltitude ? theme.verticalTrendConflict : theme.verticalTrendSafe;
+  ctx.fillStyle = ctx.strokeStyle;
+
+  const tipOffset = climbing ? -8 : 8;
+  const tailOffset = climbing ? 8 : -8;
+  const headBaseOffset = climbing ? -3 : 3;
+  ctx.beginPath();
+  ctx.moveTo(x, y + tailOffset);
+  ctx.lineTo(x, y + tipOffset);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x, y + tipOffset);
+  ctx.lineTo(x - 3.5, y + headBaseOffset);
+  ctx.lineTo(x + 3.5, y + headBaseOffset);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.restore();
+}
+
 function collectAircraftContacts(scope, now) {
   const normalContacts = [];
   const highlightedContacts = [];
@@ -2668,6 +3651,17 @@ function prepareAircraftLabels(scope, now) {
 function drawTrackedAircraftGuide(scope) {
   const plane = findTrackedAircraft();
   if (!plane) return;
+  drawGuideToAircraft(scope, plane, trackedAircraftColor(0.78), trackedAircraftColor(0.5));
+}
+
+function drawThreatFocusGuide(scope) {
+  if (!trafficAlertActive || !proximityAlertKey) return;
+  const plane = visibleAircraft().find((candidate) => aircraftKey(candidate) === proximityAlertKey);
+  if (!plane) return;
+  drawGuideToAircraft(scope, plane, "rgba(255, 235, 80, 0.82)", "rgba(255, 80, 92, 0.42)");
+}
+
+function drawGuideToAircraft(scope, plane, strokeStyle, shadowColor) {
   const point = project(plane.lat, plane.lon, scope);
   if (point.distance > radiusMiles) return;
 
@@ -2675,10 +3669,10 @@ function drawTrackedAircraftGuide(scope) {
   ctx.beginPath();
   ctx.arc(scope.cx, scope.cy, scope.radius, 0, Math.PI * 2);
   ctx.clip();
-  ctx.strokeStyle = trackedAircraftColor(0.78);
+  ctx.strokeStyle = strokeStyle;
   ctx.lineWidth = 2;
   ctx.setLineDash([10, 8]);
-  ctx.shadowColor = trackedAircraftColor(0.5);
+  ctx.shadowColor = shadowColor;
   ctx.shadowBlur = 10;
   ctx.beginPath();
   ctx.moveTo(scope.cx, scope.cy);
@@ -2704,14 +3698,22 @@ function drawAircraft(scope) {
   }
 
   drawTrackedAircraftGuide(scope);
-  for (const contact of normalContacts) drawAircraftContact(contact);
-  for (const contact of highlightedContacts) drawAircraftContact(contact);
+  drawThreatFocusGuide(scope);
+  for (const contact of normalContacts) {
+    drawAircraftContact(contact);
+    drawVerticalTrendCue(contact.plane, contact.point, contact.alpha);
+  }
+  for (const contact of highlightedContacts) {
+    drawAircraftContact(contact);
+    drawVerticalTrendCue(contact.plane, contact.point, contact.alpha);
+  }
 
   ctx.restore();
 }
 
 function drawUserNavigation(scope) {
   if (!gpsActive) return;
+  const theme = currentRadarTheme();
 
   const visibleTrail = gpsTrail.filter((sample) => Date.now() - sample.at <= 30 * 60 * 1000);
   gpsTrail = visibleTrail;
@@ -2722,7 +3724,7 @@ function drawUserNavigation(scope) {
   ctx.clip();
 
   if (visibleTrail.length >= 2) {
-    ctx.strokeStyle = "rgba(233, 255, 243, 0.72)";
+    ctx.strokeStyle = theme.navTrail;
     ctx.lineWidth = 2;
     ctx.setLineDash([2, 8]);
     ctx.beginPath();
@@ -2762,7 +3764,7 @@ function drawUserNavigation(scope) {
   if (gpsSpeedKts >= 2 && Number.isFinite(gpsTrackDegrees)) {
     const projected = destinationPoint(center.lat, center.lon, gpsTrackDegrees, (gpsSpeedKts / 3600) * 30 * 1.15078);
     const projectedPoint = project(projected.lat, projected.lon, scope);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.82)";
+    ctx.strokeStyle = theme.navProjection;
     ctx.lineWidth = 2;
     ctx.setLineDash([8, 6]);
     ctx.beginPath();
@@ -2772,7 +3774,7 @@ function drawUserNavigation(scope) {
     ctx.setLineDash([]);
     ctx.beginPath();
     ctx.arc(projectedPoint.x, projectedPoint.y, 4, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+    ctx.fillStyle = theme.navProjection;
     ctx.fill();
   }
 
@@ -2807,8 +3809,8 @@ function drawArcOwnship(scope) {
 }
 
 function drawSweep(scope, angle) {
-  const trailSegments = 28;
-  const trailWidth = 1.35;
+  const trailSegments = reducedLoad ? 12 : 28;
+  const trailWidth = reducedLoad ? 0.9 : 1.35;
   const palette = sweepPalettes[sweepColor] || sweepPalettes.green;
   ctx.save();
   ctx.translate(scope.cx, scope.cy);
@@ -2816,7 +3818,7 @@ function drawSweep(scope, angle) {
   for (let index = 0; index < trailSegments; index += 1) {
     const progress = index / trailSegments;
     const segmentAngle = angle - progress * trailWidth;
-    const alpha = (1 - progress) ** 2 * 0.2;
+    const alpha = (1 - progress) ** 2 * (reducedLoad ? 0.14 : 0.2);
     const innerRadius = scope.radius * 0.04;
 
     ctx.beginPath();
@@ -2874,10 +3876,36 @@ function drawWeatherScopeBackground(scope) {
   ctx.restore();
 }
 
-function weatherForwardBearing() {
+function rawWeatherForwardBearing() {
+  const activeHeading = activeTrackHeadingDegrees();
+  if (Number.isFinite(activeHeading)) return activeHeading;
   if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= gpsTrackThresholdKts) return gpsTrackDegrees;
   if (Number.isFinite(compassHeadingDegrees)) return compassHeadingDegrees;
-  return activeTrackHeadingDegrees() ?? 0;
+  return 0;
+}
+
+function updateArcForwardHeading(now = performance.now()) {
+  const rawHeading = rawWeatherForwardBearing();
+  if (!Number.isFinite(rawHeading)) return;
+  if (!Number.isFinite(arcForwardHeadingDegrees)) {
+    arcForwardHeadingDegrees = normalizedDegrees(rawHeading);
+    lastArcForwardHeadingAt = now;
+    return;
+  }
+
+  const elapsedSeconds = Math.max(0.016, Math.min(0.25, (now - lastArcForwardHeadingAt) / 1000));
+  const delta = ((normalizedDegrees(rawHeading - arcForwardHeadingDegrees + 180) - 180) || 0);
+  const absDelta = Math.abs(delta);
+  const maxDegreesPerSecond = absDelta > 45 ? 220 : absDelta > 15 ? 140 : 72;
+  const maxStep = maxDegreesPerSecond * elapsedSeconds;
+  const step = Math.max(-maxStep, Math.min(maxStep, delta));
+  arcForwardHeadingDegrees = normalizedDegrees(arcForwardHeadingDegrees + step);
+  lastArcForwardHeadingAt = now;
+}
+
+function weatherForwardBearing() {
+  if (Number.isFinite(arcForwardHeadingDegrees)) return arcForwardHeadingDegrees;
+  return rawWeatherForwardBearing();
 }
 
 function weatherSectorSweepBearing(progress) {
@@ -2975,7 +4003,8 @@ function drawWeatherSector(scope, sweepBearing, sweepProgress) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = "850 12px ui-monospace, SFMono-Regular, Consolas, monospace";
-  for (let offset = -wxSectorDegrees; offset <= wxSectorDegrees; offset += 5) {
+  const tickStep = reducedLoad ? 10 : 5;
+  for (let offset = -wxSectorDegrees; offset <= wxSectorDegrees; offset += tickStep) {
     const angle = screenAngleForBearing(weatherForwardBearing() + offset);
     const labeled = offset % 10 === 0;
     const inner = scope.radius - (labeled ? 15 : 8);
@@ -3023,10 +4052,11 @@ function drawWeatherSector(scope, sweepBearing, sweepProgress) {
   ctx.arc(0, 0, scope.radius, leftAngle, rightAngle, false);
   ctx.closePath();
   ctx.clip();
-  for (let index = 0; index < 22; index += 1) {
-    const progress = index / 20;
+  const trailSegments = reducedLoad ? 10 : 22;
+  for (let index = 0; index < trailSegments; index += 1) {
+    const progress = index / Math.max(1, trailSegments - 2);
     const segmentAngle = sweepAngle + trailDirection * progress * 0.52;
-    const alpha = (1 - progress) ** 2 * 0.24;
+    const alpha = (1 - progress) ** 2 * (reducedLoad ? 0.16 : 0.24);
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.arc(0, 0, scope.radius, segmentAngle - 0.02, segmentAngle + 0.02);
@@ -3058,6 +4088,15 @@ function drawHud(scope) {
 }
 
 function render(now) {
+  const targetFrameMs = reducedLoad ? 1000 / 24 : 0;
+  if (targetFrameMs && lastRenderedAt && now - lastRenderedAt < targetFrameMs) {
+    requestAnimationFrame(render);
+    return;
+  }
+  lastRenderedAt = now;
+  const frameStartedAt = performance.now();
+  maybeRefreshDeviceStatus();
+
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
   const scope = weatherMode ? weatherScope(width, height) : radarScope(width, height);
@@ -3067,6 +4106,8 @@ function render(now) {
   const angle = sweepProgress * Math.PI * 2 - Math.PI / 2;
   const wxProgress = ((now / 1000) % wxSweepSeconds) / wxSweepSeconds;
   const wxSweepBucket = Math.floor(now / (wxSweepSeconds * 1000));
+  if (weatherMode) updateArcForwardHeading(now);
+  else arcForwardHeadingDegrees = null;
   const wxSweepBearing = weatherSectorSweepBearing(wxProgress);
   const wxAngle = screenAngleForBearing(wxSweepBearing);
 
@@ -3127,6 +4168,7 @@ function render(now) {
   updateProximityAlert();
   updateTrackedAircraftAlert();
   updateWxNearestTarget();
+  recordRenderStats(frameStartedAt, now);
 
   requestAnimationFrame(render);
 }
@@ -3185,17 +4227,14 @@ function updateBottomRangeButton() {
 function setWeatherMode(enabled) {
   if (enabled && !weatherMode) {
     previousOrientationBeforeArc = orientationMode;
-    orientationMode = "track";
-    orientationModeSelect.value = "track";
-    queueCompassHeadingEnable();
+    setOrientationMode("track", { persist: false });
     if (!shell.classList.contains("panel-collapsed")) {
       shell.classList.add("panel-collapsed");
       updatePanelToggle();
       window.setTimeout(resizeCanvas, 240);
     }
   } else if (!enabled && weatherMode) {
-    orientationMode = previousOrientationBeforeArc === "track" ? "track" : "north";
-    orientationModeSelect.value = orientationMode;
+    setOrientationMode(previousOrientationBeforeArc === "track" ? "track" : "north", { persist: false });
   }
 
   weatherMode = Boolean(enabled);
@@ -3208,6 +4247,7 @@ function setWeatherMode(enabled) {
   }
   updateBottomRangeButton();
   updateWxNearestTarget();
+  setQuickNotesVisible(weatherMode);
   previousSweepAngle = null;
 }
 
@@ -3263,6 +4303,38 @@ wxRangeButton?.addEventListener("click", () => {
   fetchTraffic({ force: true });
 });
 
+wxNearestTarget?.addEventListener("click", focusNearestTargetFromArc);
+wxNearestTarget?.addEventListener("keydown", (event) => {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  focusNearestTargetFromArc();
+});
+
+quickNotesCanvas?.addEventListener("pointerdown", beginQuickNote);
+quickNotesCanvas?.addEventListener("pointermove", continueQuickNote);
+quickNotesCanvas?.addEventListener("pointerup", endQuickNote);
+quickNotesCanvas?.addEventListener("pointercancel", endQuickNote);
+quickNotesCanvas?.addEventListener("contextmenu", (event) => event.preventDefault());
+quickNotes?.addEventListener("selectstart", (event) => event.preventDefault());
+quickNotes?.addEventListener("contextmenu", (event) => event.preventDefault());
+quickNotes?.addEventListener("gesturestart", (event) => event.preventDefault());
+quickNotes?.addEventListener("touchstart", (event) => {
+  if (event.target.closest("#quickNotesClear")) return;
+  event.preventDefault();
+}, { passive: false });
+quickNotes?.addEventListener("touchmove", (event) => {
+  if (event.target.closest("#quickNotesClear")) return;
+  event.preventDefault();
+}, { passive: false });
+quickNotesClear?.addEventListener("pointerdown", beginQuickNotesClearHold);
+quickNotesClear?.addEventListener("pointerup", finishQuickNotesClearHold);
+quickNotesClear?.addEventListener("pointercancel", cancelQuickNotesClearHold);
+quickNotesClear?.addEventListener("pointerleave", cancelQuickNotesClearHold);
+quickNotesClear?.addEventListener("click", (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+});
+
 altitudeBracketButton?.addEventListener("click", cycleAltitudeBracket);
 
 airspaceToggles.addEventListener("change", () => {
@@ -3277,6 +4349,8 @@ airspaceToggles.addEventListener("change", () => {
 
 function openSettings() {
   settingsModal.hidden = false;
+  refreshDeviceThermalStatus();
+  updatePerformanceTelemetry();
 }
 
 function closeSettings() {
@@ -3285,6 +4359,7 @@ function closeSettings() {
 
 function openLegend() {
   legendModal.hidden = false;
+  refreshDeviceThermalStatus();
 }
 
 function closeLegend() {
@@ -3293,6 +4368,7 @@ function closeLegend() {
 
 function updateTrackingControls() {
   if (!trackingOpen) return;
+  shell.classList.toggle("tracking-active", Boolean(trackedAircraft));
   trackingOpen.classList.toggle("active", Boolean(trackedAircraft));
   if (trackingNNumberInput) trackingNNumberInput.value = trackedAircraft?.nNumber || "";
   if (trackingCriterionSelect) trackingCriterionSelect.value = trackedAircraft?.criterion || "distance";
@@ -3520,7 +4596,22 @@ themeToggle?.addEventListener("click", () => {
   setLightTheme(!lightTheme);
 });
 
-proximityAlertEl?.addEventListener("click", () => {
+function handleProximityAlertClear(event) {
+  if (event.target.closest(".traffic-alert-clear")) {
+    event.preventDefault();
+    event.stopPropagation();
+    clearActiveTrafficAlert();
+    return true;
+  }
+  return false;
+}
+
+proximityAlertEl?.addEventListener("pointerup", (event) => {
+  handleProximityAlertClear(event);
+});
+
+proximityAlertEl?.addEventListener("click", (event) => {
+  if (handleProximityAlertClear(event)) return;
   if (!trafficAlertActive || !proximityAlertKey) return;
   proximityAlertSolid = true;
   proximityAlertAudioLevel = proximityAlertAudioLevel === 1 ? 0.5 : 0;
@@ -3602,9 +4693,14 @@ radarDataToggle.addEventListener("change", () => {
   showRadarData = radarDataToggle.checked;
 });
 
+reducedLoadToggle?.addEventListener("change", () => {
+  setReducedLoad(Boolean(reducedLoadToggle.checked));
+});
+
 radarSoundStyleSelect.value = radarSoundStyle;
 if (settingsVersionEl) settingsVersionEl.textContent = APP_ROLLOUT_VERSION;
 setLightTheme(lightTheme);
+setReducedLoad(reducedLoad);
 setWeatherMode(false);
 setPrecipitationLayer(showPrecipitation);
 updateAltitudeBracketButton();
@@ -3640,8 +4736,7 @@ radarSoundStyleSelect.addEventListener("change", async () => {
 });
 
 orientationModeSelect.addEventListener("change", () => {
-  orientationMode = orientationModeSelect.value === "track" ? "track" : "north";
-  if (orientationMode === "track") queueCompassHeadingEnable();
+  setOrientationMode(orientationModeSelect.value === "track" ? "track" : "north");
 });
 
 aircraftListEl.addEventListener("click", (event) => {
@@ -3720,12 +4815,26 @@ function updateCoordinateVisibility() {
   coordRow.hidden = managedCenter;
 }
 
+function refreshNetworkFeeds() {
+  nextTrafficFetchAt = 0;
+  fetchTraffic({ force: true });
+  resetWeatherImage();
+  if (showPrecipitation) ensureWeatherImage();
+}
+
 window.addEventListener("resize", resizeCanvas);
 window.addEventListener("resize", updateProximityAlert);
+window.addEventListener("resize", resizeQuickNotesCanvas);
+window.addEventListener("online", refreshNetworkFeeds);
+window.addEventListener("focus", refreshNetworkFeeds);
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshNetworkFeeds();
+});
 if ("ResizeObserver" in window && radarWrap) {
   const radarResizeObserver = new ResizeObserver(() => {
     resizeCanvas();
     updateProximityAlert();
+    resizeQuickNotesCanvas();
   });
   radarResizeObserver.observe(radarWrap);
 }

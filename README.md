@@ -144,3 +144,22 @@ $env:STRATUS_GDL90_PORTS="4000,4001,43211"
 $env:STRATUS_BRIDGE_HTTP_PORT=8787
 npm run stratus
 ```
+
+## Native iPad App Prototype
+
+The `ios/ADSB-Radar` folder contains a native iOS prototype for testing without a Raspberry Pi bridge.
+
+It keeps the existing radar UI in a `WKWebView`, bundles the `public/` web assets into the app, and adds a Swift local-network Stratus receiver. The Swift side listens for GDL90 UDP packets on ports `4000`, `4001`, and `43211`, decodes ownship and traffic reports, then feeds the same aircraft JSON shape back into the radar UI through a native message bridge.
+
+To try it on an iPad:
+
+1. Install/open full Xcode.
+2. Open `ios/ADSB-Radar/ADSBRadar.xcodeproj`.
+3. Select the `ADSB Radar` target.
+4. Set your Apple developer team under **Signing & Capabilities**.
+5. Connect the iPad by USB or WiFi debugging.
+6. Build and run on the iPad.
+7. Accept the local network permission prompt.
+8. Connect the iPad to the Stratus 3 WiFi and watch the radar status.
+
+The first real-device goal is to confirm whether `packetCount` and `trafficFrameCount` increase from Stratus 3 packets inside the native app. If packets do not arrive, the next likely step is adding Apple's multicast networking entitlement or adjusting the UDP ports after a packet capture.
