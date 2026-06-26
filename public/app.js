@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.06.25-r2";
+const APP_ROLLOUT_VERSION = "2026.06.26-r1";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -1843,11 +1843,11 @@ function weatherScope(width, height) {
   const desktopArc = window.matchMedia("(min-width: 1181px) and (pointer: fine)").matches;
   const arcDropPx = window.matchMedia("(pointer: coarse)").matches ? 38 : 30;
   const cy = desktopArc
-    ? Math.min(height - framePad - 36, Math.max(520, height * 0.94))
+    ? Math.min(height - framePad - 160, Math.max(560, height * 0.7))
     : Math.min(height - framePad - 96, Math.max(230, height * (width >= 700 ? 0.52 : 0.48) + arcDropPx));
-  const headingTapeClearance = desktopArc ? Math.max(250, height * 0.24) : 0;
+  const headingTapeClearance = desktopArc ? Math.max(320, height * 0.22) : 0;
   const radius = desktopArc
-    ? Math.max(120, Math.min(width * 0.42, height * 0.58, cy - headingTapeClearance))
+    ? Math.max(120, Math.min(width * 0.32, height * 0.47, cy - headingTapeClearance))
     : Math.max(120, Math.min(width * 0.58, height * 0.72));
   return {
     width,

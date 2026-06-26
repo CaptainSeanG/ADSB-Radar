@@ -994,32 +994,32 @@ select {
 
 @media (min-width: 1181px) and (pointer: fine) {
   .shell.wx-mode .bottom-range-buttons {
-    top: calc(80% + 72px);
+    top: calc(70% + 54px);
   }
 
   .shell.wx-mode .altitude-bracket-button,
   .shell.wx-mode.panel-collapsed .altitude-bracket-button {
-    top: calc(80% + 22px);
+    top: calc(70% + 4px);
   }
 
   .shell.wx-mode .wx-nearest:not([hidden]) {
-    top: calc(80% + 99px);
+    top: calc(70% + 122px);
   }
 
   .shell.wx-mode .proximity-alert:not([hidden]) {
-    top: calc(80% + 99px);
+    top: calc(70% + 122px);
   }
 
   .shell.wx-mode .proximity-alert.manual-focus:not([hidden]) {
-    top: calc(80% + 99px);
+    top: calc(70% + 122px);
   }
 
   .shell.wx-mode .proximity-alert.diverging:not([hidden]) {
-    top: calc(80% + 99px);
+    top: calc(70% + 122px);
   }
 
   .shell.wx-mode .quick-notes:not([hidden]) {
-    top: calc(80% + 171px);
+    display: none;
   }
 }
 
