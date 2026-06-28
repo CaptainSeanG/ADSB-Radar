@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.06.28-r3";
+const APP_ROLLOUT_VERSION = "2026.06.28-r4";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -421,6 +421,7 @@ let returnToArcAfterThreat = false;
 let manualThreatFocusKey = "";
 let returnToArcAfterManualThreat = false;
 let dismissedTrafficAlertKey = "";
+let wxNearestTargetKey = "";
 let altitudeBracketFt = null;
 let trackedAircraft = loadTrackedAircraft();
 let quickNoteStrokes = [];
@@ -746,7 +747,9 @@ function isLocalNetworkUrl(url) {
 }
 
 function internetTrafficSourceLabel() {
-  return isLocalNetworkUrl(adsbProxyBaseUrl) ? "WiFi ADS-B" : "Cellular";
+  const connectionType = String(navigator.connection?.type || "").toLowerCase();
+  if (connectionType === "cellular") return "Cellular";
+  return "WiFi ADS-B";
 }
 
 function classifyTrafficSource(data = {}) {
@@ -1678,6 +1681,8 @@ function updateWxNearestTarget() {
   if (!weatherMode) {
     wxNearestTarget.hidden = true;
     wxNearestTarget.innerHTML = "";
+    wxNearestTarget.dataset.targetKey = "";
+    wxNearestTargetKey = "";
     return;
   }
 
@@ -1689,10 +1694,14 @@ function updateWxNearestTarget() {
   const nearest = nearestVisibleAircraft();
   if (!nearest) {
     wxNearestTarget.innerHTML = `<span class="wx-nearest-label">Range to nearest target</span><strong class="wx-nearest-data">--</strong>`;
+    wxNearestTarget.dataset.targetKey = "";
+    wxNearestTargetKey = "";
     wxNearestTarget.hidden = false;
     return;
   }
 
+  wxNearestTargetKey = aircraftKey(nearest.plane);
+  wxNearestTarget.dataset.targetKey = wxNearestTargetKey;
   const relativeBearing = relativeBearingDegrees(nearest.bearing);
   wxNearestTarget.innerHTML = `
     <span class="wx-nearest-label">Range to nearest target</span>
@@ -1711,6 +1720,7 @@ function focusAircraftOnFullRadar(plane, { returnToArc = false } = {}) {
   if (!plane) return;
   const key = aircraftKey(plane);
   if (!key) return;
+  const displayPlane = predictedAircraftForDisplay(plane);
 
   manualThreatFocusKey = key;
   proximityAlertKey = key;
@@ -1720,8 +1730,9 @@ function focusAircraftOnFullRadar(plane, { returnToArc = false } = {}) {
   trafficAlertActive = true;
   returnToArcAfterManualThreat = Boolean(returnToArc);
 
+  radarBlips.set(key, { ...displayPlane, radarSeenAt: Date.now(), liveUpdatedAt: Date.now() });
   setWeatherMode(false);
-  const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
+  const distance = milesBetween(center.lat, center.lon, displayPlane.lat, displayPlane.lon);
   const nextRange = rangeForDistance(distance + 0.6);
   if (nextRange !== radiusMiles) {
     setRange(nextRange);
@@ -1735,8 +1746,10 @@ function focusAircraftOnFullRadar(plane, { returnToArc = false } = {}) {
 
 function focusNearestTargetFromArc() {
   if (!weatherMode) return;
-  const nearest = nearestVisibleAircraft();
-  if (!nearest) return;
+  const targetKey = wxNearestTarget?.dataset.targetKey || wxNearestTargetKey;
+  const targetPlane = aircraftByKey(targetKey);
+  const nearest = targetPlane ? { plane: targetPlane } : nearestVisibleAircraft();
+  if (!nearest?.plane) return;
   focusAircraftOnFullRadar(nearest.plane, { returnToArc: true });
 }
 
@@ -1769,10 +1782,10 @@ function renderManualThreatFocus() {
   const manualPlane = visibleAircraft().find((plane) => aircraftKey(plane) === manualThreatFocusKey);
   if (!manualPlane) return false;
 
-  const distance = milesBetween(center.lat, center.lon, manualPlane.lat, manualPlane.lon);
-  if (distance > closeRangeNearestTargetMiles) return false;
+  const displayPlane = predictedAircraftForDisplay(manualPlane);
+  const distance = milesBetween(center.lat, center.lon, displayPlane.lat, displayPlane.lon);
 
-  const closureKts = closureRateKts(manualPlane, distance);
+  const closureKts = closureRateKts(displayPlane, distance);
   trafficAlertActive = true;
   proximityAlertKey = manualThreatFocusKey;
   if (!proximityHighlightLastAt || Date.now() - proximityHighlightLastAt > 8500) {
@@ -1786,8 +1799,8 @@ function renderManualThreatFocus() {
     <strong class="traffic-alert-main">
       Tracking nearest traffic
       <span class="traffic-alert-number">${formatRangeToTarget(distance)}</span>
-      ${altitudeRelation(manualPlane.altitude)}
-      <span class="traffic-alert-number">${formatAltitude(manualPlane.altitude)}</span>
+      ${altitudeRelation(displayPlane.altitude)}
+      <span class="traffic-alert-number">${formatAltitude(displayPlane.altitude)}</span>
       <span class="traffic-alert-closure">${formatClosureRate(closureKts)}</span>
     </strong>
     <button type="button" class="traffic-alert-clear" aria-label="Clear nearest traffic tracking">Clear</button>
@@ -4459,6 +4472,10 @@ wxRangeButton?.addEventListener("click", () => {
 });
 
 wxNearestTarget?.addEventListener("click", focusNearestTargetFromArc);
+wxNearestTarget?.addEventListener("pointerup", (event) => {
+  event.preventDefault();
+  focusNearestTargetFromArc();
+});
 wxNearestTarget?.addEventListener("keydown", (event) => {
   if (event.key !== "Enter" && event.key !== " ") return;
   event.preventDefault();

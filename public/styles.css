@@ -897,7 +897,7 @@ select {
 .shell.wx-mode .wx-nearest:not([hidden]) {
   display: grid;
   position: absolute;
-  z-index: 4;
+  z-index: 7;
   right: 28px;
   top: calc(48% + 116px);
   bottom: auto;
@@ -923,6 +923,8 @@ select {
   overflow: hidden;
   padding: 5px 12px;
   cursor: pointer;
+  pointer-events: auto;
+  touch-action: manipulation;
   user-select: none;
 }
 
