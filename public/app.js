@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.06.28-r4";
+const APP_ROLLOUT_VERSION = "2026.06.28-r5";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -1786,6 +1786,11 @@ function renderManualThreatFocus() {
   const distance = milesBetween(center.lat, center.lon, displayPlane.lat, displayPlane.lon);
 
   const closureKts = closureRateKts(displayPlane, distance);
+  const isThreatFocus =
+    closureKts > 0 &&
+    !isGroundTraffic(displayPlane) &&
+    altitudeBracketAllowsAlert(displayPlane) &&
+    distance <= alertRangeForClosure(closureKts);
   trafficAlertActive = true;
   proximityAlertKey = manualThreatFocusKey;
   if (!proximityHighlightLastAt || Date.now() - proximityHighlightLastAt > 8500) {
@@ -1794,6 +1799,7 @@ function renderManualThreatFocus() {
   }
   proximityAlertEl.hidden = false;
   proximityAlertEl.classList.add("manual-focus", "solid");
+  proximityAlertEl.classList.toggle("threat-focus", isThreatFocus);
   proximityAlertEl.classList.remove("diverging");
   proximityAlertEl.innerHTML = `
     <strong class="traffic-alert-main">

@@ -403,6 +403,22 @@ select {
   pointer-events: auto;
 }
 
+.proximity-alert.manual-focus:not(.threat-focus) {
+  border-color: rgba(98, 213, 255, 0.86) !important;
+  background: #083e7a !important;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.42), inset 0 0 26px rgba(98, 213, 255, 0.16) !important;
+  color: #d8f2ff !important;
+  text-shadow: 0 0 12px rgba(98, 213, 255, 0.62) !important;
+  animation: none !important;
+}
+
+.proximity-alert.manual-focus.threat-focus {
+  border-color: rgba(255, 235, 80, 0.95);
+  background: #9e0010;
+  color: #fff04a;
+  text-shadow: 0 0 12px rgba(255, 240, 74, 0.7);
+}
+
 .shell.panel-collapsed .proximity-alert.diverging:not([hidden]) {
   border-color: rgba(132, 255, 194, 0.96);
   background: #006932;
