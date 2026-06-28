@@ -7,7 +7,7 @@
     <meta name="author" content="CaptainSeanG" />
     <meta name="copyright" content="Copyright 2026 CaptainSeanG. All rights reserved." />
     <meta name="rights" content="Unauthorized reproduction or redistribution prohibited." />
-    <link rel="stylesheet" href="./public/styles.css?v=20260626-3" />
+    <link rel="stylesheet" href="./public/styles.css?v=20260628-1" />
   </head>
   <body data-copyright-owner="CaptainSeanG" data-product="ADSB Radar" data-build-series="2026-rollout">
     <main class="shell">
@@ -30,6 +30,15 @@
           <button type="button" data-range="100">100</button>
         </div>
         <button type="button" class="altitude-bracket-button" id="altitudeBracketButton" aria-label="Vertical traffic alert filter all altitudes">VFR ALL</button>
+        <div class="arc-heading-override" id="arcHeadingOverride" hidden aria-label="Temporarily point ARC radar to a cardinal direction">
+          <div class="arc-heading-grid">
+            <button type="button" data-heading="0" aria-label="Point ARC radar north">N</button>
+            <button type="button" data-heading="270" aria-label="Point ARC radar west">W</button>
+            <button type="button" data-heading="90" aria-label="Point ARC radar east">E</button>
+            <button type="button" data-heading="180" aria-label="Point ARC radar south">S</button>
+          </div>
+          <div class="arc-heading-countdown" aria-hidden="true"><span></span></div>
+        </div>
       </section>
       <div class="wx-nearest" id="wxNearestTarget" role="button" tabindex="0" hidden>Range to nearest target --</div>
       <div class="quick-notes" id="quickNotes" hidden aria-label="Quick notes pad">
@@ -191,7 +200,7 @@
           </fieldset>
 
           <div class="settings-meta" aria-label="Version and copyright information">
-            <div class="settings-version">Rollout <span id="settingsVersion">2026.06.26-r3</span></div>
+            <div class="settings-version">Rollout <span id="settingsVersion">2026.06.28-r1</span></div>
             <div class="settings-copyright">Copyright 2026 CaptainSeanG. All rights reserved.</div>
           </div>
         </div>
@@ -298,7 +307,7 @@
       </section>
     </div>
 
-    <script src="./public/config.js?v=20260626-3"></script>
-    <script type="module" src="./public/app.js?v=20260626-3"></script>
+    <script src="./public/config.js?v=20260628-1"></script>
+    <script type="module" src="./public/app.js?v=20260628-1"></script>
   </body>
 </html>

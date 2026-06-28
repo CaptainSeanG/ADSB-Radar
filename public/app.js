@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.06.26-r3";
+const APP_ROLLOUT_VERSION = "2026.06.28-r1";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -12,6 +12,7 @@ const wxToggle = document.querySelector("#wxToggle");
 const wxRangeButton = document.querySelector("#wxRangeButton");
 const bottomRangeButtons = document.querySelector("#bottomRangeButtons");
 const altitudeBracketButton = document.querySelector("#altitudeBracketButton");
+const arcHeadingOverrideEl = document.querySelector("#arcHeadingOverride");
 const wxNearestTarget = document.querySelector("#wxNearestTarget");
 const quickNotes = document.querySelector("#quickNotes");
 const quickNotesCanvas = document.querySelector("#quickNotesCanvas");
@@ -391,6 +392,9 @@ let lastStratusHeadingAt = 0;
 let stratusAutoTrackUpEnabled = false;
 let arcForwardHeadingDegrees = null;
 let lastArcForwardHeadingAt = 0;
+let arcHeadingOverrideDegrees = null;
+let arcHeadingOverrideStartedAt = 0;
+let arcHeadingOverrideUntil = 0;
 let compassHeadingDegrees = null;
 let compassPermissionRequested = false;
 let gpsTrail = [];
@@ -1409,6 +1413,57 @@ function isDesktopArcDisplay() {
   return weatherMode && window.matchMedia("(min-width: 1181px)").matches;
 }
 
+function arcHeadingOverrideActive(now = Date.now()) {
+  return Number.isFinite(arcHeadingOverrideDegrees) && now < arcHeadingOverrideUntil;
+}
+
+function clearArcHeadingOverride() {
+  arcHeadingOverrideDegrees = null;
+  arcHeadingOverrideStartedAt = 0;
+  arcHeadingOverrideUntil = 0;
+  updateArcHeadingOverrideControl();
+}
+
+function setArcHeadingOverride(degrees) {
+  if (!isDesktopArcDisplay()) return;
+  const heading = normalizedDegrees(degrees);
+  const now = Date.now();
+  arcHeadingOverrideDegrees = heading;
+  arcHeadingOverrideStartedAt = now;
+  arcHeadingOverrideUntil = now + 10000;
+  arcForwardHeadingDegrees = heading;
+  lastArcForwardHeadingAt = performance.now();
+  updateArcHeadingOverrideControl(now);
+}
+
+function updateArcHeadingOverrideControl(now = Date.now()) {
+  if (!arcHeadingOverrideEl) return;
+  const visible = isDesktopArcDisplay();
+  arcHeadingOverrideEl.hidden = !visible;
+  if (!visible) {
+    arcHeadingOverrideEl.style.setProperty("--arc-heading-countdown", "0");
+    for (const button of arcHeadingOverrideEl.querySelectorAll("button[data-heading]")) {
+      button.classList.remove("active");
+    }
+    return;
+  }
+
+  const active = arcHeadingOverrideActive(now);
+  if (!active && arcHeadingOverrideDegrees !== null) {
+    arcHeadingOverrideDegrees = null;
+    arcHeadingOverrideStartedAt = 0;
+    arcHeadingOverrideUntil = 0;
+  }
+
+  const duration = arcHeadingOverrideUntil - arcHeadingOverrideStartedAt;
+  const remaining = active && duration > 0 ? clamp((arcHeadingOverrideUntil - now) / duration, 0, 1) : 0;
+  arcHeadingOverrideEl.style.setProperty("--arc-heading-countdown", remaining.toFixed(3));
+  for (const button of arcHeadingOverrideEl.querySelectorAll("button[data-heading]")) {
+    const buttonHeading = normalizedDegrees(Number(button.dataset.heading));
+    button.classList.toggle("active", active && buttonHeading === arcHeadingOverrideDegrees);
+  }
+}
+
 function closureRateKts(plane, currentDistance) {
   const targetSpeed = Number(plane.speed);
   const targetTrack = Number(plane.track);
@@ -1613,12 +1668,14 @@ function updateWxNearestTarget() {
   wxNearestTarget.hidden = false;
 }
 
-function focusNearestTargetFromArc() {
-  if (!weatherMode) return;
-  const nearest = nearestVisibleAircraft();
-  if (!nearest) return;
+function aircraftByKey(key) {
+  if (!key) return null;
+  return visibleAircraft().find((plane) => aircraftKey(plane) === key) || null;
+}
 
-  const key = aircraftKey(nearest.plane);
+function focusAircraftOnFullRadar(plane, { returnToArc = false } = {}) {
+  if (!plane) return;
+  const key = aircraftKey(plane);
   if (!key) return;
 
   manualThreatFocusKey = key;
@@ -1627,10 +1684,11 @@ function focusNearestTargetFromArc() {
   proximityAlertAudioLevel = 0;
   proximityHighlightLastAt = 0;
   trafficAlertActive = true;
-  returnToArcAfterManualThreat = true;
+  returnToArcAfterManualThreat = Boolean(returnToArc);
 
   setWeatherMode(false);
-  const nextRange = rangeForDistance(nearest.distance + 0.6);
+  const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
+  const nextRange = rangeForDistance(distance + 0.6);
   if (nextRange !== radiusMiles) {
     setRange(nextRange);
     fetchAirspace();
@@ -1639,6 +1697,21 @@ function focusNearestTargetFromArc() {
   scheduleAircraftHighlight(key, { delayMs: 0, durationMs: 12000 });
   updateBottomRangeButton();
   updateProximityAlert();
+}
+
+function focusNearestTargetFromArc() {
+  if (!weatherMode) return;
+  const nearest = nearestVisibleAircraft();
+  if (!nearest) return;
+  focusAircraftOnFullRadar(nearest.plane, { returnToArc: true });
+}
+
+function focusActiveAlertFromArc() {
+  if (!isDesktopArcDisplay() || !trafficAlertActive || !proximityAlertKey) return false;
+  const plane = aircraftByKey(proximityAlertKey);
+  if (!plane) return false;
+  focusAircraftOnFullRadar(plane, { returnToArc: false });
+  return true;
 }
 
 function highlightProximityTarget(alert) {
@@ -1845,9 +1918,9 @@ function weatherScope(width, height) {
   const cy = desktopArc
     ? Math.min(height - framePad - 160, Math.max(560, height * 0.7))
     : Math.min(height - framePad - 96, Math.max(230, height * (width >= 700 ? 0.52 : 0.48) + arcDropPx));
-  const headingTapeClearance = desktopArc ? Math.max(250, height * 0.24) : 0;
+  const headingTapeClearance = desktopArc ? Math.max(200, height * 0.18) : 0;
   const radius = desktopArc
-    ? Math.max(120, Math.min(width * 0.42, height * 0.58, cy - headingTapeClearance))
+    ? Math.max(120, Math.min(width * 0.48, height * 0.67, cy - headingTapeClearance))
     : Math.max(120, Math.min(width * 0.58, height * 0.72));
   return {
     width,
@@ -3877,6 +3950,7 @@ function drawWeatherScopeBackground(scope) {
 }
 
 function rawWeatherForwardBearing() {
+  if (arcHeadingOverrideActive()) return arcHeadingOverrideDegrees;
   const activeHeading = activeTrackHeadingDegrees();
   if (Number.isFinite(activeHeading)) return activeHeading;
   if (Number.isFinite(gpsTrackDegrees) && gpsSpeedKts >= gpsTrackThresholdKts) return gpsTrackDegrees;
@@ -3885,6 +3959,11 @@ function rawWeatherForwardBearing() {
 }
 
 function updateArcForwardHeading(now = performance.now()) {
+  if (arcHeadingOverrideActive()) {
+    arcForwardHeadingDegrees = arcHeadingOverrideDegrees;
+    lastArcForwardHeadingAt = now;
+    return;
+  }
   const rawHeading = rawWeatherForwardBearing();
   if (!Number.isFinite(rawHeading)) return;
   if (!Number.isFinite(arcForwardHeadingDegrees)) {
@@ -4168,6 +4247,7 @@ function render(now) {
   updateProximityAlert();
   updateTrackedAircraftAlert();
   updateWxNearestTarget();
+  updateArcHeadingOverrideControl();
   recordRenderStats(frameStartedAt, now);
 
   requestAnimationFrame(render);
@@ -4238,6 +4318,11 @@ function setWeatherMode(enabled) {
   }
 
   weatherMode = Boolean(enabled);
+  if (!weatherMode) {
+    arcHeadingOverrideDegrees = null;
+    arcHeadingOverrideStartedAt = 0;
+    arcHeadingOverrideUntil = 0;
+  }
   shell.classList.toggle("wx-mode", weatherMode);
   if (radarModeToggle) {
     radarModeToggle.classList.toggle("active", weatherMode);
@@ -4247,6 +4332,7 @@ function setWeatherMode(enabled) {
   }
   updateBottomRangeButton();
   updateWxNearestTarget();
+  updateArcHeadingOverrideControl();
   setQuickNotesVisible(weatherMode);
   previousSweepAngle = null;
 }
@@ -4275,6 +4361,12 @@ bottomRangeButtons?.addEventListener("click", (event) => {
   setRange(Number(button.dataset.range));
   fetchAirspace();
   fetchTraffic({ force: true });
+});
+
+arcHeadingOverrideEl?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-heading]");
+  if (!button) return;
+  setArcHeadingOverride(Number(button.dataset.heading));
 });
 
 radarModeToggle?.addEventListener("click", () => {
@@ -4612,6 +4704,11 @@ proximityAlertEl?.addEventListener("pointerup", (event) => {
 
 proximityAlertEl?.addEventListener("click", (event) => {
   if (handleProximityAlertClear(event)) return;
+  if (focusActiveAlertFromArc()) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   if (!trafficAlertActive || !proximityAlertKey) return;
   proximityAlertSolid = true;
   proximityAlertAudioLevel = proximityAlertAudioLevel === 1 ? 0.5 : 0;
