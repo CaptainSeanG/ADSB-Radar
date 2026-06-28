@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.06.28-r2";
+const APP_ROLLOUT_VERSION = "2026.06.28-r3";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -1511,6 +1511,39 @@ function alertRangeForClosure(closureKts) {
   return 2;
 }
 
+function shouldPredictAircraft(plane) {
+  const key = aircraftKey(plane);
+  if (trafficAlertActive && proximityAlertKey && key === proximityAlertKey) return true;
+  return isTrackedAircraft(plane);
+}
+
+function predictedAircraftForDisplay(plane, now = Date.now()) {
+  if (!plane || !shouldPredictAircraft(plane)) return plane;
+
+  const key = aircraftKey(plane);
+  const latest = aircraftByKey(key) || plane;
+  const merged = { ...plane, ...latest };
+  const speedKts = Number(merged.speed);
+  const trackDegrees = Number(merged.track);
+  const updatedAt = Number(merged.positionReceivedAt || merged.liveUpdatedAt || lastFetchAt || now);
+  const ageSeconds = Math.max(0, (now - updatedAt) / 1000);
+
+  if (!Number.isFinite(speedKts) || speedKts < 20 || !Number.isFinite(trackDegrees) || ageSeconds < 0.25) {
+    return merged;
+  }
+
+  const predictionSeconds = Math.min(ageSeconds, 18);
+  const predictionMiles = (speedKts / 3600) * predictionSeconds * 1.15078;
+  const predicted = destinationPoint(merged.lat, merged.lon, trackDegrees, predictionMiles);
+  return {
+    ...merged,
+    lat: predicted.lat,
+    lon: predicted.lon,
+    predicted: true,
+    predictionAgeSeconds: predictionSeconds
+  };
+}
+
 function altitudeBracketLabel() {
   return altitudeBracketFt ? `${altitudeBracketFt}'` : "ALL";
 }
@@ -1558,16 +1591,17 @@ function proximityCandidate(plane) {
   if (isGroundTraffic(plane)) return null;
   if (!altitudeBracketAllowsAlert(plane)) return null;
 
-  const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
-  const closureKts = closureRateKts(plane, distance);
+  const displayPlane = predictedAircraftForDisplay(plane);
+  const distance = milesBetween(center.lat, center.lon, displayPlane.lat, displayPlane.lon);
+  const closureKts = closureRateKts(displayPlane, distance);
   const key = aircraftKey(plane);
   const diverging = closureKts <= 0;
   const alertRange = diverging && key === proximityAlertKey ? 3 : alertRangeForClosure(closureKts);
   if (distance > alertRange) return null;
 
-  const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
+  const bearing = bearingDegrees(center.lat, center.lon, displayPlane.lat, displayPlane.lon);
   return {
-    plane,
+    plane: displayPlane,
     distance,
     closureKts,
     diverging,
@@ -1797,7 +1831,7 @@ function updateProximityAlert() {
   }
 
   if (alertKey !== proximityAlertKey) {
-    const shouldReturnToArcAfterThreat = weatherMode && !isDesktopArcDisplay();
+    const shouldReturnToArcAfterThreat = weatherMode;
     if (weatherMode) {
       returnToArcAfterThreat = shouldReturnToArcAfterThreat;
       setWeatherMode(false);
@@ -1811,6 +1845,7 @@ function updateProximityAlert() {
   }
   trafficAlertActive = true;
   updateBottomRangeButton();
+  radarBlips.set(alertKey, { ...alert.plane, radarSeenAt: Date.now(), liveUpdatedAt: Date.now() });
   highlightProximityTarget(alert);
   if (alert.diverging) {
     proximityAlertAudioLevel = 0;
@@ -2470,12 +2505,15 @@ function refreshLiveStratusBlips(nextAircraft, data = {}) {
     if (previous) {
       radarBlips.set(key, {
         ...previous,
+        lat: plane.lat,
+        lon: plane.lon,
         speed: plane.speed ?? previous.speed,
         track: plane.track ?? previous.track,
         verticalRate: plane.verticalRate ?? previous.verticalRate,
         altitude: plane.altitude ?? previous.altitude,
         geoAltitude: plane.geoAltitude ?? previous.geoAltitude,
         seen: plane.seen ?? previous.seen,
+        positionReceivedAt: plane.positionReceivedAt ?? previous.positionReceivedAt,
         liveUpdatedAt: Date.now()
       });
     } else {
@@ -3216,8 +3254,9 @@ async function fetchTraffic({ force = false } = {}) {
 
   try {
     const data = await fetchStaticTraffic();
+    const receivedAt = Date.now();
 
-    aircraft = data.aircraft;
+    aircraft = data.aircraft.map((plane) => ({ ...plane, positionReceivedAt: receivedAt }));
     airports = data.airports;
     lastDataSource = data.source;
     updateStratusDiagnostics(data);
@@ -3236,7 +3275,7 @@ async function fetchTraffic({ force = false } = {}) {
     resolveMissingAircraftTypes(aircraft);
     pruneRadarBlips(aircraft);
     refreshLiveStratusBlips(aircraft, data);
-    lastFetchAt = Date.now();
+    lastFetchAt = receivedAt;
     scheduleNextTrafficFetch({ source: data.source, stale: data.stale });
   } catch (error) {
     lastDataSource = "offline";
@@ -3695,17 +3734,36 @@ function drawVerticalTrendCue(plane, point, alpha = 1) {
 function collectAircraftContacts(scope, now) {
   const normalContacts = [];
   const highlightedContacts = [];
+  const seenKeys = new Set();
 
   for (const plane of visibleRadarAircraft()) {
-    const point = project(plane.lat, plane.lon, scope);
+    const displayPlane = predictedAircraftForDisplay(plane, now);
+    const key = aircraftKey(displayPlane);
+    seenKeys.add(key);
+
+    const point = project(displayPlane.lat, displayPlane.lon, scope);
     if (point.distance > radiusMiles) continue;
 
     const alpha = radarBlipAlpha(plane, now);
     if (alpha <= 0) continue;
 
-    const key = aircraftKey(plane);
     const highlight = aircraftHighlightState(key, now);
-    const contact = { plane, point, alpha, highlight };
+    const contact = { plane: displayPlane, point, alpha, highlight };
+    if (highlight?.active) highlightedContacts.push(contact);
+    else normalContacts.push(contact);
+  }
+
+  for (const plane of visibleAircraft()) {
+    if (!shouldPredictAircraft(plane)) continue;
+    const key = aircraftKey(plane);
+    if (seenKeys.has(key)) continue;
+
+    const displayPlane = predictedAircraftForDisplay(plane, now);
+    const point = project(displayPlane.lat, displayPlane.lon, scope);
+    if (point.distance > radiusMiles) continue;
+
+    const highlight = aircraftHighlightState(key, now);
+    const contact = { plane: displayPlane, point, alpha: 1, highlight };
     if (highlight?.active) highlightedContacts.push(contact);
     else normalContacts.push(contact);
   }
@@ -3727,7 +3785,7 @@ function drawTrackedAircraftGuide(scope) {
   if (!plane) return;
   const stroke = lightTheme ? "rgba(38, 26, 136, 0.9)" : trackedAircraftColor(0.78);
   const shadow = lightTheme ? "rgba(20, 16, 92, 0.28)" : trackedAircraftColor(0.5);
-  drawGuideToAircraft(scope, plane, stroke, shadow);
+  drawGuideToAircraft(scope, predictedAircraftForDisplay(plane), stroke, shadow);
 }
 
 function drawThreatFocusGuide(scope) {
@@ -3736,7 +3794,7 @@ function drawThreatFocusGuide(scope) {
   if (!plane) return;
   const stroke = lightTheme ? "rgba(102, 16, 132, 0.9)" : "rgba(255, 235, 80, 0.82)";
   const shadow = lightTheme ? "rgba(52, 12, 84, 0.3)" : "rgba(255, 80, 92, 0.42)";
-  drawGuideToAircraft(scope, plane, stroke, shadow);
+  drawGuideToAircraft(scope, predictedAircraftForDisplay(plane), stroke, shadow);
 }
 
 function drawGuideToAircraft(scope, plane, strokeStyle, shadowColor) {
