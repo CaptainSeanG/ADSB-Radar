@@ -1082,10 +1082,14 @@ select {
 
   .shell.wx-mode .wx-nearest:not([hidden]) {
     top: calc(70% + 122px);
+    right: 16.666%;
+    left: 16.666%;
   }
 
   .shell.wx-mode .proximity-alert:not([hidden]) {
     top: calc(70% + 122px);
+    right: 16.666%;
+    left: 16.666%;
   }
 
   .shell.wx-mode .proximity-alert.manual-focus:not([hidden]) {

@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.06.28-r1";
+const APP_ROLLOUT_VERSION = "2026.06.28-r2";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -1797,8 +1797,9 @@ function updateProximityAlert() {
   }
 
   if (alertKey !== proximityAlertKey) {
-    if (weatherMode && !isDesktopArcDisplay()) {
-      returnToArcAfterThreat = true;
+    const shouldReturnToArcAfterThreat = weatherMode && !isDesktopArcDisplay();
+    if (weatherMode) {
+      returnToArcAfterThreat = shouldReturnToArcAfterThreat;
       setWeatherMode(false);
       setOrientationMode("track", { persist: false });
     }
@@ -1918,9 +1919,9 @@ function weatherScope(width, height) {
   const cy = desktopArc
     ? Math.min(height - framePad - 160, Math.max(560, height * 0.7))
     : Math.min(height - framePad - 96, Math.max(230, height * (width >= 700 ? 0.52 : 0.48) + arcDropPx));
-  const headingTapeClearance = desktopArc ? Math.max(200, height * 0.18) : 0;
+  const headingTapeClearance = desktopArc ? Math.max(160, height * 0.14) : 0;
   const radius = desktopArc
-    ? Math.max(120, Math.min(width * 0.48, height * 0.67, cy - headingTapeClearance))
+    ? Math.max(120, Math.min(width * 0.53, height * 0.74, cy - headingTapeClearance))
     : Math.max(120, Math.min(width * 0.58, height * 0.72));
   return {
     width,
@@ -3724,14 +3725,18 @@ function prepareAircraftLabels(scope, now) {
 function drawTrackedAircraftGuide(scope) {
   const plane = findTrackedAircraft();
   if (!plane) return;
-  drawGuideToAircraft(scope, plane, trackedAircraftColor(0.78), trackedAircraftColor(0.5));
+  const stroke = lightTheme ? "rgba(38, 26, 136, 0.9)" : trackedAircraftColor(0.78);
+  const shadow = lightTheme ? "rgba(20, 16, 92, 0.28)" : trackedAircraftColor(0.5);
+  drawGuideToAircraft(scope, plane, stroke, shadow);
 }
 
 function drawThreatFocusGuide(scope) {
   if (!trafficAlertActive || !proximityAlertKey) return;
   const plane = visibleAircraft().find((candidate) => aircraftKey(candidate) === proximityAlertKey);
   if (!plane) return;
-  drawGuideToAircraft(scope, plane, "rgba(255, 235, 80, 0.82)", "rgba(255, 80, 92, 0.42)");
+  const stroke = lightTheme ? "rgba(102, 16, 132, 0.9)" : "rgba(255, 235, 80, 0.82)";
+  const shadow = lightTheme ? "rgba(52, 12, 84, 0.3)" : "rgba(255, 80, 92, 0.42)";
+  drawGuideToAircraft(scope, plane, stroke, shadow);
 }
 
 function drawGuideToAircraft(scope, plane, strokeStyle, shadowColor) {
