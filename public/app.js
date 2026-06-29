@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.06.28-r5";
+const APP_ROLLOUT_VERSION = "2026.06.28-r6";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -341,8 +341,8 @@ const kdvtFallbackCenter = { lat: 33.6883, lon: -112.083 };
 
 let center = { lat: 33.7292, lon: -111.9918 };
 let radiusMiles = 10;
-const breadcrumbBaseLimit = 20;
-const trackedBreadcrumbLimit = 240;
+const breadcrumbBaseLimit = 10;
+const trackedBreadcrumbLimit = 100;
 const trackedBreadcrumbRangeMiles = 100;
 let sweepColor = "orange";
 let showGroundTraffic = false;
@@ -2023,8 +2023,8 @@ function aircraftSpeed(plane) {
 function breadcrumbLimitForAircraft(plane) {
   if (isTrackedAircraft(plane)) return trackedBreadcrumbLimit;
   const speed = aircraftSpeed(plane);
-  const speedFactor = speed <= 60 ? 0.5 : speed <= 160 ? 0.85 : speed <= 300 ? 1.2 : speed <= 450 ? 1.8 : 2.5;
-  return Math.max(4, Math.min(90, Math.round(breadcrumbBaseLimit * speedFactor)));
+  const speedFactor = speed <= 60 ? 0.45 : speed <= 160 ? 0.7 : speed <= 300 ? 1 : speed <= 450 ? 1.35 : 1.7;
+  return Math.max(4, Math.min(40, Math.round(breadcrumbBaseLimit * speedFactor)));
 }
 
 function formatAirspaceAltitude(value, code) {
