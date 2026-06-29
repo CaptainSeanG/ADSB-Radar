@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.06.28-r6";
+const APP_ROLLOUT_VERSION = "2026.06.28-r7";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -3632,6 +3632,13 @@ function drawTrack(scope, plane, alpha = 1) {
   const history = (tracks.get(key) || [])
     .slice(-breadcrumbLimitForAircraft(plane))
     .filter((sample) => milesBetween(center.lat, center.lon, sample.lat, sample.lon) <= radiusMiles);
+  if (plane.predicted && history.length) {
+    const last = history.at(-1);
+    const predictedMoved = Math.abs(last.lat - plane.lat) > 0.00001 || Math.abs(last.lon - plane.lon) > 0.00001;
+    if (predictedMoved && milesBetween(center.lat, center.lon, plane.lat, plane.lon) <= radiusMiles) {
+      history.push({ lat: plane.lat, lon: plane.lon, at: Date.now(), predicted: true });
+    }
+  }
   if (history.length < 2) return;
 
   ctx.save();
@@ -3642,7 +3649,9 @@ function drawTrack(scope, plane, alpha = 1) {
   const tracked = isTrackedAircraft(plane);
   ctx.strokeStyle = tracked ? "rgba(255, 157, 53, 0.9)" : altitudeColorStyle(plane).trail;
   ctx.lineWidth = tracked ? 2.4 : 2;
-  ctx.setLineDash(tracked ? [3, 7] : []);
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  ctx.setLineDash(tracked ? [1.5, 5] : [1.2, 4.5]);
   ctx.beginPath();
 
   history.forEach((sample, index) => {
