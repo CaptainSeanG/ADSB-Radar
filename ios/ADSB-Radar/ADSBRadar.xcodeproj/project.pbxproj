@@ -14,6 +14,7 @@
 		01A000100000000000000005 /* GDL90Decoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A000010000000000000005 /* GDL90Decoder.swift */; };
 		01A000100000000000000006 /* public in Resources */ = {isa = PBXBuildFile; fileRef = 01A000010000000000000007 /* public */; };
 		01A000100000000000000007 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 01A000010000000000000009 /* Assets.xcassets */; };
+		01A000100000000000000008 /* ATCScratchpadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 01A00001000000000000000A /* ATCScratchpadView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +27,7 @@
 		01A000010000000000000007 /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; name = public; path = ../../public; sourceTree = "<group>"; };
 		01A000010000000000000008 /* ADSB Radar.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "ADSB Radar.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		01A000010000000000000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		01A00001000000000000000A /* ATCScratchpadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ATCScratchpadView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -53,6 +55,7 @@
 			children = (
 				01A000010000000000000001 /* ADSBRadarApp.swift */,
 				01A000010000000000000002 /* ContentView.swift */,
+				01A00001000000000000000A /* ATCScratchpadView.swift */,
 				01A000010000000000000003 /* RadarWebView.swift */,
 				01A000010000000000000004 /* StratusBridge.swift */,
 				01A000010000000000000005 /* GDL90Decoder.swift */,
@@ -142,6 +145,7 @@
 			files = (
 				01A000100000000000000001 /* ADSBRadarApp.swift in Sources */,
 				01A000100000000000000002 /* ContentView.swift in Sources */,
+				01A000100000000000000008 /* ATCScratchpadView.swift in Sources */,
 				01A000100000000000000003 /* RadarWebView.swift in Sources */,
 				01A000100000000000000004 /* StratusBridge.swift in Sources */,
 				01A000100000000000000005 /* GDL90Decoder.swift in Sources */,

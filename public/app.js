@@ -426,6 +426,7 @@ let altitudeBracketFt = null;
 let trackedAircraft = loadTrackedAircraft();
 let quickNoteStrokes = [];
 let activeQuickNoteStroke = null;
+let quickNotesText = "";
 let quickNotesClearTimer = null;
 let quickNotesClearStartedAt = 0;
 let lastRenderedAt = 0;
@@ -2153,6 +2154,29 @@ function drawQuickNotes() {
   noteCtx.lineJoin = "round";
   noteCtx.strokeStyle = lightTheme ? "rgba(43, 35, 145, 0.88)" : "rgba(255, 232, 150, 0.9)";
 
+  if (quickNotesText) {
+    noteCtx.save();
+    noteCtx.fillStyle = lightTheme ? "rgba(17, 28, 98, 0.94)" : "rgba(233, 255, 243, 0.92)";
+    noteCtx.font = "800 18px ui-monospace, SFMono-Regular, Consolas, monospace";
+    noteCtx.textBaseline = "top";
+    const words = quickNotesText.split(/\s+/).filter(Boolean);
+    const lines = [];
+    let line = "";
+    const maxWidth = Math.max(120, width - 28);
+    for (const word of words) {
+      const nextLine = line ? `${line} ${word}` : word;
+      if (noteCtx.measureText(nextLine).width > maxWidth && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = nextLine;
+      }
+    }
+    if (line) lines.push(line);
+    lines.slice(0, 3).forEach((text, index) => noteCtx.fillText(text, 14, 12 + index * 23));
+    noteCtx.restore();
+  }
+
   for (const stroke of quickNoteStrokes) {
     if (!stroke.points.length) continue;
     const pressure = stroke.points.reduce((sum, point) => sum + point.pressure, 0) / stroke.points.length;
@@ -2176,6 +2200,12 @@ function setQuickNotesVisible(visible) {
 
 function beginQuickNote(event) {
   if (!weatherMode) return;
+  if (window.webkit?.messageHandlers?.scratchpad) {
+    event.preventDefault();
+    event.stopPropagation();
+    window.webkit.messageHandlers.scratchpad.postMessage({ type: "open" });
+    return;
+  }
   const point = quickNotesPoint(event);
   if (!point) return;
   event.preventDefault();
@@ -2203,8 +2233,15 @@ function endQuickNote(event) {
 function clearQuickNotes() {
   quickNoteStrokes = [];
   activeQuickNoteStroke = null;
+  quickNotesText = "";
   drawQuickNotes();
 }
+
+window.addEventListener("adsb-set-quick-note-text", (event) => {
+  quickNotesText = String(event.detail?.text || "").trim();
+  if (quickNotesText) quickNoteStrokes = [];
+  window.requestAnimationFrame(drawQuickNotes);
+});
 
 function cancelQuickNotesClearHold() {
   if (quickNotesClearTimer) {

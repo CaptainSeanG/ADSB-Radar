@@ -3,14 +3,17 @@ import WebKit
 
 struct RadarWebView: UIViewRepresentable {
     @ObservedObject var stratusBridge: StratusBridge
+    @Binding var notesText: String
+    var onScratchpadRequested: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(stratusBridge: stratusBridge)
+        Coordinator(stratusBridge: stratusBridge, onScratchpadRequested: onScratchpadRequested)
     }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(context.coordinator, name: "stratus")
+        configuration.userContentController.add(context.coordinator, name: "scratchpad")
         configuration.setURLSchemeHandler(RadarAssetSchemeHandler(), forURLScheme: "adsbradar")
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
 
@@ -26,17 +29,28 @@ struct RadarWebView: UIViewRepresentable {
         return webView
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {}
+    func updateUIView(_ webView: WKWebView, context: Context) {
+        context.coordinator.onScratchpadRequested = onScratchpadRequested
+        context.coordinator.sendNotesTextIfNeeded(notesText)
+    }
 
     final class Coordinator: NSObject, WKScriptMessageHandler {
         let stratusBridge: StratusBridge
+        var onScratchpadRequested: () -> Void
         weak var webView: WKWebView?
+        private var lastSentNotesText: String?
 
-        init(stratusBridge: StratusBridge) {
+        init(stratusBridge: StratusBridge, onScratchpadRequested: @escaping () -> Void) {
             self.stratusBridge = stratusBridge
+            self.onScratchpadRequested = onScratchpadRequested
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "scratchpad" {
+                DispatchQueue.main.async { self.onScratchpadRequested() }
+                return
+            }
+
             guard message.name == "stratus",
                   let body = message.body as? [String: Any],
                   let id = body["id"] as? String,
@@ -53,6 +67,23 @@ struct RadarWebView: UIViewRepresentable {
                 sendResponse(id: id, type: type, payload: DeviceStatusPayload.current)
             default:
                 sendError(id: id, type: type, message: "Unsupported native Stratus request")
+            }
+        }
+
+        func sendNotesTextIfNeeded(_ text: String) {
+            guard text != lastSentNotesText else { return }
+            lastSentNotesText = text
+            let escaped = text
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "\n", with: "\\n")
+            let script = """
+            window.dispatchEvent(new CustomEvent("adsb-set-quick-note-text", {
+              detail: {"text":"\(escaped)"}
+            }));
+            """
+            DispatchQueue.main.async {
+                self.webView?.evaluateJavaScript(script)
             }
         }
 
