@@ -1,5 +1,6 @@
 node_modules/
 .DS_Store
 DerivedData/
+data/source/
 ios/**/xcuserdata/
 ios/**/project.xcworkspace/xcuserdata/

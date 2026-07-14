@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.06.28-r7";
+const APP_ROLLOUT_VERSION = "2026.07.14-r8";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -16,6 +16,7 @@ const arcHeadingOverrideEl = document.querySelector("#arcHeadingOverride");
 const wxNearestTarget = document.querySelector("#wxNearestTarget");
 const quickNotes = document.querySelector("#quickNotes");
 const quickNotesCanvas = document.querySelector("#quickNotesCanvas");
+const quickNotesAtcPad = document.querySelector("#quickNotesAtcPad");
 const quickNotesClear = document.querySelector("#quickNotesClear");
 const airportSelect = document.querySelector("#airportSelect");
 const coordRow = document.querySelector("#coordRow");
@@ -137,6 +138,8 @@ const radarThemes = {
 };
 const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
 const runwaysCsvUrl = "https://davidmegginson.github.io/ourairports-data/runways.csv";
+const bundledAirportsUrl = "./data/offline-airports.json";
+const bundledAirspaceUrl = "./data/offline-airspace.json";
 const weatherMapsUrl = "https://api.rainviewer.com/public/weather-maps.json";
 const airspaceQueryUrl =
   "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0/query";
@@ -372,8 +375,15 @@ let nextTrafficFetchAt = 0;
 let pixelRatio = window.devicePixelRatio || 1;
 let airportsCachePromise = null;
 let runwaysCachePromise = null;
+let bundledAirspacePromise = null;
+let airportRowsCache = null;
+let runwayRowsCache = null;
 let airportCacheRetryAt = 0;
 let runwayCacheRetryAt = 0;
+let airportRefreshInFlight = false;
+let runwayRefreshInFlight = false;
+let offlineAirportDataActive = false;
+let offlineAirspaceDataActive = false;
 let lastAirspaceKey = "";
 let aircraftHitAreas = [];
 let currentAircraftContacts = [];
@@ -404,6 +414,7 @@ let weatherMetaFetchedAt = 0;
 let weatherTiles = [];
 let weatherImageKey = "";
 let weatherImageLoading = false;
+let weatherImageRetryAt = 0;
 let stratusWeatherData = null;
 let stratusAhrsData = null;
 let audioCtx = null;
@@ -625,6 +636,7 @@ function resetWeatherImage() {
   weatherTiles = [];
   weatherImageKey = "";
   weatherImageLoading = false;
+  weatherImageRetryAt = 0;
 }
 
 function randomJitter(minMs = 500, maxMs = 2000) {
@@ -765,18 +777,35 @@ function classifyTrafficSource(data = {}) {
 function updateDataSourceIndicator(data = null) {
   if (!dataSourceIndicator || !dataSourceLabel) return;
 
-  if (!data || data.stale) {
-    dataSourceIndicator.hidden = true;
-    return;
-  }
+  const source = data
+    ? classifyTrafficSource(data)
+    : {
+        type: nativeStratusHandler ? "stratus" : "offline",
+        label: nativeStratusHandler ? "STRATUS CONNECTING" : offlineAirportDataActive || offlineAirspaceDataActive ? "OFFLINE DATA" : "NO TRAFFIC DATA"
+      };
+  const stale = Boolean(data?.stale);
+  const label =
+    stale && source.type === "stratus"
+      ? "STRATUS STALE"
+      : stale
+        ? `${source.label} STALE`
+        : source.label;
 
-  const source = classifyTrafficSource(data);
   dataSourceIndicator.hidden = false;
   dataSourceIndicator.classList.toggle("stratus", source.type === "stratus");
   dataSourceIndicator.classList.toggle("wifi", source.type === "wifi");
   dataSourceIndicator.classList.toggle("cellular", source.type === "cellular");
-  dataSourceIndicator.classList.toggle("steady", source.type === "cellular");
-  dataSourceLabel.textContent = source.label;
+  dataSourceIndicator.classList.toggle("offline", source.type === "offline" || !data);
+  dataSourceIndicator.classList.toggle("stale", stale);
+  dataSourceIndicator.classList.toggle("steady", source.type === "cellular" || source.type === "offline" || stale);
+  dataSourceLabel.textContent = label;
+}
+
+function offlineDataNotice() {
+  const localParts = [];
+  if (offlineAirportDataActive) localParts.push("airports");
+  if (offlineAirspaceDataActive) localParts.push("airspace");
+  return localParts.length ? ` Local ${localParts.join(" and ")} active.` : "";
 }
 
 function activeTrackHeadingSource() {
@@ -1175,6 +1204,63 @@ function milesBetween(latA, lonA, latB, lonB) {
 function parseNumber(value, fallback = null) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function storageReadJson(key, fallback = null) {
+  try {
+    return JSON.parse(window.localStorage.getItem(key) || "null") ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function storageWriteJson(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Local storage may be unavailable or full; bundled seed data remains the fallback.
+  }
+}
+
+async function fetchWithTimeout(url, { timeoutMs = 4000, ...options } = {}) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function fetchJsonWithTimeout(url, options = {}) {
+  const response = await fetchWithTimeout(url, {
+    timeoutMs: options.timeoutMs ?? 4000,
+    cache: options.cache,
+    headers: {
+      accept: "application/json",
+      ...(options.headers || {})
+    }
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload.detail || payload.error || `Request failed with ${response.status}`);
+  }
+  return payload;
+}
+
+async function fetchTextWithTimeout(url, options = {}) {
+  const response = await fetchWithTimeout(url, {
+    timeoutMs: options.timeoutMs ?? 4000,
+    cache: options.cache,
+    headers: {
+      accept: options.accept || "text/plain,*/*"
+    }
+  });
+  if (!response.ok) throw new Error(`Request failed with ${response.status}`);
+  return response.text();
 }
 
 function parseCsvLine(line) {
@@ -2156,13 +2242,14 @@ function drawQuickNotes() {
 
   if (quickNotesText) {
     noteCtx.save();
+    const ratio = window.devicePixelRatio || 1;
     noteCtx.fillStyle = lightTheme ? "rgba(17, 28, 98, 0.94)" : "rgba(233, 255, 243, 0.92)";
-    noteCtx.font = "800 18px ui-monospace, SFMono-Regular, Consolas, monospace";
+    noteCtx.font = `950 ${Math.round(28 * ratio)}px ui-monospace, SFMono-Regular, Consolas, monospace`;
     noteCtx.textBaseline = "top";
     const words = quickNotesText.split(/\s+/).filter(Boolean);
     const lines = [];
     let line = "";
-    const maxWidth = Math.max(120, width - 28);
+    const maxWidth = Math.max(120 * ratio, width - 28 * ratio);
     for (const word of words) {
       const nextLine = line ? `${line} ${word}` : word;
       if (noteCtx.measureText(nextLine).width > maxWidth && line) {
@@ -2173,7 +2260,10 @@ function drawQuickNotes() {
       }
     }
     if (line) lines.push(line);
-    lines.slice(0, 3).forEach((text, index) => noteCtx.fillText(text, 14, 12 + index * 23));
+    const x = 14 * ratio;
+    const y = 12 * ratio;
+    const lineHeight = 34 * ratio;
+    lines.slice(0, 3).forEach((text, index) => noteCtx.fillText(text, x, y + index * lineHeight));
     noteCtx.restore();
   }
 
@@ -2200,12 +2290,6 @@ function setQuickNotesVisible(visible) {
 
 function beginQuickNote(event) {
   if (!weatherMode) return;
-  if (window.webkit?.messageHandlers?.scratchpad) {
-    event.preventDefault();
-    event.stopPropagation();
-    window.webkit.messageHandlers.scratchpad.postMessage({ type: "open" });
-    return;
-  }
   const point = quickNotesPoint(event);
   if (!point) return;
   event.preventDefault();
@@ -2235,6 +2319,12 @@ function clearQuickNotes() {
   activeQuickNoteStroke = null;
   quickNotesText = "";
   drawQuickNotes();
+}
+
+function openAtcScratchpad(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  window.webkit?.messageHandlers?.scratchpad?.postMessage({ type: "open" });
 }
 
 window.addEventListener("adsb-set-quick-note-text", (event) => {
@@ -2650,52 +2740,167 @@ function updateRadarBlipsForWeatherSweep(angle) {
 }
 
 async function getJson(url) {
-  const response = await fetch(url);
-  const payload = await response.json();
-  if (!response.ok) {
-    throw new Error(payload.detail || payload.error || `Request failed with ${response.status}`);
-  }
-  return payload;
+  return fetchJsonWithTimeout(url, { timeoutMs: 4500 });
 }
 
 async function loadAirportCache() {
-  if (!airportsCachePromise && Date.now() < airportCacheRetryAt) return [];
-  if (!airportsCachePromise) {
-    airportsCachePromise = fetch(airportsCsvUrl)
-      .then((response) => {
-        if (!response.ok) throw new Error(`Airport data returned ${response.status}`);
-        return response.text();
-      })
-      .then(parseAirportsCsv)
-      .catch((error) => {
-        console.warn("Unable to load airport data", error);
-        airportsCachePromise = null;
-        airportCacheRetryAt = Date.now() + 60000;
-        return [];
-      });
+  if (airportRowsCache) {
+    refreshAirportCacheInBackground();
+    return airportRowsCache;
   }
 
-  return airportsCachePromise;
+  if (!airportsCachePromise) {
+    airportsCachePromise = loadLocalAirportRows();
+  }
+
+  airportRowsCache = await airportsCachePromise;
+  refreshAirportCacheInBackground();
+  return airportRowsCache;
 }
 
 async function loadRunwayCache() {
-  if (!runwaysCachePromise && Date.now() < runwayCacheRetryAt) return [];
-  if (!runwaysCachePromise) {
-    runwaysCachePromise = fetch(runwaysCsvUrl)
-      .then((response) => {
-        if (!response.ok) throw new Error(`Runway data returned ${response.status}`);
-        return response.text();
-      })
-      .then(parseRunwaysCsv)
-      .catch((error) => {
-        console.warn("Unable to load runway data", error);
-        runwaysCachePromise = null;
-        runwayCacheRetryAt = Date.now() + 60000;
-        return [];
-      });
+  if (runwayRowsCache) {
+    refreshRunwayCacheInBackground();
+    return runwayRowsCache;
   }
 
-  return runwaysCachePromise;
+  if (!runwaysCachePromise) {
+    runwaysCachePromise = loadLocalRunwayRows();
+  }
+
+  runwayRowsCache = await runwaysCachePromise;
+  refreshRunwayCacheInBackground();
+  return runwayRowsCache;
+}
+
+function normalizeBundledAirportRows(payload) {
+  const rows = Array.isArray(payload) ? payload : payload?.airports;
+  if (!Array.isArray(rows)) return [];
+
+  return rows
+    .map((airport) => ({
+      ident: airport.ident,
+      name: airport.name || airport.ident,
+      type: airport.type || "small_airport",
+      lat: parseNumber(airport.lat),
+      lon: parseNumber(airport.lon),
+      elevationFt: parseNumber(airport.elevationFt),
+      municipality: airport.municipality || "",
+      iata: airport.iata || "",
+      runways: Array.isArray(airport.runways) ? airport.runways : []
+    }))
+    .filter((airport) => airport.ident && Number.isFinite(airport.lat) && Number.isFinite(airport.lon));
+}
+
+function normalizeBundledRunwayRows(payload) {
+  const airportRows = Array.isArray(payload) ? payload : payload?.airports;
+  if (!Array.isArray(airportRows)) return [];
+
+  return airportRows.flatMap((airport) =>
+    (Array.isArray(airport.runways) ? airport.runways : []).map((runway) => ({
+      airportIdent: airport.ident,
+      leIdent: runway.leIdent,
+      heIdent: runway.heIdent,
+      leLat: parseNumber(runway.leLat),
+      leLon: parseNumber(runway.leLon),
+      heLat: parseNumber(runway.heLat),
+      heLon: parseNumber(runway.heLon),
+      lengthFt: parseNumber(runway.lengthFt),
+      widthFt: parseNumber(runway.widthFt),
+      leHeading: parseNumber(runway.leHeading),
+      heHeading: parseNumber(runway.heHeading)
+    })))
+    .filter(
+      (runway) =>
+        runway.airportIdent &&
+        Number.isFinite(runway.leLat) &&
+        Number.isFinite(runway.leLon) &&
+        Number.isFinite(runway.heLat) &&
+        Number.isFinite(runway.heLon)
+    );
+}
+
+function mergeRowsByKey(primaryRows, fallbackRows, keyName) {
+  const merged = new Map();
+  for (const row of fallbackRows || []) {
+    if (row?.[keyName]) merged.set(row[keyName], row);
+  }
+  for (const row of primaryRows || []) {
+    if (row?.[keyName]) merged.set(row[keyName], row);
+  }
+  return Array.from(merged.values());
+}
+
+async function loadBundledAirportSeed() {
+  try {
+    const payload = await fetchJsonWithTimeout(bundledAirportsUrl, {
+      timeoutMs: 1200,
+      cache: "force-cache"
+    });
+    return payload;
+  } catch (error) {
+    console.warn("Bundled airport seed unavailable", error);
+    return null;
+  }
+}
+
+async function loadLocalAirportRows() {
+  const persisted = storageReadJson("ADSB_RADAR_AIRPORT_ROWS", []);
+  const bundledPayload = await loadBundledAirportSeed();
+  const bundledRows = normalizeBundledAirportRows(bundledPayload);
+  const rows = mergeRowsByKey(persisted, bundledRows, "ident");
+  offlineAirportDataActive = rows.length > 0;
+  return rows;
+}
+
+async function loadLocalRunwayRows() {
+  const persisted = storageReadJson("ADSB_RADAR_RUNWAY_ROWS", []);
+  const bundledPayload = await loadBundledAirportSeed();
+  const bundledRows = normalizeBundledRunwayRows(bundledPayload);
+  const rows = [...(persisted || []), ...bundledRows];
+  offlineAirportDataActive = offlineAirportDataActive || rows.length > 0;
+  return rows;
+}
+
+function refreshAirportCacheInBackground() {
+  if (airportRefreshInFlight || Date.now() < airportCacheRetryAt) return;
+  airportRefreshInFlight = true;
+  fetchTextWithTimeout(airportsCsvUrl, { timeoutMs: 4500, accept: "text/csv,*/*" })
+    .then(parseAirportsCsv)
+    .then((rows) => {
+      if (!rows.length) throw new Error("Airport refresh returned no usable rows");
+      airportRowsCache = rows;
+      airportsCachePromise = Promise.resolve(rows);
+      storageWriteJson("ADSB_RADAR_AIRPORT_ROWS", rows);
+      offlineAirportDataActive = false;
+    })
+    .catch((error) => {
+      console.warn("Unable to refresh airport data; keeping local airport database", error);
+      airportCacheRetryAt = Date.now() + 300000;
+    })
+    .finally(() => {
+      airportRefreshInFlight = false;
+    });
+}
+
+function refreshRunwayCacheInBackground() {
+  if (runwayRefreshInFlight || Date.now() < runwayCacheRetryAt) return;
+  runwayRefreshInFlight = true;
+  fetchTextWithTimeout(runwaysCsvUrl, { timeoutMs: 4500, accept: "text/csv,*/*" })
+    .then(parseRunwaysCsv)
+    .then((rows) => {
+      if (!rows.length) throw new Error("Runway refresh returned no usable rows");
+      runwayRowsCache = rows;
+      runwaysCachePromise = Promise.resolve(rows);
+      storageWriteJson("ADSB_RADAR_RUNWAY_ROWS", rows);
+    })
+    .catch((error) => {
+      console.warn("Unable to refresh runway data; keeping local runway database", error);
+      runwayCacheRetryAt = Date.now() + 300000;
+    })
+    .finally(() => {
+      runwayRefreshInFlight = false;
+    });
 }
 
 function airportSizeScore(airport) {
@@ -3031,7 +3236,7 @@ async function loadWeatherMeta() {
   const now = Date.now();
   if (weatherMeta && now - weatherMetaFetchedAt < 5 * 60 * 1000) return weatherMeta;
 
-  const response = await fetch(weatherMapsUrl);
+  const response = await fetchWithTimeout(weatherMapsUrl, { timeoutMs: 2500 });
   if (!response.ok) throw new Error(`weather radar returned ${response.status}`);
   weatherMeta = await response.json();
   weatherMetaFetchedAt = now;
@@ -3040,6 +3245,7 @@ async function loadWeatherMeta() {
 
 async function ensureWeatherImage() {
   if (!showPrecipitation || weatherImageLoading) return;
+  if (Date.now() < weatherImageRetryAt) return;
 
   try {
     const meta = await loadWeatherMeta();
@@ -3060,11 +3266,16 @@ async function ensureWeatherImage() {
       .filter((result) => result.status === "fulfilled")
       .map((result) => result.value);
     if (weatherImageKey === key) {
-      weatherTiles = loadedTiles;
+      if (loadedTiles.length) {
+        weatherTiles = loadedTiles;
+      } else if (!weatherTiles.length) {
+        weatherImageRetryAt = Date.now() + 15000;
+      }
     }
     weatherImageLoading = false;
   } catch (error) {
     weatherImageLoading = false;
+    weatherImageRetryAt = Date.now() + 15000;
     console.warn("Unable to load precipitation layer", error);
   }
 }
@@ -3072,7 +3283,7 @@ async function ensureWeatherImage() {
 function drawPrecipitation(scope) {
   if (!showPrecipitation) return;
   const now = Date.now();
-  if (!reducedLoad || !weatherTiles.length || now - lastWeatherEnsureAt > 30000) {
+  if (!weatherTiles.length || now - lastWeatherEnsureAt > 60000) {
     lastWeatherEnsureAt = now;
     ensureWeatherImage();
   }
@@ -3190,13 +3401,13 @@ function parseAirspaceCacheKey(storageKey) {
   if (!storageKey.startsWith(airspaceCachePrefix)) return null;
   const key = storageKey.slice(airspaceCachePrefix.length);
   if (!key.startsWith("smooth2:")) return null;
-  const [, coords = ""] = key.split(":");
+  const [, coords = "", classes = ""] = key.split(":");
   const [latText, lonText, radiusText] = coords.split(",");
   const lat = Number(latText);
   const lon = Number(lonText);
   const radius = Number(radiusText);
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || !Number.isFinite(radius)) return null;
-  return { key, lat, lon, radius };
+  return { key, lat, lon, radius, classes };
 }
 
 function loadCachedAirspace(key) {
@@ -3242,6 +3453,8 @@ function loadNearestCachedAirspace(key) {
       if (b.key === recentKey) return 1;
       if (a.radius === requested.radius && b.radius !== requested.radius) return -1;
       if (b.radius === requested.radius && a.radius !== requested.radius) return 1;
+      if (a.classes === requested.classes && b.classes !== requested.classes) return -1;
+      if (b.classes === requested.classes && a.classes !== requested.classes) return 1;
       return a.distance - b.distance;
     });
 
@@ -3256,6 +3469,101 @@ function loadNearestCachedAirspace(key) {
   return null;
 }
 
+function circleRing(lat, lon, radiusNm, segments = 48) {
+  const radiusMilesValue = radiusNm * 1.15078;
+  const earthMiles = 3958.7613;
+  const latRad = (lat * Math.PI) / 180;
+  const angularDistance = radiusMilesValue / earthMiles;
+  const ring = [];
+
+  for (let index = 0; index <= segments; index += 1) {
+    const bearing = (index / segments) * Math.PI * 2;
+    const pointLat = Math.asin(
+      Math.sin(latRad) * Math.cos(angularDistance) +
+        Math.cos(latRad) * Math.sin(angularDistance) * Math.cos(bearing)
+    );
+    const pointLon =
+      (lon * Math.PI) / 180 +
+      Math.atan2(
+        Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latRad),
+        Math.cos(angularDistance) - Math.sin(latRad) * Math.sin(pointLat)
+      );
+    ring.push({ lat: (pointLat * 180) / Math.PI, lon: (pointLon * 180) / Math.PI });
+  }
+
+  return ring;
+}
+
+function normalizeBundledAirspaceRows(payload) {
+  const rows = Array.isArray(payload) ? payload : payload?.airspaces;
+  if (!Array.isArray(rows)) return [];
+
+  return rows
+    .map((airspace) => {
+      const rings = Array.isArray(airspace.rings)
+        ? airspace.rings
+        : airspace.center && Number.isFinite(Number(airspace.radiusNm))
+          ? [circleRing(Number(airspace.center.lat), Number(airspace.center.lon), Number(airspace.radiusNm))]
+          : [];
+      return {
+        id: airspace.id || airspace.ident || airspace.name,
+        ident: airspace.ident || "",
+        name: airspace.name || "",
+        classCode: airspace.classCode || airspace.class || "",
+        sector: airspace.sector || "",
+        lower: airspace.lower || "--",
+        upper: airspace.upper || "--",
+        bbox: Array.isArray(airspace.bbox) ? airspace.bbox : null,
+        rings
+      };
+    })
+    .filter((airspace) => airspace.classCode && airspace.rings.length);
+}
+
+async function loadBundledAirspaceRows() {
+  if (!bundledAirspacePromise) {
+    bundledAirspacePromise = fetchJsonWithTimeout(bundledAirspaceUrl, {
+      timeoutMs: 1200,
+      cache: "force-cache"
+    })
+      .then(normalizeBundledAirspaceRows)
+      .catch((error) => {
+        console.warn("Bundled airspace seed unavailable", error);
+        return [];
+      });
+  }
+
+  return bundledAirspacePromise;
+}
+
+function airspaceIntersectsCurrentView(airspace) {
+  const maxDistance = Math.max(15, radiusMiles * 2.2);
+  if (Array.isArray(airspace.bbox) && airspace.bbox.length === 4) {
+    const [west, south, east, north] = airspace.bbox.map(Number);
+    const latPad = maxDistance / 69;
+    const lonPad = maxDistance / (69 * Math.max(0.2, Math.cos((center.lat * Math.PI) / 180)));
+    if (Number.isFinite(west) && Number.isFinite(south) && Number.isFinite(east) && Number.isFinite(north)) {
+      const viewWest = center.lon - lonPad;
+      const viewEast = center.lon + lonPad;
+      const viewSouth = center.lat - latPad;
+      const viewNorth = center.lat + latPad;
+      return east >= viewWest && west <= viewEast && north >= viewSouth && south <= viewNorth;
+    }
+  }
+  return airspace.rings.some((ring) =>
+    ring.some((point) => milesBetween(center.lat, center.lon, point.lat, point.lon) <= maxDistance)
+  );
+}
+
+async function loadLocalAirspaceFallback(visibleClasses) {
+  const rows = (await loadBundledAirspaceRows())
+    .filter((airspace) => visibleClasses.has(airspace.classCode))
+    .filter(airspaceIntersectsCurrentView)
+    .slice(0, 160);
+  if (rows.length) offlineAirspaceDataActive = true;
+  return rows;
+}
+
 async function fetchAirspace() {
   const visibleClasses = getVisibleAirspaceClasses();
   if (!visibleClasses.size) {
@@ -3264,17 +3572,33 @@ async function fetchAirspace() {
     return;
   }
 
-  const key = `smooth2:${center.lat.toFixed(4)},${center.lon.toFixed(4)},${radiusMiles}`;
+  const classKey = Array.from(visibleClasses).sort().join("");
+  const key = `smooth2:${center.lat.toFixed(4)},${center.lon.toFixed(4)},${radiusMiles}:${classKey}`;
   if (key === lastAirspaceKey && airspaces.length) return;
   const cachedAirspace = loadNearestCachedAirspace(key);
-  if (cachedAirspace?.rows?.length) {
-    airspaces = cachedAirspace.rows;
+  const cachedRows = (cachedAirspace?.rows || []).filter((airspace) => visibleClasses.has(airspace.classCode));
+  const cachedClasses = new Set(cachedRows.map((airspace) => airspace.classCode));
+  const cacheCoversSelection = Array.from(visibleClasses).every((classCode) => cachedClasses.has(classCode));
+  if (cachedRows.length) {
+    airspaces = cachedRows;
     lastAirspaceKey = key;
+    offlineAirspaceDataActive = true;
+  }
+
+  if (!cacheCoversSelection) {
+    const localAirspace = await loadLocalAirspaceFallback(visibleClasses);
+    if (localAirspace.length) {
+      const mergedAirspaces = new Map(cachedRows.map((airspace) => [airspace.id, airspace]));
+      for (const airspace of localAirspace) mergedAirspaces.set(airspace.id, airspace);
+      airspaces = Array.from(mergedAirspaces.values());
+      lastAirspaceKey = key;
+      updateDataSourceIndicator(null);
+    }
   }
 
   const params = new URLSearchParams({
     f: "json",
-    where: "TYPE_CODE='CLASS' AND CLASS in ('B','C','D')",
+    where: "TYPE_CODE='CLASS' AND CLASS in ('B','C','D','E')",
     outFields: "OBJECTID,IDENT,ICAO_ID,NAME,CLASS,LOWER_VAL,LOWER_CODE,UPPER_VAL,UPPER_CODE,SECTOR",
     geometry: airspaceEnvelope(),
     geometryType: "esriGeometryEnvelope",
@@ -3282,7 +3606,7 @@ async function fetchAirspace() {
     spatialRel: "esriSpatialRelIntersects",
     outSR: "4326",
     returnGeometry: "true",
-    maxAllowableOffset: radiusMiles <= 20 ? "0.00025" : "0.0006",
+    geometryPrecision: radiusMiles <= 20 ? "5" : "4",
     resultRecordCount: "120"
   });
 
@@ -3296,6 +3620,7 @@ async function fetchAirspace() {
     }
     airspaces = fetchedAirspaces;
     lastAirspaceKey = key;
+    offlineAirspaceDataActive = false;
     if (airspaces.length) saveCachedAirspace(key, airspaces);
   } catch (error) {
     console.warn("Unable to fetch FAA airspace boundaries", error);
@@ -3322,10 +3647,10 @@ async function fetchTraffic({ force = false } = {}) {
       statusEl.textContent = `${lastDataSource} receiver waiting. Last packet ${age}.`;
     } else {
       statusEl.textContent = gpsActive
-        ? `${lastDataSource} traffic active. GPS center at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
+        ? `${lastDataSource} traffic active. GPS center at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.${offlineDataNotice()}`
         : aircraft.length
-          ? `${lastDataSource} traffic active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
-          : `${lastDataSource} traffic returned no aircraft for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
+          ? `${lastDataSource} traffic active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.${offlineDataNotice()}`
+          : `${lastDataSource} traffic returned no aircraft for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.${offlineDataNotice()}`;
     }
     updateTrackedAircraftHistory(aircraft);
     resolveMissingAircraftTypes(aircraft);
@@ -3339,7 +3664,7 @@ async function fetchTraffic({ force = false } = {}) {
     updateDataSourceIndicator(null);
     scheduleNextTrafficFetch({ failed: true });
     const retrySeconds = Math.max(1, Math.round((nextTrafficFetchAt - Date.now()) / 1000));
-    const keepDataHint = aircraft.length ? " Keeping last radar picture." : "";
+    const keepDataHint = aircraft.length ? " Keeping last radar picture." : offlineDataNotice();
     statusEl.textContent = `ADS-B feed unavailable: ${error.message}. Retrying in ${retrySeconds}s.${keepDataHint}`;
   } finally {
     trafficFetchInFlight = false;
@@ -3583,7 +3908,8 @@ function drawAirspace(scope) {
   const styles = {
     B: { stroke: "rgba(87, 185, 255, 0.92)", fill: "rgba(87, 185, 255, 0.06)", dash: [] },
     C: { stroke: "rgba(255, 88, 232, 0.82)", fill: "rgba(255, 88, 232, 0.045)", dash: [] },
-    D: { stroke: "rgba(35, 96, 202, 0.92)", fill: "rgba(35, 96, 202, 0.045)", dash: [10, 13] }
+    D: { stroke: "rgba(35, 96, 202, 0.92)", fill: "rgba(35, 96, 202, 0.045)", dash: [10, 13] },
+    E: { stroke: "rgba(137, 204, 255, 0.66)", fill: "rgba(137, 204, 255, 0.025)", dash: [3, 8] }
   };
 
   ctx.save();
@@ -3608,7 +3934,7 @@ function drawAirspace(scope) {
       if (ring.length < 2) continue;
       const projectedRing = ring.map((point) => project(point.lat, point.lon, scope));
       labelPoints.push(...projectedRing);
-      drawAirspaceRingPath(projectedRing, ["B", "C", "D"].includes(airspace.classCode));
+      drawAirspaceRingPath(projectedRing, ["B", "C", "D", "E"].includes(airspace.classCode));
       ctx.fill();
       ctx.stroke();
     }
@@ -4544,12 +4870,16 @@ quickNotes?.addEventListener("contextmenu", (event) => event.preventDefault());
 quickNotes?.addEventListener("gesturestart", (event) => event.preventDefault());
 quickNotes?.addEventListener("touchstart", (event) => {
   if (event.target.closest("#quickNotesClear")) return;
+  if (event.target.closest("#quickNotesAtcPad")) return;
   event.preventDefault();
 }, { passive: false });
 quickNotes?.addEventListener("touchmove", (event) => {
   if (event.target.closest("#quickNotesClear")) return;
+  if (event.target.closest("#quickNotesAtcPad")) return;
   event.preventDefault();
 }, { passive: false });
+quickNotesAtcPad?.addEventListener("click", openAtcScratchpad);
+quickNotesAtcPad?.addEventListener("pointerdown", (event) => event.stopPropagation());
 quickNotesClear?.addEventListener("pointerdown", beginQuickNotesClearHold);
 quickNotesClear?.addEventListener("pointerup", finishQuickNotesClearHold);
 quickNotesClear?.addEventListener("pointercancel", cancelQuickNotesClearHold);
@@ -5073,6 +5403,7 @@ updateCoordinateVisibility();
 updatePanelToggle();
 resizeCanvas();
 renderList();
+updateDataSourceIndicator(null);
 if (airportSelect.value === "gps" && getVisibleAirspaceClasses().size) {
   fetchAirspace();
 }
