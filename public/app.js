@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.07.14-r8";
+const APP_ROLLOUT_VERSION = "2026.08.11-r1";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -44,7 +44,7 @@ const deviceThermalStatus = document.querySelector("#deviceThermalStatus");
 const groundTrafficToggle = document.querySelector("#groundTrafficToggle");
 const flightLevelsToggle = document.querySelector("#flightLevelsToggle");
 const radarDataToggle = document.querySelector("#radarDataToggle");
-const reducedLoadToggle = document.querySelector("#reducedLoadToggle");
+const performanceModeSelect = document.querySelector("#performanceModeSelect");
 const performanceTelemetry = document.querySelector("#performanceTelemetry");
 const radarSoundStyleSelect = document.querySelector("#radarSoundStyle");
 const orientationModeSelect = document.querySelector("#orientationMode");
@@ -143,6 +143,8 @@ const bundledAirspaceUrl = "./data/offline-airspace.json";
 const weatherMapsUrl = "https://api.rainviewer.com/public/weather-maps.json";
 const airspaceQueryUrl =
   "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0/query";
+const specialUseAirspaceQueryUrl =
+  "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Special_Use_Airspace/FeatureServer/0/query";
 const aircraftLookupBaseUrl = "https://api.adsbdb.com/v0/aircraft";
 const queryParams = new URLSearchParams(window.location.search);
 const proxyUrlFromQuery = queryParams.get("proxy");
@@ -351,8 +353,16 @@ let sweepColor = "orange";
 let showGroundTraffic = false;
 let showFlightLevelsTraffic = true;
 let showRadarData = true;
-let showPrecipitation = true;
-let reducedLoad = window.localStorage.getItem("ADSB_RADAR_REDUCED_LOAD") === "true";
+const savedWxDisplayMode = window.localStorage.getItem("ADSB_RADAR_WX_DISPLAY_MODE");
+let wxDisplayMode = ["off", "on", "wxOnly"].includes(savedWxDisplayMode) ? savedWxDisplayMode : "on";
+let showPrecipitation = wxDisplayMode !== "off";
+const savedPerformanceMode = window.localStorage.getItem("ADSB_RADAR_PERFORMANCE_MODE");
+let performanceMode = ["cool", "reduced", "fast"].includes(savedPerformanceMode)
+  ? savedPerformanceMode
+  : window.localStorage.getItem("ADSB_RADAR_REDUCED_LOAD") === "true"
+    ? "reduced"
+    : "fast";
+let reducedLoad = performanceMode !== "fast";
 let lightTheme = window.localStorage.getItem("ADSB_RADAR_THEME") === "light";
 let radarSoundsEnabled = true;
 let radarSoundStyle = "softTick";
@@ -369,6 +379,7 @@ let lastWxSweepBucket = -1;
 let previousSweepAngle = null;
 let lastFetchAt = 0;
 let lastDataSource = "standby";
+let lastStatusText = "";
 let trafficFetchInFlight = false;
 let trafficBackoffMs = 0;
 let nextTrafficFetchAt = 0;
@@ -406,6 +417,7 @@ let arcHeadingOverrideDegrees = null;
 let arcHeadingOverrideStartedAt = 0;
 let arcHeadingOverrideUntil = 0;
 let compassHeadingDegrees = null;
+let lastCompassHeadingAt = 0;
 let compassPermissionRequested = false;
 let gpsTrail = [];
 let lastGpsTrailAt = 0;
@@ -427,6 +439,7 @@ let proximityAlertKey = "";
 let proximityAlertSolid = false;
 let proximityAlertAudioLevel = 1;
 let proximityHighlightLastAt = 0;
+let proximityDivergingSince = 0;
 let trafficAlertActive = false;
 let returnToArcAfterThreat = false;
 let manualThreatFocusKey = "";
@@ -441,6 +454,8 @@ let quickNotesText = "";
 let quickNotesClearTimer = null;
 let quickNotesClearStartedAt = 0;
 let lastRenderedAt = 0;
+let renderLoopScheduled = false;
+let scratchpadPaused = false;
 let lastWeatherEnsureAt = 0;
 let latestDeviceStatus = null;
 let deviceStatusRefreshInFlight = false;
@@ -588,16 +603,44 @@ function installRadarAudioRecovery() {
   });
 }
 
+function applyCompassHeading(rawHeading, { accuracy = null } = {}) {
+  const nextHeading = normalizedDegrees(rawHeading);
+  const now = performance.now();
+  const headingAccuracy = Number(accuracy);
+  if (Number.isFinite(headingAccuracy) && headingAccuracy > 55 && compassHeadingDegrees !== null) return;
+
+  if (!Number.isFinite(compassHeadingDegrees)) {
+    compassHeadingDegrees = nextHeading;
+    lastCompassHeadingAt = now;
+    return;
+  }
+
+  const elapsedSeconds = lastCompassHeadingAt ? Math.max(0.016, (now - lastCompassHeadingAt) / 1000) : 0.25;
+  const delta = signedDegreesDelta(compassHeadingDegrees, nextHeading);
+  const stationary = gpsSpeedKts < 3 && (!gpsWatchId || gpsActive);
+  const deadband = stationary ? 3.5 : 1.5;
+  if (Math.abs(delta) < deadband) return;
+
+  // Android browser compass data can chatter while the phone is sitting flat.
+  // Rate limiting keeps track-up readable without disabling deliberate turns.
+  const maxStep = (stationary ? 90 : 180) * elapsedSeconds;
+  const limitedDelta = Math.max(-maxStep, Math.min(maxStep, delta));
+  const smoothing = stationary ? 0.42 : 0.62;
+  compassHeadingDegrees = normalizedDegrees(compassHeadingDegrees + limitedDelta * smoothing);
+  lastCompassHeadingAt = now;
+}
+
 function handleDeviceOrientation(event) {
   const webkitHeading = Number(event.webkitCompassHeading);
   if (Number.isFinite(webkitHeading)) {
-    compassHeadingDegrees = (webkitHeading + 360) % 360;
+    applyCompassHeading(webkitHeading, { accuracy: event.webkitCompassAccuracy });
     return;
   }
 
   const alpha = Number(event.alpha);
-  if (Number.isFinite(alpha)) {
-    compassHeadingDegrees = (360 - alpha + 360) % 360;
+  const hasAbsoluteHeading = event.absolute === true || event.type === "deviceorientationabsolute";
+  if (Number.isFinite(alpha) && hasAbsoluteHeading) {
+    applyCompassHeading(360 - alpha);
   }
 }
 
@@ -639,6 +682,16 @@ function resetWeatherImage() {
   weatherImageRetryAt = 0;
 }
 
+function resetWeatherImageIfMoved(previousCenter, nextCenter, thresholdMiles = Math.min(8, Math.max(1.5, radiusMiles * 0.2))) {
+  if (!previousCenter || !nextCenter) {
+    resetWeatherImage();
+    return;
+  }
+  if (milesBetween(previousCenter.lat, previousCenter.lon, nextCenter.lat, nextCenter.lon) > thresholdMiles) {
+    resetWeatherImage();
+  }
+}
+
 function randomJitter(minMs = 500, maxMs = 2000) {
   return minMs + Math.random() * (maxMs - minMs);
 }
@@ -664,75 +717,6 @@ function scheduleNextTrafficFetch({ failed = false, source = lastDataSource, sta
 function formatCounter(value) {
   const number = Number(value);
   return Number.isFinite(number) ? String(Math.trunc(number)) : "--";
-}
-
-function formatPortStats(portStats = {}) {
-  return ["4000", "4001", "43211"]
-    .map((port) => `${port}:${formatCounter(portStats[port])}`)
-    .join(" ");
-}
-
-function formatMessageCounts(messageCounts = {}) {
-  return Object.entries(messageCounts)
-    .sort((a, b) => Number(a[0]) - Number(b[0]))
-    .slice(0, 8)
-    .map(([id, count]) => `${id}:${formatCounter(count)}`)
-    .join(" ") || "--";
-}
-
-function formatBattery(data = {}) {
-  const percent = Number(data.batteryPercent);
-  const raw = data.batteryRaw ?? data.batteryVoltage ?? data.batteryMv ?? data.externalPower ?? null;
-  const rawText = raw === null || raw === undefined || raw === "" ? "" : ` raw ${raw}`;
-  if (!Number.isFinite(percent)) return `bat --${rawText}`;
-  const power = data.powerStatus ? ` ${data.powerStatus}` : "";
-  return `bat ${Math.round(percent)}%${power}${rawText}`;
-}
-
-function formatVendorSamples(samples = {}) {
-  const entries = Object.entries(samples || {}).slice(0, 6);
-  if (!entries.length) return "vendor --";
-  return entries.map(([id, sample]) => `${id}:${String(sample).slice(0, 40)}`).join(" ");
-}
-
-function formatRawPacketSamples(samples = {}) {
-  const entries = Object.entries(samples || {}).slice(0, 4);
-  if (!entries.length) return "raw --";
-  return entries.map(([port, sample]) => `${port}:${String(sample).slice(0, 40)}`).join(" ");
-}
-
-function formatRawAsciiSamples(samples = {}) {
-  const entries = Object.entries(samples || {}).slice(0, 4);
-  if (!entries.length) return "ascii --";
-  return entries.map(([port, sample]) => `${port}:${String(sample).slice(0, 32)}`).join(" ");
-}
-
-function formatRawLengths(lengths = {}) {
-  const entries = Object.entries(lengths || {}).slice(0, 4);
-  if (!entries.length) return "len --";
-  return entries.map(([port, length]) => `${port}:${formatCounter(length)}`).join(" ");
-}
-
-function formatFrameSamples(samples = {}) {
-  const entries = Object.entries(samples || {}).slice(0, 8);
-  if (!entries.length) return "frmhex --";
-  return entries.map(([id, sample]) => `${id}:${String(sample).slice(0, 36)}`).join(" ");
-}
-
-function formatRecentMessageIds(ids = []) {
-  if (!Array.isArray(ids) || !ids.length) return "ids --";
-  return `ids ${ids.slice(-24).join(",")}`;
-}
-
-function formatObjectEntries(value = {}, { limit = 8, prefix = "--" } = {}) {
-  const entries = Object.entries(value || {}).slice(0, limit);
-  if (!entries.length) return prefix;
-  return entries.map(([key, item]) => `${key}:${String(item).slice(0, 28)}`).join(" ");
-}
-
-function formatPayloadKeys(data = {}) {
-  const keys = Object.keys(data || {}).filter((key) => !["aircraft", "ac", "ownship"].includes(key));
-  return keys.length ? keys.slice(0, 32).join(",") : "--";
 }
 
 function formatHeadingValue(value) {
@@ -790,6 +774,9 @@ function updateDataSourceIndicator(data = null) {
       : stale
         ? `${source.label} STALE`
         : source.label;
+  const stateKey = `${source.type}:${label}:${stale ? "stale" : "live"}:${data ? "data" : "none"}`;
+  if (dataSourceIndicator.dataset.stateKey === stateKey) return;
+  dataSourceIndicator.dataset.stateKey = stateKey;
 
   dataSourceIndicator.hidden = false;
   dataSourceIndicator.classList.toggle("stratus", source.type === "stratus");
@@ -799,6 +786,12 @@ function updateDataSourceIndicator(data = null) {
   dataSourceIndicator.classList.toggle("stale", stale);
   dataSourceIndicator.classList.toggle("steady", source.type === "cellular" || source.type === "offline" || stale);
   dataSourceLabel.textContent = label;
+}
+
+function setStatusText(message) {
+  if (!statusEl || message === lastStatusText) return;
+  lastStatusText = message;
+  statusEl.textContent = message;
 }
 
 function offlineDataNotice() {
@@ -820,50 +813,8 @@ function activeTrackHeadingSource() {
 function updateStratusDiagnostics(data = null) {
   if (!stratusDiagnosticsEl) return;
 
-  const isStratus = data && (data.displaySource === "Stratus" || data.source === "Stratus");
-  stratusDiagnosticsEl.hidden = !isStratus;
-  if (!isStratus) return;
-
-  const age = Number.isFinite(Number(data.ageSeconds)) ? `${Math.round(Number(data.ageSeconds))}s` : "--";
-  const status = data.stale ? "WAITING" : "LIVE";
-  const ownship = data.ownship ? "YES" : "NO";
-  const diagnosticRows = [
-    ["state", status],
-    ["source", data.source || data.displaySource || "--"],
-    ["age", age],
-    ["total", formatCounter(data.total)],
-    ["pkts", formatCounter(data.packetCount)],
-    ["frames", formatCounter(data.frameCount)],
-    ["traffic", formatCounter(data.trafficFrameCount)],
-    ["own", formatCounter(data.ownshipFrameCount)],
-    ["trk", formatHeadingValue(stratusTrackDegrees)],
-    ["hb", formatCounter(data.heartbeatFrameCount)],
-    ["battery", formatBattery(data)],
-    ["power", data.powerStatus || data.externalPower || data.batteryState || "--"],
-    ["batraw", formatObjectEntries(data.batteryCandidates, { prefix: "--" })],
-    ["vendor", formatVendorSamples(data.vendorFrameSamples)],
-    ["vascii", formatObjectEntries(data.vendorAsciiSamples, { limit: 6, prefix: "--" })],
-    ["raw", formatRawPacketSamples(data.rawPacketSamples)],
-    ["tail", formatObjectEntries(data.rawPacketTailSamples, { limit: 4, prefix: "--" })],
-    ["ascii", formatRawAsciiSamples(data.rawPacketAsciiSamples)],
-    ["len", formatRawLengths(data.rawPacketLengths)],
-    ["frmhex", formatFrameSamples(data.frameSamples)],
-    ["frmlen", formatObjectEntries(data.frameLengths, { limit: 10, prefix: "--" })],
-    ["ids", formatRecentMessageIds(data.recentMessageIds)],
-    ["keys", formatPayloadKeys(data)],
-    ["hdg", activeTrackHeadingSource()],
-    ["devhdg", formatHeadingValue(data.deviceHeading)],
-    ["devacc", formatCounter(data.deviceHeadingAccuracy)],
-    ["deverr", formatCounter(data.decodeErrors)],
-    ["ownship", ownship],
-    ["ports", formatPortStats(data.portStats)],
-    ["msg", formatMessageCounts(data.messageCounts)],
-    ["listen", data.listenerStatus || "--"],
-    ["warn", data.warning || "--"]
-  ];
-  stratusDiagnosticsEl.innerHTML = `
-    ${diagnosticRows.map(([label, value]) => `<span><b>${label}</b> ${escapeHtml(value)}</span>`).join("")}
-  `;
+  stratusDiagnosticsEl.hidden = true;
+  stratusDiagnosticsEl.innerHTML = "";
 }
 
 function setOrientationMode(mode, { persist = true } = {}) {
@@ -932,8 +883,8 @@ function updateDeviceThermalBadge(data = null) {
   deviceThermalStatus.classList.toggle("hot", state === "serious");
   deviceThermalStatus.classList.toggle("critical", state === "critical");
   deviceThermalStatus.textContent = `Device ${label}`;
-  if ((state === "serious" || state === "critical") && !reducedLoad) {
-    setReducedLoad(true, { automatic: true });
+  if ((state === "serious" || state === "critical") && performanceMode !== "cool") {
+    setPerformanceMode("cool", { automatic: true });
   }
 }
 
@@ -1088,11 +1039,30 @@ function playContactBlip() {
 }
 
 function resizeCanvas() {
+  stabilizeNativeViewport();
   const rect = canvas.getBoundingClientRect();
-  pixelRatio = reducedLoad ? Math.min(window.devicePixelRatio || 1, 1.5) : window.devicePixelRatio || 1;
+  pixelRatio = performanceModeConfig().pixelScale;
   canvas.width = Math.max(1, Math.floor(rect.width * pixelRatio));
   canvas.height = Math.max(1, Math.floor(rect.height * pixelRatio));
   ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+}
+
+function stabilizeNativeViewport() {
+  if (!nativeStratusHandler) return;
+
+  const viewport = window.visualViewport;
+  const width = Math.max(window.innerWidth || 0, viewport?.width || 0, document.documentElement.clientWidth || 0);
+  const height = Math.max(window.innerHeight || 0, viewport?.height || 0, document.documentElement.clientHeight || 0);
+  if (width > 0) {
+    document.documentElement.style.width = `${width}px`;
+    document.body.style.width = `${width}px`;
+    shell.style.width = `${width}px`;
+  }
+  if (height > 0) {
+    document.documentElement.style.height = `${height}px`;
+    document.body.style.height = `${height}px`;
+    shell.style.height = `${height}px`;
+  }
 }
 
 function currentRadarTheme() {
@@ -1118,15 +1088,32 @@ function thermalLabel() {
   return latestDeviceStatus?.thermalLabel || "--";
 }
 
+function performanceModeConfig(mode = performanceMode) {
+  switch (mode) {
+    case "cool":
+      return { label: "cool down", fps: 15, pixelScale: 1, tileLimit: 18, trailFactor: 0.55 };
+    case "fast":
+      return { label: "fast", fps: 60, pixelScale: window.devicePixelRatio || 1, tileLimit: 64, trailFactor: 1 };
+    case "reduced":
+    default:
+      return {
+        label: "reduced load",
+        fps: 24,
+        pixelScale: Math.min(window.devicePixelRatio || 1, 1.5),
+        tileLimit: 28,
+        trailFactor: 0.75
+      };
+  }
+}
+
 function updatePerformanceTelemetry() {
   if (!performanceTelemetry) return;
 
-  const targetFps = reducedLoad ? 24 : 60;
-  const mode = reducedLoad ? "reduced" : "normal";
+  const config = performanceModeConfig();
   const lowPower = latestDeviceStatus?.lowPowerMode ? " low power" : "";
   performanceTelemetry.innerHTML = `
-    <span><b>Load</b> ${mode}${lowPower}</span>
-    <span><b>FPS</b> ${Math.round(renderStats.fps) || "--"} / ${targetFps}</span>
+    <span><b>Load</b> ${config.label}${lowPower}</span>
+    <span><b>FPS</b> ${Math.round(renderStats.fps) || "--"} / ${config.fps}</span>
     <span><b>Frame</b> ${renderStats.averageRenderMs ? renderStats.averageRenderMs.toFixed(1) : "--"}ms</span>
     <span><b>Slow</b> ${renderStats.slowPercent ? `${Math.round(renderStats.slowPercent)}%` : "0%"}</span>
     <span><b>Thermal</b> ${escapeHtml(thermalLabel())}</span>
@@ -1134,14 +1121,20 @@ function updatePerformanceTelemetry() {
   `;
 }
 
-function setReducedLoad(enabled, { automatic = false } = {}) {
-  reducedLoad = Boolean(enabled);
+function setPerformanceMode(mode, { automatic = false } = {}) {
+  performanceMode = ["cool", "reduced", "fast"].includes(mode) ? mode : "reduced";
+  reducedLoad = performanceMode !== "fast";
+  window.localStorage.setItem("ADSB_RADAR_PERFORMANCE_MODE", performanceMode);
   window.localStorage.setItem("ADSB_RADAR_REDUCED_LOAD", reducedLoad ? "true" : "false");
   document.body.classList.toggle("reduced-load", reducedLoad);
   shell.classList.toggle("reduced-load", reducedLoad);
-  if (reducedLoadToggle) reducedLoadToggle.checked = reducedLoad;
+  document.body.classList.toggle("cool-load", performanceMode === "cool");
+  shell.classList.toggle("cool-load", performanceMode === "cool");
+  document.body.classList.toggle("fast-load", performanceMode === "fast");
+  shell.classList.toggle("fast-load", performanceMode === "fast");
+  if (performanceModeSelect) performanceModeSelect.value = performanceMode;
   if (automatic && performanceTelemetry) {
-    performanceTelemetry.dataset.notice = "Reduced load enabled after iOS reported high thermal pressure.";
+    performanceTelemetry.dataset.notice = "Cool Down enabled after iOS reported high thermal pressure.";
   } else if (performanceTelemetry) {
     delete performanceTelemetry.dataset.notice;
   }
@@ -1149,11 +1142,12 @@ function setReducedLoad(enabled, { automatic = false } = {}) {
   lastWeatherEnsureAt = 0;
   resizeCanvas();
   updatePerformanceTelemetry();
+  scheduleRender();
 }
 
 function recordRenderStats(frameStartedAt, frameTimestamp) {
   const renderMs = performance.now() - frameStartedAt;
-  const targetMs = reducedLoad ? 1000 / 24 : 1000 / 60;
+  const targetMs = 1000 / performanceModeConfig().fps;
   const frameGap = renderStats.lastFrameAt ? frameTimestamp - renderStats.lastFrameAt : targetMs;
 
   renderStats.frames += 1;
@@ -1186,6 +1180,7 @@ function updatePanelToggle() {
   const collapsed = shell.classList.contains("panel-collapsed");
   panelToggle.setAttribute("aria-label", collapsed ? "Show panel" : "Hide panel");
   panelToggle.setAttribute("aria-expanded", String(!collapsed));
+  if (!collapsed) renderList({ force: true });
   updateProximityAlert();
   updateBottomRangeButton();
 }
@@ -1454,6 +1449,10 @@ function normalizedDegrees(value) {
   return ((value % 360) + 360) % 360;
 }
 
+function signedDegreesDelta(from, to) {
+  return ((normalizedDegrees(to) - normalizedDegrees(from) + 540) % 360) - 180;
+}
+
 function relativeBearingDegrees(bearing) {
   const heading = activeTrackHeadingDegrees() ?? 0;
   return normalizedDegrees(bearing - heading);
@@ -1706,6 +1705,7 @@ function clearProximityAlert() {
   proximityAlertKey = "";
   proximityAlertSolid = false;
   proximityAlertAudioLevel = 1;
+  proximityDivergingSince = 0;
   trafficAlertActive = false;
   manualThreatFocusKey = "";
   if (returnToArcAfterThreat) {
@@ -1720,15 +1720,18 @@ function clearProximityAlert() {
 }
 
 function clearManualThreatFocus() {
+  const shouldReturnToArc = returnToArcAfterManualThreat;
   manualThreatFocusKey = "";
   returnToArcAfterManualThreat = false;
   if (proximityAlertKey && !returnToArcAfterThreat) proximityAlertKey = "";
   proximityAlertSolid = false;
   proximityAlertAudioLevel = 1;
+  proximityDivergingSince = 0;
   trafficAlertActive = false;
   proximityAlertEl.hidden = true;
   proximityAlertEl.textContent = "";
   proximityAlertEl.classList.remove("diverging", "manual-focus", "solid");
+  if (shouldReturnToArc) setWeatherMode(true);
   updateBottomRangeButton();
   updateWxNearestTarget();
 }
@@ -1740,12 +1743,18 @@ function clearActiveTrafficAlert() {
   }
 
   if (proximityAlertKey) dismissedTrafficAlertKey = proximityAlertKey;
+  const shouldReturnToArc = returnToArcAfterThreat;
   proximityAlertEl.hidden = true;
   proximityAlertEl.textContent = "";
   proximityAlertEl.classList.remove("diverging", "manual-focus", "solid");
   proximityAlertSolid = false;
   proximityAlertAudioLevel = 1;
+  proximityDivergingSince = 0;
   trafficAlertActive = false;
+  if (shouldReturnToArc) {
+    returnToArcAfterThreat = false;
+    setWeatherMode(true);
+  }
   updateBottomRangeButton();
   updateWxNearestTarget();
 }
@@ -1775,6 +1784,14 @@ function updateWxNearestTarget() {
 
   if (trafficAlertActive && proximityAlertKey && !proximityAlertEl.hidden) {
     wxNearestTarget.hidden = true;
+    return;
+  }
+
+  if (wxDisplayMode === "wxOnly") {
+    wxNearestTarget.hidden = true;
+    wxNearestTarget.innerHTML = "";
+    wxNearestTarget.dataset.targetKey = "";
+    wxNearestTargetKey = "";
     return;
   }
 
@@ -1856,6 +1873,7 @@ function highlightProximityTarget(alert) {
     proximityAlertSolid = false;
     proximityAlertAudioLevel = 1;
     proximityHighlightLastAt = 0;
+    proximityDivergingSince = 0;
   }
 
   if (!proximityHighlightLastAt || now - proximityHighlightLastAt > 8500) {
@@ -1953,10 +1971,18 @@ function updateProximityAlert() {
   updateBottomRangeButton();
   radarBlips.set(alertKey, { ...alert.plane, radarSeenAt: Date.now(), liveUpdatedAt: Date.now() });
   highlightProximityTarget(alert);
+  const now = Date.now();
+  const closeInAlert = alert.distance <= 2 || Math.abs(alert.closureKts) < 35;
+  if (alert.diverging) {
+    if (!proximityDivergingSince) proximityDivergingSince = now;
+  } else {
+    proximityDivergingSince = 0;
+  }
+  const divergingStable = alert.diverging && now - proximityDivergingSince >= 3500;
   if (alert.diverging) {
     proximityAlertAudioLevel = 0;
     proximityAlertSolid = true;
-    if (returnToArcAfterThreat) {
+    if (returnToArcAfterThreat && divergingStable) {
       returnToArcAfterThreat = false;
       setWeatherMode(true);
     }
@@ -1976,7 +2002,7 @@ function updateProximityAlert() {
     <button type="button" class="traffic-alert-clear" aria-label="Clear traffic alert">Clear</button>
   `;
   proximityAlertEl.classList.toggle("diverging", alert.diverging);
-  proximityAlertEl.classList.toggle("solid", proximityAlertSolid || alert.diverging);
+  proximityAlertEl.classList.toggle("solid", proximityAlertSolid || alert.diverging || closeInAlert);
   proximityAlertEl.classList.remove("manual-focus");
   proximityAlertEl.hidden = false;
   updateWxNearestTarget();
@@ -2519,6 +2545,17 @@ function visibleAircraft() {
   return aircraft.filter(isVisibleTraffic);
 }
 
+function isDisplayTraffic(plane) {
+  if (!isVisibleTraffic(plane)) return false;
+  if (wxDisplayMode !== "wxOnly") return true;
+  if (!trafficAlertActive || !proximityAlertKey) return false;
+  return aircraftKey(plane) === proximityAlertKey;
+}
+
+function displayAircraft() {
+  return aircraft.filter(isDisplayTraffic);
+}
+
 function aircraftKey(plane) {
   return plane.hex || plane.nNumber || plane.callsign || `${plane.lat},${plane.lon}`;
 }
@@ -2691,7 +2728,7 @@ function pruneExpiredRadarBlips(now = Date.now()) {
 
 function visibleRadarAircraft() {
   const now = Date.now();
-  return Array.from(radarBlips.values()).filter((plane) => radarBlipAlpha(plane, now) > 0 && isVisibleTraffic(plane));
+  return Array.from(radarBlips.values()).filter((plane) => radarBlipAlpha(plane, now) > 0 && isDisplayTraffic(plane));
 }
 
 function updateRadarBlipsForSweep(angle) {
@@ -2707,7 +2744,7 @@ function updateRadarBlipsForSweep(angle) {
     const snapshot = { ...plane, radarSeenAt: Date.now() };
     radarBlips.set(aircraftKey(plane), snapshot);
     appendTrackHistory(snapshot);
-    playContactBlip();
+    if (wxDisplayMode !== "wxOnly") playContactBlip();
   }
 
   previousSweepAngle = currentSweepAngle;
@@ -2735,7 +2772,7 @@ function updateRadarBlipsForWeatherSweep(angle) {
     const snapshot = { ...plane, radarSeenAt: Date.now() };
     radarBlips.set(key, snapshot);
     appendTrackHistory(snapshot);
-    playContactBlip();
+    if (wxDisplayMode !== "wxOnly") playContactBlip();
   }
 }
 
@@ -2934,11 +2971,34 @@ function attachRunwaysToAirports(airportRows, runwayRows) {
 }
 
 async function fetchStaticTraffic() {
-  const [trafficData, airportRows, runwayRows] = await Promise.all([
+  const [trafficResult, airportResult, runwayResult] = await Promise.allSettled([
     fetchPreferredAircraftFeed(),
     loadAirportCache(),
     loadRunwayCache()
   ]);
+
+  const airportRows = airportResult.status === "fulfilled" ? airportResult.value : [];
+  const runwayRows = runwayResult.status === "fulfilled" ? runwayResult.value : [];
+  if (airportResult.status === "rejected") {
+    console.warn("Unable to load local airport database", airportResult.reason);
+  }
+  if (runwayResult.status === "rejected") {
+    console.warn("Unable to load local runway database", runwayResult.reason);
+  }
+
+  const trafficData =
+    trafficResult.status === "fulfilled"
+      ? trafficResult.value
+      : {
+          source: nativeStratusHandler ? "Stratus" : "Offline",
+          displaySource: nativeStratusHandler ? "Stratus" : "Offline",
+          stale: true,
+          ageSeconds: null,
+          warning: trafficResult.reason?.message || "Traffic source unavailable",
+          aircraft: [],
+          ac: [],
+          total: 0
+        };
 
   const aircraftRows = dropDuplicateTisbOtherTargets(
     (trafficData.aircraft || trafficData.ac || []).map(normalizeAircraft).filter(Boolean)
@@ -3010,7 +3070,7 @@ function applyStratusOwnship(trafficData) {
   latInput.value = ownship.lat.toFixed(4);
   lonInput.value = ownship.lon.toFixed(4);
   center = { lat: ownship.lat, lon: ownship.lon };
-  resetWeatherImage();
+  resetWeatherImageIfMoved(previousCenter, center);
 
   if (!lastGpsTrailAt || now - lastGpsTrailAt >= 30000) {
     gpsTrail.push({ lat: ownship.lat, lon: ownship.lon, at: now });
@@ -3097,11 +3157,14 @@ async function fetchNativeStratusFeed({ timeoutMs = 900 } = {}) {
 }
 
 async function fetchPreferredAircraftFeed() {
+  let staleNativeData = null;
+
   if (nativeStratusHandler) {
     try {
-      const nativeData = await fetchNativeStratusFeed({ timeoutMs: 900 });
+      const nativeData = await fetchNativeStratusFeed({ timeoutMs: 1500 });
       applyNativeDeviceHeading(nativeData);
       if (nativeData.stale) {
+        staleNativeData = nativeData;
         const age = Number.isFinite(Number(nativeData.ageSeconds)) ? `${Math.round(Number(nativeData.ageSeconds))}s old` : "not receiving packets";
         throw new Error(`Native Stratus receiver is stale (${age})`);
       }
@@ -3129,13 +3192,22 @@ async function fetchPreferredAircraftFeed() {
   }
 
   if (!adsbProxyBaseUrl) {
+    if (staleNativeData) return staleNativeData;
     throw new Error("Cloudflare Worker proxy is not configured");
   }
 
-  return fetchAircraftFeed(adsbProxyBaseUrl, {
-    displaySource: internetTrafficSourceLabel(),
-    timeoutMs: 6500
-  });
+  try {
+    return await fetchAircraftFeed(adsbProxyBaseUrl, {
+      displaySource: internetTrafficSourceLabel(),
+      timeoutMs: 6500
+    });
+  } catch (error) {
+    if (staleNativeData) {
+      console.warn("Configured ADS-B source unavailable; keeping stale native Stratus diagnostics", error);
+      return staleNativeData;
+    }
+    throw error;
+  }
 }
 
 async function fetchStratusJson(path, timeoutMs = 1200) {
@@ -3219,7 +3291,7 @@ function weatherTileEnvelope(zoom) {
     }
   }
 
-  return tiles.slice(0, reducedLoad ? 28 : 64);
+  return tiles.slice(0, performanceModeConfig().tileLimit);
 }
 
 function loadWeatherTile(url, tile) {
@@ -3244,6 +3316,7 @@ async function loadWeatherMeta() {
 }
 
 async function ensureWeatherImage() {
+  if (scratchpadPaused) return;
   if (!showPrecipitation || weatherImageLoading) return;
   if (Date.now() < weatherImageRetryAt) return;
 
@@ -3301,7 +3374,7 @@ function drawPrecipitation(scope) {
 }
 
 function drawProjectedWeatherTile(tile, scope) {
-  const steps = reducedLoad ? 3 : 5;
+  const steps = performanceMode === "cool" ? 2 : reducedLoad ? 3 : 5;
   const sourceWidth = tile.image.naturalWidth || tile.image.width;
   const sourceHeight = tile.image.naturalHeight || tile.image.height;
   if (!sourceWidth || !sourceHeight) return;
@@ -3365,10 +3438,11 @@ function updateCenter(lat, lon, { clearTracks = true, source = "manual" } = {}) 
   }
   lastAirspaceKey = "";
   resetWeatherImage();
-  statusEl.textContent =
+  setStatusText(
     source === "gps"
       ? `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`
-      : "Radar sweep active. Updating aircraft every pass.";
+      : "Radar sweep active. Updating aircraft every pass."
+  );
   fetchAirspace();
   fetchTraffic({ force: true });
 }
@@ -3390,6 +3464,43 @@ function normalizeAirspaceFeature(feature) {
   };
 }
 
+function normalizeSpecialUseClass(attributes) {
+  const classText = String(attributes.CLASS || "").toUpperCase();
+  const typeText = String(attributes.TYPE_CODE || "").toUpperCase();
+  const nameText = String(attributes.NAME || "").toUpperCase();
+  const combined = `${classText} ${typeText} ${nameText}`;
+
+  if (classText === "P" || combined.includes("PROHIB")) return "P";
+  if (classText === "R" || combined.includes("RESTRICT")) return "R";
+  if (classText === "MOA" || combined.includes("MOA") || combined.includes("MILITARY OPERATIONS")) return "MOA";
+  return "";
+}
+
+function normalizeSpecialUseAirspaceFeature(feature) {
+  const attributes = feature.attributes || {};
+  const specialUseType = normalizeSpecialUseClass(attributes);
+  const rings = (feature.geometry?.rings || []).map((ring) => ring.map(([lon, lat]) => ({ lat, lon })));
+  if (!specialUseType || !rings.length) return null;
+
+  return {
+    id: `SUA-${attributes.OBJECTID}`,
+    ident: attributes.IDENT || "",
+    name: attributes.NAME || "",
+    classCode: "SUA",
+    type: "SUA",
+    typeCode: specialUseType,
+    sector: attributes.SECTOR || "",
+    lower: formatAirspaceAltitude(attributes.LOWER_VAL, attributes.LOWER_CODE),
+    upper: formatAirspaceAltitude(attributes.UPPER_VAL, attributes.UPPER_CODE),
+    controllingFacility: attributes.CONT_AGENT || attributes.COMM_NAME || "",
+    rings
+  };
+}
+
+function airspaceMatchesSelection(airspace, visibleClasses) {
+  return visibleClasses.has(airspace.classCode);
+}
+
 const airspaceCachePrefix = "ADSB_RADAR_AIRSPACE_";
 const recentAirspaceCacheKey = "ADSB_RADAR_AIRSPACE_RECENT";
 
@@ -3400,7 +3511,7 @@ function airspaceStorageKey(key) {
 function parseAirspaceCacheKey(storageKey) {
   if (!storageKey.startsWith(airspaceCachePrefix)) return null;
   const key = storageKey.slice(airspaceCachePrefix.length);
-  if (!key.startsWith("smooth2:")) return null;
+  if (!key.startsWith("smooth2:") && !key.startsWith("smooth3:")) return null;
   const [, coords = "", classes = ""] = key.split(":");
   const [latText, lonText, radiusText] = coords.split(",");
   const lat = Number(latText);
@@ -3557,7 +3668,7 @@ function airspaceIntersectsCurrentView(airspace) {
 
 async function loadLocalAirspaceFallback(visibleClasses) {
   const rows = (await loadBundledAirspaceRows())
-    .filter((airspace) => visibleClasses.has(airspace.classCode))
+    .filter((airspace) => airspaceMatchesSelection(airspace, visibleClasses))
     .filter(airspaceIntersectsCurrentView)
     .slice(0, 160);
   if (rows.length) offlineAirspaceDataActive = true;
@@ -3573,10 +3684,10 @@ async function fetchAirspace() {
   }
 
   const classKey = Array.from(visibleClasses).sort().join("");
-  const key = `smooth2:${center.lat.toFixed(4)},${center.lon.toFixed(4)},${radiusMiles}:${classKey}`;
+  const key = `smooth3:${center.lat.toFixed(4)},${center.lon.toFixed(4)},${radiusMiles}:${classKey}`;
   if (key === lastAirspaceKey && airspaces.length) return;
   const cachedAirspace = loadNearestCachedAirspace(key);
-  const cachedRows = (cachedAirspace?.rows || []).filter((airspace) => visibleClasses.has(airspace.classCode));
+  const cachedRows = (cachedAirspace?.rows || []).filter((airspace) => airspaceMatchesSelection(airspace, visibleClasses));
   const cachedClasses = new Set(cachedRows.map((airspace) => airspace.classCode));
   const cacheCoversSelection = Array.from(visibleClasses).every((classCode) => cachedClasses.has(classCode));
   if (cachedRows.length) {
@@ -3596,23 +3707,54 @@ async function fetchAirspace() {
     }
   }
 
-  const params = new URLSearchParams({
-    f: "json",
-    where: "TYPE_CODE='CLASS' AND CLASS in ('B','C','D','E')",
-    outFields: "OBJECTID,IDENT,ICAO_ID,NAME,CLASS,LOWER_VAL,LOWER_CODE,UPPER_VAL,UPPER_CODE,SECTOR",
-    geometry: airspaceEnvelope(),
-    geometryType: "esriGeometryEnvelope",
-    inSR: "4326",
-    spatialRel: "esriSpatialRelIntersects",
-    outSR: "4326",
-    returnGeometry: "true",
-    geometryPrecision: radiusMiles <= 20 ? "5" : "4",
-    resultRecordCount: "120"
-  });
+  const airspaceRequests = [];
+  const classCodes = Array.from(visibleClasses).filter((classCode) => ["B", "C", "D"].includes(classCode));
+
+  if (classCodes.length) {
+    const classParams = new URLSearchParams({
+      f: "json",
+      where: `TYPE_CODE='CLASS' AND CLASS in (${classCodes.map((classCode) => `'${classCode}'`).join(",")})`,
+      outFields: "OBJECTID,IDENT,ICAO_ID,NAME,CLASS,LOWER_VAL,LOWER_CODE,UPPER_VAL,UPPER_CODE,SECTOR",
+      geometry: airspaceEnvelope(),
+      geometryType: "esriGeometryEnvelope",
+      inSR: "4326",
+      spatialRel: "esriSpatialRelIntersects",
+      outSR: "4326",
+      returnGeometry: "true",
+      geometryPrecision: radiusMiles <= 20 ? "5" : "4",
+      resultRecordCount: "120"
+    });
+    airspaceRequests.push(
+      getJson(`${airspaceQueryUrl}?${classParams}`).then((data) =>
+        (data.features || []).map(normalizeAirspaceFeature).filter(Boolean)
+      )
+    );
+  }
+
+  if (visibleClasses.has("SUA")) {
+    const specialUseParams = new URLSearchParams({
+      f: "json",
+      where: "1=1",
+      outFields:
+        "OBJECTID,NAME,TYPE_CODE,CLASS,LOWER_VAL,LOWER_CODE,UPPER_VAL,UPPER_CODE,SECTOR,CONT_AGENT,COMM_NAME",
+      geometry: airspaceEnvelope(),
+      geometryType: "esriGeometryEnvelope",
+      inSR: "4326",
+      spatialRel: "esriSpatialRelIntersects",
+      outSR: "4326",
+      returnGeometry: "true",
+      geometryPrecision: radiusMiles <= 20 ? "5" : "4",
+      resultRecordCount: "120"
+    });
+    airspaceRequests.push(
+      getJson(`${specialUseAirspaceQueryUrl}?${specialUseParams}`).then((data) =>
+        (data.features || []).map(normalizeSpecialUseAirspaceFeature).filter(Boolean)
+      )
+    );
+  }
 
   try {
-    const data = await getJson(`${airspaceQueryUrl}?${params}`);
-    const fetchedAirspaces = (data.features || []).map(normalizeAirspaceFeature).filter(Boolean);
+    const fetchedAirspaces = (await Promise.all(airspaceRequests)).flat();
     if (!fetchedAirspaces.length && airspaces.length) {
       console.warn("FAA airspace request returned no usable boundaries; keeping cached/session airspace.");
       lastAirspaceKey = key;
@@ -3628,6 +3770,10 @@ async function fetchAirspace() {
 }
 
 async function fetchTraffic({ force = false } = {}) {
+  if (scratchpadPaused) {
+    nextTrafficFetchAt = Date.now() + 1000;
+    return;
+  }
   if (trafficFetchInFlight) return;
   if (!force && Date.now() < nextTrafficFetchAt) return;
 
@@ -3644,13 +3790,15 @@ async function fetchTraffic({ force = false } = {}) {
     updateDataSourceIndicator(data);
     if (data.stale) {
       const age = Number.isFinite(Number(data.ageSeconds)) ? `${Math.round(Number(data.ageSeconds))}s old` : "stale";
-      statusEl.textContent = `${lastDataSource} receiver waiting. Last packet ${age}.`;
+      setStatusText(`${lastDataSource} receiver waiting. Last packet ${age}.`);
     } else {
-      statusEl.textContent = gpsActive
-        ? `${lastDataSource} traffic active. GPS center at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.${offlineDataNotice()}`
-        : aircraft.length
-          ? `${lastDataSource} traffic active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.${offlineDataNotice()}`
-          : `${lastDataSource} traffic returned no aircraft for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.${offlineDataNotice()}`;
+      setStatusText(
+        gpsActive
+          ? `${lastDataSource} traffic active. GPS center at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.${offlineDataNotice()}`
+          : aircraft.length
+            ? `${lastDataSource} traffic active for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.${offlineDataNotice()}`
+            : `${lastDataSource} traffic returned no aircraft for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.${offlineDataNotice()}`
+      );
     }
     updateTrackedAircraftHistory(aircraft);
     resolveMissingAircraftTypes(aircraft);
@@ -3665,7 +3813,7 @@ async function fetchTraffic({ force = false } = {}) {
     scheduleNextTrafficFetch({ failed: true });
     const retrySeconds = Math.max(1, Math.round((nextTrafficFetchAt - Date.now()) / 1000));
     const keepDataHint = aircraft.length ? " Keeping last radar picture." : offlineDataNotice();
-    statusEl.textContent = `ADS-B feed unavailable: ${error.message}. Retrying in ${retrySeconds}s.${keepDataHint}`;
+    setStatusText(`ADS-B feed unavailable: ${error.message}. Retrying in ${retrySeconds}s.${keepDataHint}`);
   } finally {
     trafficFetchInFlight = false;
   }
@@ -3674,12 +3822,14 @@ async function fetchTraffic({ force = false } = {}) {
   updateProximityAlert();
 }
 
-function renderList() {
+function renderList({ force = false } = {}) {
+  if (!force && shell.classList.contains("panel-collapsed")) return;
+
   lastUpdateEl.textContent = lastFetchAt
     ? new Date(lastFetchAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
     : "No sweep yet";
 
-  const sorted = visibleAircraft()
+  const sorted = displayAircraft()
     .map((plane) => ({
       ...plane,
       distance: milesBetween(center.lat, center.lon, plane.lat, plane.lon)
@@ -3909,7 +4059,7 @@ function drawAirspace(scope) {
     B: { stroke: "rgba(87, 185, 255, 0.92)", fill: "rgba(87, 185, 255, 0.06)", dash: [] },
     C: { stroke: "rgba(255, 88, 232, 0.82)", fill: "rgba(255, 88, 232, 0.045)", dash: [] },
     D: { stroke: "rgba(35, 96, 202, 0.92)", fill: "rgba(35, 96, 202, 0.045)", dash: [10, 13] },
-    E: { stroke: "rgba(137, 204, 255, 0.66)", fill: "rgba(137, 204, 255, 0.025)", dash: [3, 8] }
+    SUA: { stroke: "rgba(255, 176, 60, 0.86)", fill: "rgba(255, 176, 60, 0.035)", dash: [14, 8, 3, 8] }
   };
 
   ctx.save();
@@ -3922,7 +4072,7 @@ function drawAirspace(scope) {
   ctx.lineJoin = "round";
 
   for (const airspace of airspaces) {
-    if (!visibleClasses.has(airspace.classCode)) continue;
+    if (!airspaceMatchesSelection(airspace, visibleClasses)) continue;
     const style = styles[airspace.classCode] || styles.D;
     const labelPoints = [];
 
@@ -3934,7 +4084,7 @@ function drawAirspace(scope) {
       if (ring.length < 2) continue;
       const projectedRing = ring.map((point) => project(point.lat, point.lon, scope));
       labelPoints.push(...projectedRing);
-      drawAirspaceRingPath(projectedRing, ["B", "C", "D", "E"].includes(airspace.classCode));
+      drawAirspaceRingPath(projectedRing);
       ctx.fill();
       ctx.stroke();
     }
@@ -3942,7 +4092,8 @@ function drawAirspace(scope) {
     const inScope = labelPoints.filter((point) => point.distance <= radiusMiles * 1.05);
     if (showRadarData && inScope.length) {
       const labelPoint = inScope[Math.floor(inScope.length / 2)];
-      const label = `${airspace.classCode} ${airspace.lower}/${airspace.upper}`;
+      const airspaceLabel = airspace.classCode === "SUA" ? airspace.typeCode || "SUA" : airspace.classCode;
+      const label = `${airspaceLabel} ${airspace.lower}/${airspace.upper}`;
       const labelX = Math.min(scope.width - 76, Math.max(8, labelPoint.x + 5));
       const labelY = Math.min(scope.height - 12, Math.max(18, labelPoint.y - 5));
       if (intersectsAircraftText(textBox(labelX, labelY, label, 14))) continue;
@@ -3965,27 +4116,11 @@ function drawAirspaceRingPath(points, smooth = false) {
     cleanPoints.pop();
   }
 
-  if (!smooth || cleanPoints.length < 4) {
-    cleanPoints.forEach((point, index) => {
-      if (index === 0) ctx.moveTo(point.x, point.y);
-      else ctx.lineTo(point.x, point.y);
-    });
-    ctx.closePath();
-    return;
-  }
-
-  const midpoint = (a, b) => ({
-    x: (a.x + b.x) / 2,
-    y: (a.y + b.y) / 2
-  });
-  const last = cleanPoints[cleanPoints.length - 1];
-  const first = cleanPoints[0];
-  const start = midpoint(last, first);
-  ctx.moveTo(start.x, start.y);
+  // Airspace boundaries must honor FAA vertices exactly. The offline data is
+  // already granular enough for arcs; canvas smoothing would round legal corners.
   cleanPoints.forEach((point, index) => {
-    const next = cleanPoints[(index + 1) % cleanPoints.length];
-    const mid = midpoint(point, next);
-    ctx.quadraticCurveTo(point.x, point.y, mid.x, mid.y);
+    if (index === 0) ctx.moveTo(point.x, point.y);
+    else ctx.lineTo(point.x, point.y);
   });
   ctx.closePath();
 }
@@ -4144,7 +4279,7 @@ function collectAircraftContacts(scope, now) {
     else normalContacts.push(contact);
   }
 
-  for (const plane of visibleAircraft()) {
+  for (const plane of displayAircraft()) {
     if (!shouldPredictAircraft(plane)) continue;
     const key = aircraftKey(plane);
     if (seenKeys.has(key)) continue;
@@ -4336,8 +4471,8 @@ function drawArcOwnship(scope) {
 }
 
 function drawSweep(scope, angle) {
-  const trailSegments = reducedLoad ? 12 : 28;
-  const trailWidth = reducedLoad ? 0.9 : 1.35;
+  const trailSegments = performanceMode === "cool" ? 7 : reducedLoad ? 12 : 28;
+  const trailWidth = performanceMode === "cool" ? 0.64 : reducedLoad ? 0.9 : 1.35;
   const palette = sweepPalettes[sweepColor] || sweepPalettes.green;
   ctx.save();
   ctx.translate(scope.cx, scope.cy);
@@ -4345,7 +4480,7 @@ function drawSweep(scope, angle) {
   for (let index = 0; index < trailSegments; index += 1) {
     const progress = index / trailSegments;
     const segmentAngle = angle - progress * trailWidth;
-    const alpha = (1 - progress) ** 2 * (reducedLoad ? 0.14 : 0.2);
+    const alpha = (1 - progress) ** 2 * (performanceMode === "cool" ? 0.1 : reducedLoad ? 0.14 : 0.2);
     const innerRadius = scope.radius * 0.04;
 
     ctx.beginPath();
@@ -4536,7 +4671,7 @@ function drawWeatherSector(scope, sweepBearing, sweepProgress) {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = "850 12px ui-monospace, SFMono-Regular, Consolas, monospace";
-  const tickStep = reducedLoad ? 10 : 5;
+  const tickStep = performanceMode === "cool" ? 15 : reducedLoad ? 10 : 5;
   for (let offset = -wxSectorDegrees; offset <= wxSectorDegrees; offset += tickStep) {
     const angle = screenAngleForBearing(weatherForwardBearing() + offset);
     const labeled = offset % 10 === 0;
@@ -4585,11 +4720,11 @@ function drawWeatherSector(scope, sweepBearing, sweepProgress) {
   ctx.arc(0, 0, scope.radius, leftAngle, rightAngle, false);
   ctx.closePath();
   ctx.clip();
-  const trailSegments = reducedLoad ? 10 : 22;
+  const trailSegments = performanceMode === "cool" ? 6 : reducedLoad ? 10 : 22;
   for (let index = 0; index < trailSegments; index += 1) {
     const progress = index / Math.max(1, trailSegments - 2);
     const segmentAngle = sweepAngle + trailDirection * progress * 0.52;
-    const alpha = (1 - progress) ** 2 * (reducedLoad ? 0.16 : 0.24);
+    const alpha = (1 - progress) ** 2 * (performanceMode === "cool" ? 0.11 : reducedLoad ? 0.16 : 0.24);
     ctx.beginPath();
     ctx.moveTo(0, 0);
     ctx.arc(0, 0, scope.radius, segmentAngle - 0.02, segmentAngle + 0.02);
@@ -4620,10 +4755,38 @@ function drawHud(scope) {
   ctx.restore();
 }
 
+function scheduleRender() {
+  if (scratchpadPaused || renderLoopScheduled) return;
+  renderLoopScheduled = true;
+  requestAnimationFrame(render);
+}
+
+function setScratchpadPaused(paused) {
+  scratchpadPaused = Boolean(paused);
+  if (scratchpadPaused) {
+    renderLoopScheduled = false;
+    if (performanceTelemetry) {
+      performanceTelemetry.dataset.notice = "Radar rendering and feed refresh paused while the ATC pad is open.";
+    }
+    updatePerformanceTelemetry();
+    return;
+  }
+
+  if (performanceTelemetry?.dataset.notice?.includes("ATC pad")) {
+    delete performanceTelemetry.dataset.notice;
+  }
+  lastRenderedAt = 0;
+  nextTrafficFetchAt = 0;
+  scheduleRender();
+}
+
 function render(now) {
-  const targetFrameMs = reducedLoad ? 1000 / 24 : 0;
+  renderLoopScheduled = false;
+  if (scratchpadPaused) return;
+
+  const targetFrameMs = 1000 / performanceModeConfig().fps;
   if (targetFrameMs && lastRenderedAt && now - lastRenderedAt < targetFrameMs) {
-    requestAnimationFrame(render);
+    scheduleRender();
     return;
   }
   lastRenderedAt = now;
@@ -4704,7 +4867,7 @@ function render(now) {
   updateArcHeadingOverrideControl();
   recordRenderStats(frameStartedAt, now);
 
-  requestAnimationFrame(render);
+  scheduleRender();
 }
 
 function setRange(nextRange) {
@@ -4791,14 +4954,33 @@ function setWeatherMode(enabled) {
   previousSweepAngle = null;
 }
 
-function setPrecipitationLayer(enabled) {
-  showPrecipitation = Boolean(enabled);
+function setWxDisplayMode(mode, { persist = true } = {}) {
+  wxDisplayMode = ["off", "on", "wxOnly"].includes(mode) ? mode : "off";
+  showPrecipitation = wxDisplayMode !== "off";
+  if (persist) window.localStorage.setItem("ADSB_RADAR_WX_DISPLAY_MODE", wxDisplayMode);
+
   if (wxToggle) {
-    wxToggle.classList.toggle("active", showPrecipitation);
+    wxToggle.classList.toggle("active", wxDisplayMode === "on");
+    wxToggle.classList.toggle("wx-only", wxDisplayMode === "wxOnly");
     wxToggle.setAttribute("aria-pressed", String(showPrecipitation));
-    wxToggle.setAttribute("aria-label", showPrecipitation ? "Hide precipitation layer" : "Show precipitation layer");
+    wxToggle.setAttribute(
+      "aria-label",
+      wxDisplayMode === "off"
+        ? "Show precipitation layer"
+        : wxDisplayMode === "on"
+          ? "Show precipitation without normal traffic"
+          : "Hide precipitation layer and restore traffic display"
+    );
   }
+  shell.classList.toggle("wx-traffic-hidden", wxDisplayMode === "wxOnly");
   if (showPrecipitation) ensureWeatherImage();
+  renderList();
+  updateWxNearestTarget();
+}
+
+function cycleWxDisplayMode() {
+  const nextMode = wxDisplayMode === "off" ? "on" : wxDisplayMode === "on" ? "wxOnly" : "off";
+  setWxDisplayMode(nextMode);
 }
 
 rangeButtons.addEventListener("click", (event) => {
@@ -4838,7 +5020,7 @@ radarModeToggle?.addEventListener("click", () => {
 });
 
 wxToggle?.addEventListener("click", () => {
-  setPrecipitationLayer(!showPrecipitation);
+  cycleWxDisplayMode();
 });
 
 wxRangeButton?.addEventListener("click", () => {
@@ -5094,7 +5276,7 @@ function startGpsTracking() {
       latInput.value = lat.toFixed(4);
       lonInput.value = lon.toFixed(4);
       center = { lat, lon };
-      resetWeatherImage();
+      resetWeatherImageIfMoved(previousCenter, center);
       statusEl.textContent = `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
       const now = Date.now();
       if (!lastGpsTrailAt || now - lastGpsTrailAt >= 30000) {
@@ -5252,16 +5434,16 @@ radarDataToggle.addEventListener("change", () => {
   showRadarData = radarDataToggle.checked;
 });
 
-reducedLoadToggle?.addEventListener("change", () => {
-  setReducedLoad(Boolean(reducedLoadToggle.checked));
+performanceModeSelect?.addEventListener("change", () => {
+  setPerformanceMode(performanceModeSelect.value);
 });
 
 radarSoundStyleSelect.value = radarSoundStyle;
 if (settingsVersionEl) settingsVersionEl.textContent = APP_ROLLOUT_VERSION;
 setLightTheme(lightTheme);
-setReducedLoad(reducedLoad);
+setPerformanceMode(performanceMode);
 setWeatherMode(false);
-setPrecipitationLayer(showPrecipitation);
+setWxDisplayMode(wxDisplayMode, { persist: false });
 updateAltitudeBracketButton();
 updateTrackingControls();
 installRadarAudioRecovery();
@@ -5375,19 +5557,34 @@ function updateCoordinateVisibility() {
 }
 
 function refreshNetworkFeeds() {
+  if (scratchpadPaused) return;
   nextTrafficFetchAt = 0;
   fetchTraffic({ force: true });
   resetWeatherImage();
   if (showPrecipitation) ensureWeatherImage();
 }
 
+window.addEventListener("adsb-scratchpad-pause", (event) => {
+  setScratchpadPaused(Boolean(event.detail?.paused));
+});
+
 window.addEventListener("resize", resizeCanvas);
 window.addEventListener("resize", updateProximityAlert);
 window.addEventListener("resize", resizeQuickNotesCanvas);
+window.visualViewport?.addEventListener("resize", resizeCanvas);
+window.visualViewport?.addEventListener("scroll", resizeCanvas);
+window.addEventListener("orientationchange", () => {
+  window.setTimeout(resizeCanvas, 80);
+  window.setTimeout(resizeCanvas, 320);
+});
+window.addEventListener("pageshow", resizeCanvas);
 window.addEventListener("online", refreshNetworkFeeds);
 window.addEventListener("focus", refreshNetworkFeeds);
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) refreshNetworkFeeds();
+  if (!document.hidden) {
+    resizeCanvas();
+    refreshNetworkFeeds();
+  }
 });
 if ("ResizeObserver" in window && radarWrap) {
   const radarResizeObserver = new ResizeObserver(() => {
@@ -5411,4 +5608,4 @@ if (!initialCenterApplied) {
   fetchAirspace();
   fetchTraffic({ force: true });
 }
-requestAnimationFrame(render);
+scheduleRender();

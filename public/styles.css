@@ -50,7 +50,7 @@ body.native-app .shell {
 }
 
 body.native-app .radar-wrap {
-  contain: size layout paint;
+  contain: layout paint;
 }
 
 body::before {
@@ -627,6 +627,21 @@ select {
   color: var(--green);
 }
 
+.wx-toggle.wx-only {
+  border-color: rgba(98, 213, 255, 0.98);
+  background: #032a48;
+  color: #62d5ff;
+  animation: wx-only-blink 820ms steps(2, end) infinite;
+}
+
+@keyframes wx-only-blink {
+  50% {
+    border-color: rgba(98, 213, 255, 0.28);
+    background: rgba(3, 42, 72, 0.34);
+    color: rgba(98, 213, 255, 0.42);
+  }
+}
+
 .wx-toggle:hover {
   filter: brightness(1.16);
 }
@@ -647,6 +662,12 @@ select {
 .shell.light-theme .panel-toggle,
 .shell.light-theme .legend-button {
   box-shadow: 0 12px 26px rgba(34, 67, 54, 0.22);
+}
+
+.shell.light-theme .wx-toggle.wx-only {
+  border-color: #004c9f;
+  background: rgba(0, 92, 170, 0.22);
+  color: #003c7e;
 }
 
 .shell.light-theme .panel,
@@ -1904,6 +1925,39 @@ body.light-theme .legend-trend {
 .switch-row input:checked::after {
   transform: translateX(22px);
   background: var(--green);
+}
+
+.performance-mode-row {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  border: 1px solid rgba(132, 255, 194, 0.2);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.2);
+  color: var(--text);
+  padding: 6px 10px 6px 12px;
+  text-transform: none;
+}
+
+.performance-mode-row select {
+  min-width: 168px;
+  min-height: 32px;
+  border: 1px solid rgba(132, 255, 194, 0.28);
+  border-radius: 6px;
+  background: rgba(2, 8, 5, 0.82);
+  color: var(--text);
+  font: 850 0.72rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.02em;
+  padding: 0 8px;
+  text-transform: uppercase;
+}
+
+.shell.light-theme .performance-mode-row select {
+  background: rgba(245, 250, 247, 0.9);
+  color: #073227;
 }
 
 .performance-telemetry {
