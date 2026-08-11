@@ -14,6 +14,14 @@
   --shadow: rgba(0, 0, 0, 0.42);
 }
 
+:root.android-web,
+body.android-web {
+  --green: #00ff66;
+  --grid: rgba(0, 255, 102, 0.24);
+  --grid-soft: rgba(0, 255, 102, 0.09);
+  --danger: #ff1744;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -344,7 +352,7 @@ select {
 .proximity-alert.solid {
   animation: none !important;
   opacity: 1 !important;
-  filter: saturate(1.05) !important;
+  filter: saturate(1.18) contrast(1.08) !important;
 }
 
 .traffic-alert-main,
@@ -428,12 +436,27 @@ select {
   text-shadow: 0 0 12px rgba(255, 240, 74, 0.7);
 }
 
+body.android-web .proximity-alert.manual-focus.threat-focus {
+  border-color: rgba(255, 255, 255, 0.82);
+  background: #d5001f;
+  color: #ffffff;
+  text-shadow: 0 0 14px rgba(255, 255, 255, 0.72);
+}
+
 .shell.panel-collapsed .proximity-alert.diverging:not([hidden]) {
   border-color: rgba(132, 255, 194, 0.96);
   background: #006932;
   box-shadow: 0 16px 38px rgba(0, 0, 0, 0.42), inset 0 0 26px rgba(132, 255, 194, 0.16);
   color: #dffff0;
   text-shadow: 0 0 12px rgba(132, 255, 194, 0.62);
+}
+
+body.android-web .shell.panel-collapsed .proximity-alert.diverging:not([hidden]) {
+  border-color: rgba(0, 255, 102, 0.98);
+  background: #007a2b;
+  color: #effff5;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.48), inset 0 0 24px rgba(0, 255, 102, 0.18);
+  text-shadow: 0 0 13px rgba(0, 255, 102, 0.6);
 }
 
 .panel {
@@ -1148,6 +1171,15 @@ select {
   text-align: center;
   text-shadow: 0 0 12px rgba(255, 240, 74, 0.7);
   text-transform: uppercase;
+}
+
+body.android-web .shell.wx-mode .proximity-alert:not([hidden]),
+body.android-web .shell.panel-collapsed:not(.wx-mode) .proximity-alert:not([hidden]) {
+  border-color: rgba(255, 255, 255, 0.82);
+  background: #d5001f;
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.5), inset 0 0 24px rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  text-shadow: 0 0 14px rgba(255, 255, 255, 0.72);
 }
 
 @media (min-width: 1181px) {
@@ -2309,6 +2341,14 @@ body.light-theme .legend-trend {
     text-transform: uppercase;
     padding: 12px 56px 12px 14px;
     animation: traffic-alert-flash 360ms steps(2, end) infinite;
+  }
+
+  body.android-web .shell.panel-collapsed .proximity-alert:not([hidden]) {
+    border-color: rgba(255, 255, 255, 0.82);
+    background: #d5001f;
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.5), inset 0 0 24px rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+    text-shadow: 0 0 14px rgba(255, 255, 255, 0.72);
   }
 
   .shell.panel-collapsed .proximity-alert.manual-focus:not([hidden]) {

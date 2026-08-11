@@ -1,6 +1,6 @@
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.08.11-r1";
+const APP_ROLLOUT_VERSION = "2026.08.11-r2";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -77,10 +77,34 @@ const radarFadeMs = sweepSeconds * 3 * 1000;
 const allowedRanges = [2, 5, 10, 15, 20, 50, 100];
 const gpsTrackThresholdKts = 5 * 0.868976;
 const closeRangeNearestTargetMiles = 20;
+const isAndroidWeb = /\bAndroid\b/i.test(window.navigator.userAgent || "") && !window.webkit?.messageHandlers?.stratus;
+if (isAndroidWeb) {
+  document.body.classList.add("android-web");
+  document.documentElement.classList.add("android-web");
+}
+const platformColors = isAndroidWeb
+  ? {
+      green: "#00ff66",
+      greenRgb: "0, 255, 102",
+      red: "#ff1744",
+      redRgb: "255, 23, 68",
+      redFill: "#d5001f",
+      safeGreen: "rgba(0, 255, 102, 0.96)",
+      conflictRed: "rgba(255, 23, 68, 0.98)"
+    }
+  : {
+      green: "#4dff9b",
+      greenRgb: "77, 255, 155",
+      red: "#ff505c",
+      redRgb: "255, 80, 92",
+      redFill: "#9e0010",
+      safeGreen: "rgba(132, 255, 194, 0.9)",
+      conflictRed: "rgba(255, 80, 92, 0.95)"
+    };
 const sweepPalettes = {
   green: {
-    trail: "77, 255, 155",
-    line: "rgba(148, 255, 199, 0.96)"
+    trail: platformColors.greenRgb,
+    line: isAndroidWeb ? "rgba(0, 255, 102, 0.98)" : "rgba(148, 255, 199, 0.96)"
   },
   orange: {
     trail: "255, 155, 64",
@@ -103,8 +127,8 @@ const radarThemes = {
     lowTrail: "rgba(98, 213, 255, 0.45)",
     navTrail: "rgba(233, 255, 243, 0.72)",
     navProjection: "rgba(255, 255, 255, 0.82)",
-    verticalTrendSafe: "rgba(132, 255, 194, 0.9)",
-    verticalTrendConflict: "rgba(255, 80, 92, 0.95)",
+    verticalTrendSafe: platformColors.safeGreen,
+    verticalTrendConflict: platformColors.conflictRed,
     arcPrimary: "rgba(233, 255, 243, 0.82)",
     arcSecondary: "rgba(233, 255, 243, 0.34)",
     arcText: "rgba(233, 255, 243, 0.78)",
@@ -366,7 +390,13 @@ let reducedLoad = performanceMode !== "fast";
 let lightTheme = window.localStorage.getItem("ADSB_RADAR_THEME") === "light";
 let radarSoundsEnabled = true;
 let radarSoundStyle = "softTick";
-let orientationMode = "north";
+const savedOrientationMode = window.localStorage.getItem("ADSB_RADAR_ORIENTATION");
+const deviceCanReportCompass = typeof DeviceOrientationEvent !== "undefined";
+let orientationMode = ["north", "track"].includes(savedOrientationMode)
+  ? savedOrientationMode
+  : deviceCanReportCompass
+    ? "track"
+    : "north";
 let weatherMode = false;
 let previousRangeBeforeWx = 10;
 let previousOrientationBeforeArc = "north";
@@ -2518,8 +2548,8 @@ function altitudeColorStyle(plane) {
   const altitude = Number(plane.altitude);
   if (Number.isFinite(altitude) && altitude >= 18000) {
     return {
-      target: "#ff505c",
-      trail: "rgba(255, 80, 92, 0.7)"
+      target: platformColors.red,
+      trail: `rgba(${platformColors.redRgb}, ${isAndroidWeb ? 0.82 : 0.7})`
     };
   }
   if (Number.isFinite(altitude) && altitude >= 10000) {
@@ -4188,9 +4218,9 @@ function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   }
   ctx.fillStyle =
     plane.emergency && plane.emergency !== "none"
-      ? "#ff6a75"
+      ? platformColors.red
       : highlightMix > 0
-        ? `rgba(255, 54, 72, ${0.42 + highlightMix * 0.58})`
+        ? `rgba(${platformColors.redRgb}, ${isAndroidWeb ? 0.62 + highlightMix * 0.38 : 0.42 + highlightMix * 0.58})`
         : altitudeColorStyle(plane).target;
   ctx.beginPath();
   ctx.moveTo(10, 0);
@@ -5156,7 +5186,8 @@ function trackedAircraftMetrics(plane) {
 }
 
 function trackedAircraftColor(alpha = 1) {
-  return lightTheme ? `rgba(215, 28, 40, ${alpha})` : `rgba(77, 255, 155, ${alpha})`;
+  if (isAndroidWeb && !lightTheme) return `rgba(${platformColors.greenRgb}, ${alpha})`;
+  return lightTheme ? `rgba(215, 28, 40, ${alpha})` : `rgba(${platformColors.greenRgb}, ${alpha})`;
 }
 
 function updateTrackedAircraftAlert() {
@@ -5442,6 +5473,7 @@ radarSoundStyleSelect.value = radarSoundStyle;
 if (settingsVersionEl) settingsVersionEl.textContent = APP_ROLLOUT_VERSION;
 setLightTheme(lightTheme);
 setPerformanceMode(performanceMode);
+setOrientationMode(orientationMode, { persist: Boolean(savedOrientationMode) });
 setWeatherMode(false);
 setWxDisplayMode(wxDisplayMode, { persist: false });
 updateAltitudeBracketButton();
