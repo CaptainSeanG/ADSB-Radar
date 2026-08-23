@@ -7151,7 +7151,7 @@ function trimTrackHistories() {
   }
 }
 
-settingsOpen.addEventListener("click", openSettings);
+settingsOpen?.addEventListener("click", openSettings);
 radarSettingsOpen?.addEventListener("click", openSettings);
 settingsClose.addEventListener("click", closeSettings);
 trackingOpen?.addEventListener("click", openTracking);
@@ -7226,8 +7226,7 @@ aircraftClose.addEventListener("click", closeAircraftDetails);
 aircraftTrack?.addEventListener("click", () => {
   const key = aircraftModal.dataset.aircraftKey;
   if (!key || !trackTrafficTarget(key)) return;
-  const trackedPlane = findTrackedAircraft();
-  if (trackedPlane) openAircraftDetails(predictedAircraftForDisplay(trackedPlane));
+  closeAircraftDetails();
 });
 
 aircraftModal.addEventListener("click", (event) => {
