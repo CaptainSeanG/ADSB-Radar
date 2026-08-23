@@ -2863,6 +2863,10 @@ body.light-theme .legend-trend {
 
 /* Landscape cockpit layout keeps the radar circle clear of the main actions. */
 @media (orientation: landscape) and (max-height: 900px) {
+  .panel > header h1 {
+    margin-top: 9px;
+  }
+
   .radar-top-actions {
     top: max(18px, calc(env(safe-area-inset-top) + 8px));
     right: 50%;

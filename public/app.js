@@ -414,7 +414,9 @@ let sweepColor = "orange";
 let showGroundTraffic = false;
 let showFlightLevelsTraffic = true;
 let showRadarData = true;
-let showSmallAirports = true;
+const smallAirportsPreferenceKey = "ADSB_RADAR_SMALL_AIRPORTS";
+const savedSmallAirportsPreference = window.localStorage.getItem(smallAirportsPreferenceKey);
+let showSmallAirports = savedSmallAirportsPreference === "true";
 const savedWxDisplayMode = window.localStorage.getItem("ADSB_RADAR_WX_DISPLAY_MODE");
 let wxDisplayMode = ["off", "on", "wxOnly"].includes(savedWxDisplayMode) ? savedWxDisplayMode : "on";
 let showPrecipitation = wxDisplayMode !== "off";
@@ -537,7 +539,13 @@ let manualThreatFocusKey = "";
 let returnToArcAfterManualThreat = false;
 let dismissedTrafficAlertKey = "";
 let wxNearestTargetKey = "";
-let altitudeBracketFt = null;
+const altitudeBracketPreferenceKey = "ADSB_RADAR_ALTITUDE_BRACKET_FT";
+const savedAltitudeBracketValue = window.localStorage.getItem(altitudeBracketPreferenceKey);
+const savedAltitudeBracket = Number(savedAltitudeBracketValue);
+let altitudeBracketFt =
+  savedAltitudeBracketValue !== null && [0, 500, 1000].includes(savedAltitudeBracket)
+    ? savedAltitudeBracket || null
+    : 1000;
 let trackedAircraft = loadTrackedAircraft();
 let trackedAircraftClearedUntil = 0;
 let quickNoteStrokes = [];
@@ -715,7 +723,7 @@ function trackTrafficTarget(key) {
   if (!plane || !nNumber) return false;
 
   if (!trackedAircraft || trackedAircraft.nNumber !== nNumber) {
-    clearTrackedAircraftHistory(trackedAircraft);
+    preserveTrackedAircraftHistory(trackedAircraft);
   }
   trackedAircraft = {
     nNumber,
@@ -2242,6 +2250,7 @@ function updateAltitudeBracketButton() {
 
 function cycleAltitudeBracket() {
   altitudeBracketFt = altitudeBracketFt === 500 ? 1000 : altitudeBracketFt === 1000 ? null : 500;
+  window.localStorage.setItem(altitudeBracketPreferenceKey, altitudeBracketFt === null ? "0" : String(altitudeBracketFt));
   updateAltitudeBracketButton();
   updateProximityAlert();
 }
@@ -2722,6 +2731,10 @@ function aircraftSpeed(plane) {
 
 function breadcrumbLimitForAircraft(plane) {
   if (isTrackedAircraft(plane)) return trackedBreadcrumbLimit;
+  return normalBreadcrumbLimitForAircraft(plane);
+}
+
+function normalBreadcrumbLimitForAircraft(plane) {
   const speed = aircraftSpeed(plane);
   const speedFactor = speed <= 60 ? 0.45 : speed <= 160 ? 0.7 : speed <= 300 ? 1 : speed <= 450 ? 1.35 : 1.7;
   const slowAircraftFactor = speed <= 160 ? slowAircraftBreadcrumbMultiplier : 1;
@@ -2920,15 +2933,16 @@ function milesToNauticalMiles(miles) {
   return miles * 0.868976;
 }
 
-function clearTrackedAircraftHistory(state = trackedAircraft) {
+function preserveTrackedAircraftHistory(state = trackedAircraft, trackedPlane = findTrackedAircraft()) {
   if (!state?.nNumber) return;
 
-  for (const [key] of tracks.entries()) {
+  for (const [key, history] of tracks.entries()) {
     const livePlane = radarBlips.get(key) || aircraft.find((candidate) => aircraftKey(candidate) === key);
     const keyMatches = normalizeNNumber(key) === state.nNumber;
     const planeMatches = livePlane ? trackedAircraftKeyValue(livePlane) === state.nNumber : false;
     if (keyMatches || planeMatches) {
-      tracks.delete(key);
+      const referencePlane = livePlane || (planeMatches ? trackedPlane : null) || trackedPlane || {};
+      tracks.set(key, history.slice(-normalBreadcrumbLimitForAircraft(referencePlane)));
     }
   }
 }
@@ -5810,7 +5824,11 @@ function drawTrack(scope, plane, alpha = 1) {
   ctx.clip();
   ctx.globalAlpha = alpha;
   const tracked = isTrackedAircraft(plane);
-  ctx.strokeStyle = tracked ? "rgba(255, 157, 53, 0.9)" : altitudeColorStyle(plane).trail;
+  ctx.strokeStyle = tracked
+    ? lightTheme
+      ? "rgba(198, 76, 0, 0.94)"
+      : "rgba(255, 157, 53, 0.9)"
+    : altitudeColorStyle(plane).trail;
   ctx.lineWidth = tracked ? 2.4 : 2;
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
@@ -6835,6 +6853,7 @@ airspaceToggles.addEventListener("change", () => {
 
 smallAirportsToggle?.addEventListener("change", () => {
   showSmallAirports = smallAirportsToggle.checked;
+  window.localStorage.setItem(smallAirportsPreferenceKey, String(showSmallAirports));
   airportControlledAirspaceCache.clear();
   lastAirspaceKey = "";
   if (!showSmallAirports) fetchAirspace();
@@ -6893,7 +6912,7 @@ function clearTrackedAircraft() {
   const previousTracking = trackedAircraft ? { ...trackedAircraft } : null;
   const trackedPlane = findTrackedAircraft();
   if (trackedPlane) aircraftHighlights.delete(aircraftKey(trackedPlane));
-  clearTrackedAircraftHistory(trackedAircraft);
+  preserveTrackedAircraftHistory(trackedAircraft, trackedPlane);
   trackedAircraft = null;
   suppressTrackingRestore();
   saveTrackedAircraft();
@@ -7261,7 +7280,7 @@ trackingForm?.addEventListener("submit", (event) => {
   }
 
   if (!trackedAircraft || trackedAircraft.nNumber !== nNumber) {
-    clearTrackedAircraftHistory(trackedAircraft);
+    preserveTrackedAircraftHistory(trackedAircraft);
   }
   trackedAircraft = { nNumber, criterion, value, isolate, alerted: false };
   saveTrackedAircraft();
@@ -7545,6 +7564,7 @@ if ("ResizeObserver" in window && radarWrap) {
 
 const initialCenterApplied = applySelectedAirport();
 applySavedAirspaceDefaults();
+if (smallAirportsToggle) smallAirportsToggle.checked = showSmallAirports;
 updateCoordinateVisibility();
 applyResponsivePanelMode({ initial: true });
 updateRangeIndicator();
