@@ -61,6 +61,10 @@ body.native-app .radar-wrap {
   contain: layout paint;
 }
 
+body.native-app {
+  touch-action: manipulation;
+}
+
 body::before {
   content: "";
   pointer-events: none;
@@ -136,6 +140,11 @@ select {
     inset 0 0 90px rgba(88, 255, 160, 0.08);
 }
 
+.radar-wrap,
+#radar {
+  touch-action: none;
+}
+
 .shell.light-theme .radar-wrap {
   border-color: rgba(74, 95, 84, 0.76);
   background:
@@ -208,6 +217,46 @@ select {
   mix-blend-mode: multiply;
 }
 
+.radar-top-actions {
+  position: absolute;
+  top: max(22px, calc(env(safe-area-inset-top) + 12px));
+  left: 50%;
+  z-index: 6;
+  display: flex;
+  gap: 8px;
+  transform: translateX(-50%);
+}
+
+.radar-top-actions button {
+  min-width: 76px;
+  min-height: 44px;
+  border: 1px solid rgba(132, 255, 194, 0.46);
+  border-radius: 7px;
+  background: rgba(3, 18, 12, 0.9);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
+  color: rgba(233, 255, 243, 0.92);
+  cursor: pointer;
+  font: 900 0.72rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.06em;
+  padding: 0 12px;
+  text-transform: uppercase;
+}
+
+.radar-top-actions button:hover,
+.radar-top-actions button:focus-visible,
+.radar-top-actions button.active {
+  border-color: var(--green);
+  background: rgba(5, 57, 31, 0.96);
+  color: var(--green);
+}
+
+.shell.light-theme .radar-top-actions button {
+  border-color: rgba(0, 74, 50, 0.48);
+  background: rgba(225, 239, 230, 0.94);
+  box-shadow: 0 10px 24px rgba(34, 67, 54, 0.2);
+  color: #063c2a;
+}
+
 .legend-button {
   position: absolute;
   top: 66px;
@@ -229,6 +278,31 @@ select {
   border-color: var(--green);
   background: rgba(77, 255, 155, 0.14);
   color: var(--text);
+}
+
+.range-indicator {
+  position: absolute;
+  left: 22px;
+  bottom: 58px;
+  z-index: 4;
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  border: 1px solid rgba(255, 207, 106, 0.48);
+  border-radius: 999px;
+  background: rgba(3, 8, 5, 0.82);
+  color: var(--amber);
+  font: 900 0.68rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.08em;
+  padding: 0 11px;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+.shell.light-theme .range-indicator {
+  border-color: rgba(0, 69, 120, 0.48);
+  background: rgba(232, 243, 236, 0.86);
+  color: #003c7e;
 }
 
 .data-source-indicator {
@@ -286,9 +360,16 @@ select {
 }
 
 .data-source-indicator.cellular .data-source-dot,
+.data-source-indicator.internet .data-source-dot,
 .legend-source-cellular {
   background: #2f7dff;
   color: #2f7dff;
+}
+
+.data-source-indicator.faa .data-source-dot,
+.legend-source-faa {
+  background: #31d7ff;
+  color: #31d7ff;
 }
 
 .data-source-indicator.offline .data-source-dot {
@@ -318,6 +399,7 @@ select {
   display: none;
   cursor: pointer;
   position: relative;
+  pointer-events: none;
   user-select: none;
 }
 
@@ -362,7 +444,7 @@ select {
 
 .traffic-alert-main {
   line-height: 1.05;
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .traffic-alert-number {
@@ -417,7 +499,6 @@ select {
 
 .proximity-alert.manual-focus {
   padding-right: 56px;
-  pointer-events: auto;
 }
 
 .proximity-alert.manual-focus:not(.threat-focus) {
@@ -596,31 +677,31 @@ body.android-web .shell.panel-collapsed .proximity-alert.diverging:not([hidden])
 }
 
 .theme-toggle {
-  top: 32px;
+  top: max(42px, calc(env(safe-area-inset-top) + 22px));
   right: 74px;
   width: 42px;
   min-width: 42px;
 }
 
 .radar-mode-toggle {
-  top: 74px;
+  top: max(84px, calc(env(safe-area-inset-top) + 64px));
 }
 
 .wx-toggle {
-  top: 116px;
+  top: max(126px, calc(env(safe-area-inset-top) + 106px));
 }
 
 .shell.wx-mode .radar-mode-toggle {
-  top: 32px;
+  top: max(42px, calc(env(safe-area-inset-top) + 22px));
 }
 
 .shell.wx-mode .theme-toggle {
-  top: 32px;
+  top: max(42px, calc(env(safe-area-inset-top) + 22px));
   right: 74px;
 }
 
 .shell.wx-mode .wx-toggle {
-  top: 74px;
+  top: max(84px, calc(env(safe-area-inset-top) + 64px));
 }
 
 .theme-toggle:hover,
@@ -746,8 +827,15 @@ body.android-web .shell.panel-collapsed .proximity-alert.diverging:not([hidden])
   background: rgba(177, 204, 190, 0.72);
 }
 
-.shell.light-theme .aircraft-row:hover {
+.shell.light-theme .aircraft-row:hover,
+.shell.light-theme .aircraft-summary:hover {
   background: rgba(0, 86, 55, 0.12);
+}
+
+.shell.light-theme .aircraft-action {
+  border-color: rgba(0, 92, 58, 0.42);
+  background: rgba(214, 236, 224, 0.9);
+  color: #00442c;
 }
 
 .wx-range-button {
@@ -1411,6 +1499,154 @@ select {
   outline: none;
 }
 
+.airport-search-control {
+  position: relative;
+}
+
+.airport-search-open {
+  display: flex;
+  min-height: 44px;
+  width: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  margin-top: 7px;
+  border: 1px solid rgba(133, 255, 194, 0.28);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  cursor: pointer;
+  padding: 11px 12px;
+  text-align: left;
+  touch-action: manipulation;
+}
+
+.airport-search-open span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#airportSelect {
+  display: none;
+}
+
+.airport-search-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  align-items: start;
+  justify-items: center;
+  background: rgba(0, 0, 0, 0.72);
+  padding: max(18px, env(safe-area-inset-top)) 14px max(18px, env(safe-area-inset-bottom));
+  overflow-y: auto;
+}
+
+.airport-search-modal[hidden] {
+  display: none;
+}
+
+.airport-search-dialog {
+  display: grid;
+  gap: 12px;
+  width: min(560px, 100%);
+  margin-top: min(12svh, 86px);
+  border: 1px solid rgba(132, 255, 194, 0.28);
+  border-radius: 10px;
+  background: rgba(5, 14, 11, 0.98);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.62);
+  padding: 16px;
+}
+
+.airport-search-dialog header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.airport-search-dialog h2 {
+  margin: 2px 0 0;
+  font-size: 1.3rem;
+}
+
+.airport-search-dialog .airport-search-results {
+  position: static;
+  max-height: min(44svh, 360px);
+}
+
+.airport-search-results {
+  position: absolute;
+  right: 0;
+  left: 0;
+  top: calc(100% - 4px);
+  z-index: 12;
+  display: grid;
+  gap: 4px;
+  max-height: min(42svh, 340px);
+  overflow: auto;
+  border: 1px solid rgba(132, 255, 194, 0.24);
+  border-radius: 7px;
+  background: rgba(4, 12, 9, 0.98);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.48);
+  padding: 6px;
+}
+
+.airport-search-results[hidden] {
+  display: none;
+}
+
+.airport-result {
+  display: grid;
+  gap: 2px;
+  min-height: 44px;
+  width: 100%;
+  border: 1px solid rgba(132, 255, 194, 0.12);
+  border-radius: 6px;
+  background: rgba(14, 31, 25, 0.92);
+  color: var(--text);
+  cursor: pointer;
+  padding: 8px 10px;
+  text-align: left;
+  touch-action: manipulation;
+}
+
+.airport-result:active,
+.airport-result:focus {
+  border-color: rgba(255, 207, 106, 0.74);
+  outline: none;
+}
+
+.airport-result strong {
+  color: var(--amber);
+  font-size: 0.88rem;
+}
+
+.airport-result span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.74rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell.light-theme .airport-search-results {
+  border-color: rgba(20, 68, 50, 0.28);
+  background: rgba(235, 245, 240, 0.99);
+}
+
+.shell.light-theme .airport-search-open,
+.shell.light-theme .airport-search-dialog {
+  border-color: rgba(0, 57, 40, 0.34);
+  background: rgba(232, 243, 236, 0.94);
+  color: var(--text);
+}
+
+.shell.light-theme .airport-result {
+  border-color: rgba(20, 68, 50, 0.15);
+  background: rgba(207, 226, 216, 0.96);
+}
+
 select {
   appearance: none;
   background:
@@ -1536,6 +1772,10 @@ fieldset {
   display: none;
 }
 
+#aircraftModal {
+  z-index: 50;
+}
+
 .settings-modal {
   width: min(440px, 100%);
   border: 1px solid rgba(132, 255, 194, 0.26);
@@ -1560,6 +1800,43 @@ fieldset {
   gap: 8px;
   color: var(--text);
   font-size: 1.15rem;
+}
+
+.aircraft-modal {
+  position: relative;
+}
+
+.aircraft-track-button {
+  display: block;
+  min-width: 92px;
+  min-height: 44px;
+  margin: 0 auto 10px;
+  border: 1px solid rgba(132, 255, 194, 0.64);
+  border-radius: 7px;
+  background: rgba(5, 57, 31, 0.92);
+  color: #e9fff3;
+  cursor: pointer;
+  font: 950 0.72rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  touch-action: manipulation;
+}
+
+.aircraft-track-button.active {
+  border-color: #62d5ff;
+  background: #083e7a;
+  color: #d8f2ff;
+}
+
+.aircraft-track-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.shell.light-theme .aircraft-track-button {
+  border-color: rgba(0, 82, 52, 0.68);
+  background: rgba(0, 82, 52, 0.14);
+  color: #003d29;
 }
 
 .device-thermal {
@@ -1632,6 +1909,15 @@ fieldset {
   color: var(--green);
 }
 
+.settings-disclaimer {
+  margin-top: 6px;
+  color: rgba(233, 255, 243, 0.68);
+  font-size: 0.66rem;
+  line-height: 1.35;
+  letter-spacing: 0.035em;
+  text-transform: none;
+}
+
 .settings-copyright {
   margin-top: 3px;
 }
@@ -1649,8 +1935,14 @@ fieldset {
   color: #005a3b;
 }
 
+.shell.light-theme .settings-disclaimer {
+  color: rgba(0, 42, 38, 0.76);
+}
+
 .legend-modal {
-  width: min(460px, 100%);
+  width: min(720px, 100%);
+  max-height: calc(100dvh - 24px);
+  padding: 14px;
 }
 
 .tracking-modal {
@@ -1676,25 +1968,62 @@ fieldset {
 
 .tracking-alert {
   position: absolute;
+  top: max(107px, calc(env(safe-area-inset-top) + 87px));
   left: 50%;
-  top: 22px;
   z-index: 7;
-  min-width: min(560px, calc(100% - 36px));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: fit-content;
+  max-width: min(420px, calc(100% - 160px));
   transform: translateX(-50%);
+  pointer-events: none;
   border: 1px solid rgba(77, 255, 155, 0.58);
   border-radius: 7px;
   background: rgba(0, 42, 25, 0.9);
   box-shadow: 0 18px 42px rgba(0, 0, 0, 0.38);
   color: #7dffb8;
-  padding: 12px 16px;
+  padding: 10px 14px;
   text-align: center;
-  font: 900 0.94rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  font: 900 1.08rem ui-monospace, SFMono-Regular, Consolas, monospace;
   letter-spacing: 0.05em;
   text-transform: uppercase;
 }
 
+.tracking-alert[hidden] {
+  display: none;
+}
+
+.tracking-alert-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42em;
+  min-width: 0;
+  white-space: nowrap;
+}
+
 .tracking-alert strong {
   color: #e9fff3;
+}
+
+.tracking-alert-clear {
+  flex: 0 0 auto;
+  min-width: 54px;
+  min-height: 34px;
+  border: 1px solid rgba(233, 255, 243, 0.86);
+  border-radius: 6px;
+  background: rgba(233, 255, 243, 0.16);
+  color: #e9fff3;
+  cursor: pointer;
+  pointer-events: auto;
+  font: 950 0.66rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.04em;
+}
+
+.tracking-alert-clear:active {
+  transform: translateY(1px);
+  background: rgba(233, 255, 243, 0.28);
 }
 
 .shell.light-theme .tracking-alert {
@@ -1707,6 +2036,12 @@ fieldset {
   color: #00160f;
 }
 
+.shell.light-theme .tracking-alert-clear {
+  border-color: rgba(0, 57, 40, 0.72);
+  background: rgba(0, 82, 52, 0.12);
+  color: #001f15;
+}
+
 .shell.tracking-active.panel-collapsed .bottom-range-buttons:not([hidden]) {
   top: 86px;
   bottom: auto;
@@ -1714,18 +2049,19 @@ fieldset {
 
 .legend-list {
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 8px;
 }
 
 .legend-item {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
+  grid-template-columns: 38px minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   border: 1px solid rgba(132, 255, 194, 0.15);
   border-radius: 7px;
   background: rgba(0, 0, 0, 0.18);
-  padding: 11px 12px;
+  padding: 7px 9px;
 }
 
 .legend-item strong,
@@ -1735,7 +2071,8 @@ fieldset {
 
 .legend-item strong {
   color: var(--text);
-  font-size: 0.9rem;
+  font-size: 0.8rem;
+  line-height: 1.15;
 }
 
 .legend-item strong span {
@@ -1743,10 +2080,10 @@ fieldset {
 }
 
 .legend-item div span {
-  margin-top: 2px;
+  margin-top: 1px;
   color: var(--muted);
-  font-size: 0.76rem;
-  line-height: 1.35;
+  font-size: 0.68rem;
+  line-height: 1.22;
 }
 
 .legend-aircraft {
@@ -1755,6 +2092,7 @@ fieldset {
   height: 18px;
   margin-left: 4px;
   clip-path: polygon(100% 50%, 0 12%, 20% 50%, 0 88%);
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 1)) drop-shadow(0 0 5px rgba(255, 255, 255, 0.82)) drop-shadow(0 0 9px rgba(98, 213, 255, 0.82));
 }
 
 .legend-aircraft-white {
@@ -1765,6 +2103,7 @@ fieldset {
 body.light-theme .legend-aircraft-white {
   background: #000000;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.26);
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 1)) drop-shadow(0 0 5px rgba(255, 255, 255, 0.94)) drop-shadow(0 0 10px rgba(0, 160, 220, 1));
 }
 
 .legend-aircraft-orange {
@@ -1817,7 +2156,8 @@ body.light-theme .legend-item strong span.day-legend-text {
 .legend-airspace,
 .legend-airspace-b,
 .legend-airspace-c,
-.legend-airspace-d {
+.legend-airspace-d,
+.legend-airspace-sua {
   display: block;
   width: 34px;
   height: 22px;
@@ -1836,6 +2176,12 @@ body.light-theme .legend-item strong span.day-legend-text {
 .legend-airspace-d {
   border: 2px dashed rgba(35, 96, 202, 0.94);
   border-radius: 50%;
+}
+
+.legend-airspace-sua {
+  border: 2px dashed rgba(255, 176, 60, 0.9);
+  border-radius: 45% 55% 48% 52%;
+  box-shadow: inset 0 0 8px rgba(255, 176, 60, 0.12), 0 0 7px rgba(255, 176, 60, 0.18);
 }
 
 .legend-runway {
@@ -2132,19 +2478,56 @@ body.light-theme .legend-trend {
 }
 
 .aircraft-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 8px;
+  padding: 8px;
+}
+
+.aircraft-summary {
   display: block;
   width: 100%;
   border: 0;
-  border-radius: 8px;
+  border-radius: 6px;
   background: transparent;
   color: inherit;
   cursor: pointer;
-  padding: 11px 12px;
+  padding: 5px 4px;
   text-align: left;
 }
 
-.aircraft-row:hover {
+.aircraft-row:hover,
+.aircraft-summary:hover {
   background: rgba(77, 255, 155, 0.08);
+}
+
+.aircraft-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 5px;
+  min-width: 58px;
+}
+
+.aircraft-action {
+  min-height: 32px;
+  border: 1px solid rgba(77, 255, 155, 0.48);
+  border-radius: 6px;
+  background: rgba(0, 42, 25, 0.7);
+  color: var(--green);
+  cursor: pointer;
+  font: 900 0.64rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.04em;
+}
+
+.aircraft-action:hover {
+  border-color: rgba(132, 255, 194, 0.88);
+  background: rgba(10, 78, 45, 0.82);
+}
+
+.aircraft-action:disabled {
+  opacity: 0.36;
+  cursor: not-allowed;
 }
 
 .plane-head {
@@ -2224,17 +2607,19 @@ body.light-theme .legend-trend {
   }
 
   body.native-app {
-    overflow: hidden;
+    overflow: auto;
   }
 
   body.native-app .shell {
-    height: 100svh;
+    height: auto;
     min-height: 100svh;
-    overflow: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
   }
 
   body.native-app .panel {
-    overflow: auto;
+    overflow: visible;
   }
 
   .shell.panel-collapsed {
@@ -2245,6 +2630,36 @@ body.light-theme .legend-trend {
     max-height: 0;
     overflow: hidden;
     transform: translateX(0);
+  }
+
+  .shell.portrait-layout:not(.panel-collapsed) {
+    height: 100svh;
+    overflow: hidden;
+  }
+
+  .shell.portrait-layout:not(.panel-collapsed) .panel {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    max-height: none;
+    border-radius: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding:
+      max(18px, env(safe-area-inset-top))
+      18px
+      max(28px, env(safe-area-inset-bottom));
+  }
+
+  .shell.portrait-layout:not(.panel-collapsed) .panel-toggle {
+    z-index: 22;
+  }
+
+  .shell.portrait-layout:not(.panel-collapsed) .theme-toggle,
+  .shell.portrait-layout:not(.panel-collapsed) .radar-mode-toggle,
+  .shell.portrait-layout:not(.panel-collapsed) .wx-toggle {
+    display: none;
   }
 
   .radar-wrap {
@@ -2262,7 +2677,7 @@ body.light-theme .legend-trend {
   .panel-toggle,
   .shell.panel-collapsed .panel-toggle {
     position: fixed;
-    top: 16px;
+    top: max(26px, calc(env(safe-area-inset-top) + 16px));
     right: 16px;
     order: -1;
   }
@@ -2270,39 +2685,48 @@ body.light-theme .legend-trend {
   .theme-toggle,
   .shell.panel-collapsed .theme-toggle {
     position: fixed;
-    top: 16px;
+    top: max(26px, calc(env(safe-area-inset-top) + 16px));
     right: 58px;
   }
 
   .radar-mode-toggle,
   .shell.panel-collapsed .radar-mode-toggle {
     position: fixed;
-    top: 58px;
+    top: max(68px, calc(env(safe-area-inset-top) + 58px));
     right: 16px;
   }
 
   .wx-toggle,
   .shell.panel-collapsed .wx-toggle {
     position: fixed;
-    top: 100px;
+    top: max(110px, calc(env(safe-area-inset-top) + 100px));
     right: 16px;
   }
 
   .shell.wx-mode .radar-mode-toggle,
   .shell.wx-mode.panel-collapsed .radar-mode-toggle {
-    top: 16px;
+    top: max(26px, calc(env(safe-area-inset-top) + 16px));
     right: 16px;
   }
 
   .shell.wx-mode .theme-toggle,
   .shell.wx-mode.panel-collapsed .theme-toggle {
-    top: 16px;
+    top: max(26px, calc(env(safe-area-inset-top) + 16px));
     right: 58px;
   }
 
   .shell.wx-mode .wx-toggle,
   .shell.wx-mode.panel-collapsed .wx-toggle {
-    top: 58px;
+    top: max(68px, calc(env(safe-area-inset-top) + 58px));
+  }
+
+  .tracking-alert {
+    top: max(111px, calc(env(safe-area-inset-top) + 101px));
+    right: auto;
+    left: 50%;
+    max-width: calc(100% - 86px);
+    font-size: 0.98rem;
+    padding: 9px 12px;
   }
 }
 
@@ -2367,6 +2791,18 @@ body.light-theme .legend-trend {
 @media (max-width: 520px) {
   .shell {
     padding: 10px;
+  }
+
+  .radar-top-actions {
+    top: max(16px, calc(env(safe-area-inset-top) + 8px));
+    gap: 5px;
+  }
+
+  .radar-top-actions button {
+    min-width: 66px;
+    min-height: 44px;
+    padding: 0 8px;
+    font-size: 0.66rem;
   }
 
   .shell.wx-mode .wx-nearest:not([hidden]) {

@@ -19,10 +19,26 @@
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>ADSB Radar listens for Stratus traffic data on the local cockpit WiFi network.</string>
+	<string>ADSB Radar listens on the local cockpit Wi-Fi network for Stratus/GDL90 traffic and ownship data.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>ADSB Radar can use your location to center the radar display.</string>
+	<string>ADSB Radar uses your location to center the radar, provide ownship awareness, and fall back to GPS track when Stratus data is unavailable.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>ADSB Radar uses device heading and motion-derived orientation only as a fallback for track-up situational awareness.</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 </dict>
 </plist>

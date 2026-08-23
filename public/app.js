@@ -1,6 +1,24 @@
+import {
+  deriveConfirmedMotion,
+  distanceMilesBetween,
+  projectConfirmedTraffic,
+  trafficSymbolScreenAngleDegrees
+} from "./traffic-prediction.js?v=20260821-2";
+import {
+  classifyInternetPositionObservation,
+  coordinatesMateriallyChanged,
+  sourcePositionTimestamp
+} from "./traffic-ingestion.js";
+import {
+  displaySweepBearing,
+  sweepCrossedBearing,
+  sweepPaintDecision
+} from "./traffic-sweep.js?v=20260821-2";
+import { FaaAircraftRegistry, normalizeIcaoHex } from "./aircraft-registry.js?v=20260822-2";
+
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.08.11-r2";
+const APP_ROLLOUT_VERSION = "2026.08.22-r2";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
@@ -9,8 +27,7 @@ const panelToggle = document.querySelector("#panelToggle");
 const themeToggle = document.querySelector("#themeToggle");
 const radarModeToggle = document.querySelector("#radarModeToggle");
 const wxToggle = document.querySelector("#wxToggle");
-const wxRangeButton = document.querySelector("#wxRangeButton");
-const bottomRangeButtons = document.querySelector("#bottomRangeButtons");
+const rangeIndicator = document.querySelector("#rangeIndicator");
 const altitudeBracketButton = document.querySelector("#altitudeBracketButton");
 const arcHeadingOverrideEl = document.querySelector("#arcHeadingOverride");
 const wxNearestTarget = document.querySelector("#wxNearestTarget");
@@ -22,12 +39,14 @@ const airportSelect = document.querySelector("#airportSelect");
 const coordRow = document.querySelector("#coordRow");
 const latInput = document.querySelector("#lat");
 const lonInput = document.querySelector("#lon");
-const rangeButtons = document.querySelector("#rangeButtons");
 const airspaceToggles = document.querySelector("#airspaceToggles");
+const smallAirportsToggle = document.querySelector("#smallAirportsToggle");
 const settingsOpen = document.querySelector("#settingsOpen");
+const radarSettingsOpen = document.querySelector("#radarSettingsOpen");
 const settingsClose = document.querySelector("#settingsClose");
 const settingsModal = document.querySelector("#settingsModal");
 const trackingOpen = document.querySelector("#trackingOpen");
+const radarTrackingOpen = document.querySelector("#radarTrackingOpen");
 const trackingClose = document.querySelector("#trackingClose");
 const trackingModal = document.querySelector("#trackingModal");
 const trackingForm = document.querySelector("#trackingForm");
@@ -48,11 +67,11 @@ const performanceModeSelect = document.querySelector("#performanceModeSelect");
 const performanceTelemetry = document.querySelector("#performanceTelemetry");
 const radarSoundStyleSelect = document.querySelector("#radarSoundStyle");
 const orientationModeSelect = document.querySelector("#orientationMode");
-const sweepColorToggle = document.querySelector("#sweepColorToggle");
 const settingsVersionEl = document.querySelector("#settingsVersion");
 const aircraftModal = document.querySelector("#aircraftModal");
 const aircraftTitle = document.querySelector("#aircraftTitle");
 const aircraftClose = document.querySelector("#aircraftClose");
+const aircraftTrack = document.querySelector("#aircraftTrack");
 const aircraftDetail = document.querySelector("#aircraftDetail");
 const statusEl = document.querySelector("#status");
 const stratusDiagnosticsEl = document.querySelector("#stratusDiagnostics");
@@ -62,6 +81,12 @@ const lastUpdateEl = document.querySelector("#lastUpdate");
 const aircraftListEl = document.querySelector("#aircraftList");
 const proximityAlertEl = document.querySelector("#proximityAlert");
 const trackingAlertEl = document.querySelector("#trackingAlert");
+const airportSearchInput = document.querySelector("#airportSearch");
+const airportSearchResults = document.querySelector("#airportSearchResults");
+const airportSearchOpen = document.querySelector("#airportSearchOpen");
+const airportSearchLabel = document.querySelector("#airportSearchLabel");
+const airportSearchModal = document.querySelector("#airportSearchModal");
+const airportSearchClose = document.querySelector("#airportSearchClose");
 
 window.ADSB_RADAR_OWNERSHIP = Object.freeze({
   product: "ADSB Radar",
@@ -162,8 +187,10 @@ const radarThemes = {
 };
 const airportsCsvUrl = "https://davidmegginson.github.io/ourairports-data/airports.csv";
 const runwaysCsvUrl = "https://davidmegginson.github.io/ourairports-data/runways.csv";
-const bundledAirportsUrl = "./data/offline-airports.json";
-const bundledAirspaceUrl = "./data/offline-airspace.json";
+const bundledAirportsUrl = new URL("./data/offline-airports.json", import.meta.url).href;
+const bundledAirspaceUrl = new URL("./data/offline-airspace.json", import.meta.url).href;
+const bundledTileIndexUrl = new URL("./data/tiles/index.json", import.meta.url).href;
+const bundledTilesBaseUrl = new URL("./data/tiles/", import.meta.url);
 const weatherMapsUrl = "https://api.rainviewer.com/public/weather-maps.json";
 const airspaceQueryUrl =
   "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0/query";
@@ -185,6 +212,8 @@ const adsbProxyBaseUrl = (
   window.ADSB_RADAR_PROXY_URL ||
   ""
 ).replace(/\/$/, "");
+const internetTrafficPollMs = 1500;
+const internetTrafficStalePollMs = 2500;
 const stratusBridgeBaseUrl = (
   stratusUrlFromQuery ||
   window.localStorage.getItem("ADSB_RADAR_STRATUS_URL") ||
@@ -192,11 +221,18 @@ const stratusBridgeBaseUrl = (
   ""
 ).replace(/\/$/, "");
 const nativeStratusHandler = window.webkit?.messageHandlers?.stratus || null;
+const trafficDebugEnabled =
+  queryParams.get("debug") === "traffic" ||
+  queryParams.get("debugTraffic") === "1" ||
+  window.ADSB_RADAR_DEBUG_TRAFFIC === true;
 let nativeStratusRequestId = 0;
 document.body.classList.toggle("native-app", Boolean(nativeStratusHandler));
+document.body.classList.toggle("traffic-debug", trafficDebugEnabled);
 const tracks = new Map();
 const aircraftTypeCache = new Map();
+const faaAircraftRegistry = new FaaAircraftRegistry();
 const radarBlips = new Map();
+const trafficTargetStates = new Map();
 const aircraftHighlights = new Map();
 const aircraftTypeNames = new Map([
   ["A109", "AgustaWestland AW109"],
@@ -371,27 +407,33 @@ const kdvtFallbackCenter = { lat: 33.6883, lon: -112.083 };
 let center = { lat: 33.7292, lon: -111.9918 };
 let radiusMiles = 10;
 const breadcrumbBaseLimit = 10;
+const slowAircraftBreadcrumbMultiplier = 2;
 const trackedBreadcrumbLimit = 100;
 const trackedBreadcrumbRangeMiles = 100;
 let sweepColor = "orange";
 let showGroundTraffic = false;
 let showFlightLevelsTraffic = true;
 let showRadarData = true;
+let showSmallAirports = true;
 const savedWxDisplayMode = window.localStorage.getItem("ADSB_RADAR_WX_DISPLAY_MODE");
 let wxDisplayMode = ["off", "on", "wxOnly"].includes(savedWxDisplayMode) ? savedWxDisplayMode : "on";
 let showPrecipitation = wxDisplayMode !== "off";
-const savedPerformanceMode = window.localStorage.getItem("ADSB_RADAR_PERFORMANCE_MODE");
+const performanceModeStorageKey = "ADSB_RADAR_PERFORMANCE_MODE";
+const performanceModeSelectionKey = "ADSB_RADAR_PERFORMANCE_MODE_USER_SELECTED";
+const savedPerformanceMode = window.localStorage.getItem(performanceModeStorageKey);
+const savedPerformanceModeWasUserSelected =
+  window.localStorage.getItem(performanceModeSelectionKey) === "true";
 let performanceMode = ["cool", "reduced", "fast"].includes(savedPerformanceMode)
-  ? savedPerformanceMode
-  : window.localStorage.getItem("ADSB_RADAR_REDUCED_LOAD") === "true"
+  ? savedPerformanceMode === "cool" && !savedPerformanceModeWasUserSelected
     ? "reduced"
-    : "fast";
+    : savedPerformanceMode
+  : "reduced";
 let reducedLoad = performanceMode !== "fast";
 let lightTheme = window.localStorage.getItem("ADSB_RADAR_THEME") === "light";
 let radarSoundsEnabled = true;
 let radarSoundStyle = "softTick";
 const savedOrientationMode = window.localStorage.getItem("ADSB_RADAR_ORIENTATION");
-const deviceCanReportCompass = typeof DeviceOrientationEvent !== "undefined";
+const deviceCanReportCompass = Boolean(nativeStratusHandler) || typeof DeviceOrientationEvent !== "undefined";
 let orientationMode = ["north", "track"].includes(savedOrientationMode)
   ? savedOrientationMode
   : deviceCanReportCompass
@@ -403,21 +445,39 @@ let previousOrientationBeforeArc = "north";
 let aircraft = [];
 let airports = [];
 let airspaces = [];
+const airportControlledAirspaceCache = new Map();
+let airspaceDatasetVersion = 0;
+let airspaceLayerCache = null;
+let airspaceLabelAnchorCache = new Map();
+let airspaceLastTileIds = [];
 let running = true;
 let lastSweepBucket = -1;
 let lastWxSweepBucket = -1;
 let previousSweepAngle = null;
+let previousRadarSweepBearing = null;
+let previousWxTrafficSweepBearing = null;
+let sweepSequence = 0;
+let trafficPositionSequence = 0;
 let lastFetchAt = 0;
 let lastDataSource = "standby";
 let lastStatusText = "";
+let lastStratusReceiverState = "";
 let trafficFetchInFlight = false;
 let trafficBackoffMs = 0;
 let nextTrafficFetchAt = 0;
+let trafficPumpTimer = null;
+let lastTrafficPipelineDebugAt = 0;
 let pixelRatio = window.devicePixelRatio || 1;
 let airportsCachePromise = null;
 let runwaysCachePromise = null;
 let bundledAirspacePromise = null;
+let bundledTileIndexPromise = null;
+const bundledAirportTilePromises = new Map();
+const bundledAirspaceTilePromises = new Map();
 let airportRowsCache = null;
+let airportRowsCacheTileKey = "";
+let nationwideAirportSearchPromise = null;
+let selectedAirportLabel = "Use GPS location";
 let runwayRowsCache = null;
 let airportCacheRetryAt = 0;
 let runwayCacheRetryAt = 0;
@@ -471,6 +531,7 @@ let proximityAlertAudioLevel = 1;
 let proximityHighlightLastAt = 0;
 let proximityDivergingSince = 0;
 let trafficAlertActive = false;
+let preparingTrafficAlertUI = false;
 let returnToArcAfterThreat = false;
 let manualThreatFocusKey = "";
 let returnToArcAfterManualThreat = false;
@@ -478,6 +539,7 @@ let dismissedTrafficAlertKey = "";
 let wxNearestTargetKey = "";
 let altitudeBracketFt = null;
 let trackedAircraft = loadTrackedAircraft();
+let trackedAircraftClearedUntil = 0;
 let quickNoteStrokes = [];
 let activeQuickNoteStroke = null;
 let quickNotesText = "";
@@ -490,6 +552,7 @@ let lastWeatherEnsureAt = 0;
 let latestDeviceStatus = null;
 let deviceStatusRefreshInFlight = false;
 let lastDeviceStatusRefreshAt = 0;
+let airportContextRequestId = 0;
 const renderStats = {
   frames: 0,
   slowFrames: 0,
@@ -499,6 +562,64 @@ const renderStats = {
   fps: 0,
   averageRenderMs: 0,
   slowPercent: 0
+};
+const trafficPipelineDiagnostics = {
+  lastRangeChangeAt: 0,
+  lastRangeChangeValue: radiusMiles,
+  lastFetchStartedAt: 0,
+  lastFetchCompletedAt: 0,
+  internetLastRequestStartedAt: 0,
+  internetLastRequestCompletedAt: 0,
+  internetLastRequestDurationMs: 0,
+  internetLastSuccessAt: 0,
+  internetLastHttpStatus: null,
+  internetLastError: "",
+  internetLastDataAgeSeconds: null,
+  internetLastNextRefreshEligibleSeconds: null,
+  internetRequestTimestamps: [],
+  internetSuccessTimestamps: [],
+  internetLastTargetCount: 0,
+  internetLastProvider: "",
+  internetLastSourceUrl: "",
+  internetLastStoreMutationAt: 0,
+  internetLastSnapshotId: "",
+  internetLastSnapshotHash: "",
+  internetLastCacheSource: "",
+  internetLastUpstreamFetchedAt: null,
+  internetLastDataTimestamp: null,
+  selectedTrafficSource: "none",
+  selectedTrafficSourceReason: "startup",
+  lastStratusActive: false,
+  lastStratusPacketAgeSeconds: null,
+  lastInternetPollingActive: false,
+  airspaceLoadedTileIds: [],
+  airspaceFeatureCount: 0,
+  airspaceDuplicateFeatureCount: 0,
+  airspaceLayoutInvalidationReason: "startup",
+  airspaceLayoutRecalculationTimestamps: [],
+  airspaceDrawTimestamps: [],
+  airspaceRedrawsPerMinute: 0,
+  airspaceLabelLayoutRecalculationsPerMinute: 0,
+  lastNativeRequestAt: 0,
+  lastNativeWebResponseAt: 0,
+  lastNativePayloadGeneratedAt: 0,
+  lastJsTrafficStateUpdateAt: 0,
+  lastRadarTrafficRenderAt: 0,
+  lastTrafficRenderCount: 0,
+  lastRenderTimerAliveAt: 0,
+  sweepCount: 0,
+  sweepPeriodSeconds: sweepSeconds,
+  freshTargetsThisSweep: 0,
+  fadingTargetsThisSweep: 0,
+  removedTargetsThisSweep: 0,
+  debugTargetKey: "",
+  debugTargetState: null,
+  predictionCorrections: [],
+  predictedTargetsThisSweep: 0,
+  jsPayloadsReceived: 0,
+  jsPayloadTimestamps: [],
+  lastBridgeState: "waiting",
+  lastStaleLogKey: ""
 };
 
 function scheduleAircraftHighlight(key, { delayMs = 1000, durationMs = 10000 } = {}) {
@@ -533,6 +654,84 @@ function aircraftHighlightState(key, now) {
   const scale = baseScale + pulseWave * (isProximityAlert ? 1.25 : 2);
 
   return { scale, highlightMix, active: true };
+}
+
+function closeSidebarPanel() {
+  if (shell.classList.contains("panel-collapsed")) return;
+  shell.classList.add("panel-collapsed");
+  updatePanelToggle();
+  window.setTimeout(resizeCanvas, 240);
+}
+
+function prepareUIForTrafficAlert() {
+  if (preparingTrafficAlertUI) return;
+  preparingTrafficAlertUI = true;
+
+  try {
+    const shouldReturnToArc = weatherMode || returnToArcAfterThreat || returnToArcAfterManualThreat;
+    returnToArcAfterThreat = shouldReturnToArc;
+    manualThreatFocusKey = "";
+    returnToArcAfterManualThreat = false;
+
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    closeSettings();
+    closeTracking();
+    closeLegend();
+    closeAircraftDetails();
+    closeAirportSearchModal();
+    closeSidebarPanel();
+
+    window.webkit?.messageHandlers?.scratchpad?.postMessage({ type: "dismissForTrafficAlert" });
+
+    if (weatherMode) {
+      setWeatherMode(false);
+      setOrientationMode("track", { persist: false });
+    }
+  } finally {
+    preparingTrafficAlertUI = false;
+  }
+}
+
+function trafficTrackIdentifier(plane) {
+  const nNumber = trackedAircraftKeyValue(plane);
+  if (nNumber) return nNumber;
+
+  const callsign = String(plane?.callsign || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  return callsign && !["UNKNOWN", "TISBOTHER", "TISB"].includes(callsign) ? callsign : "";
+}
+
+function showTrafficTarget(key) {
+  const plane = displayAircraft().find((candidate) => aircraftKey(candidate) === key);
+  if (!plane) return;
+  scheduleAircraftHighlight(key, { delayMs: 0, durationMs: 9000 });
+  zoomToAircraftIfNeeded(plane);
+  closeSidebarPanel();
+  scheduleRender();
+}
+
+function trackTrafficTarget(key) {
+  const plane = displayAircraft().find((candidate) => aircraftKey(candidate) === key);
+  const nNumber = trafficTrackIdentifier(plane);
+  if (!plane || !nNumber) return false;
+
+  if (!trackedAircraft || trackedAircraft.nNumber !== nNumber) {
+    clearTrackedAircraftHistory(trackedAircraft);
+  }
+  trackedAircraft = {
+    nNumber,
+    criterion: trackingCriterionSelect?.value === "time" ? "time" : "distance",
+    value: Number(trackingValueInput?.value) > 0 ? Number(trackingValueInput.value) : 10,
+    isolate: Boolean(trackingIsolateToggle?.checked),
+    alerted: false
+  };
+  saveTrackedAircraft();
+  updateTrackingControls();
+  scheduleAircraftHighlight(key, { delayMs: 0, durationMs: 9000 });
+  zoomToAircraftIfNeeded(plane);
+  closeSidebarPanel();
+  renderList();
+  scheduleRender();
+  return true;
 }
 
 function ensureAudioContext() {
@@ -633,11 +832,13 @@ function installRadarAudioRecovery() {
   });
 }
 
-function applyCompassHeading(rawHeading, { accuracy = null } = {}) {
+function applyCompassHeading(rawHeading, { accuracy = null, source = "browser" } = {}) {
   const nextHeading = normalizedDegrees(rawHeading);
   const now = performance.now();
   const headingAccuracy = Number(accuracy);
-  if (Number.isFinite(headingAccuracy) && headingAccuracy > 55 && compassHeadingDegrees !== null) return;
+  const nativeHeading = source === "native";
+  const poorAccuracyLimit = nativeHeading ? 65 : 55;
+  if (Number.isFinite(headingAccuracy) && headingAccuracy > poorAccuracyLimit && compassHeadingDegrees !== null) return;
 
   if (!Number.isFinite(compassHeadingDegrees)) {
     compassHeadingDegrees = nextHeading;
@@ -648,14 +849,15 @@ function applyCompassHeading(rawHeading, { accuracy = null } = {}) {
   const elapsedSeconds = lastCompassHeadingAt ? Math.max(0.016, (now - lastCompassHeadingAt) / 1000) : 0.25;
   const delta = signedDegreesDelta(compassHeadingDegrees, nextHeading);
   const stationary = gpsSpeedKts < 3 && (!gpsWatchId || gpsActive);
-  const deadband = stationary ? 3.5 : 1.5;
+  const deadband = nativeHeading ? (stationary ? 0.8 : 0.35) : stationary ? 3.5 : 1.5;
   if (Math.abs(delta) < deadband) return;
 
   // Android browser compass data can chatter while the phone is sitting flat.
   // Rate limiting keeps track-up readable without disabling deliberate turns.
-  const maxStep = (stationary ? 90 : 180) * elapsedSeconds;
+  const maxRate = nativeHeading ? (stationary ? 540 : 720) : stationary ? 90 : 180;
+  const maxStep = maxRate * elapsedSeconds;
   const limitedDelta = Math.max(-maxStep, Math.min(maxStep, delta));
-  const smoothing = stationary ? 0.42 : 0.62;
+  const smoothing = nativeHeading ? (stationary ? 0.82 : 0.92) : stationary ? 0.42 : 0.62;
   compassHeadingDegrees = normalizedDegrees(compassHeadingDegrees + limitedDelta * smoothing);
   lastCompassHeadingAt = now;
 }
@@ -738,9 +940,42 @@ function scheduleNextTrafficFetch({ failed = false, source = lastDataSource, sta
   }
 
   trafficBackoffMs = 0;
-  const liveStratus = String(source || "").toLowerCase().includes("stratus") && !stale;
-  const baseDelay = liveStratus ? 2800 : 6500;
-  const jitter = liveStratus ? randomJitter(150, 450) : randomJitter(500, 2500);
+  const sourceText = String(source || "").toLowerCase();
+  const localWifi = sourceText.includes("wifi") || (sourceText.includes("ads-b") && isLocalNetworkUrl(adsbProxyBaseUrl));
+  const internetSource =
+    sourceText.includes("internet") ||
+    sourceText.includes("network") ||
+    sourceText.includes("airplanes.live") ||
+    sourceText.includes("adsb.lol") ||
+    sourceText.includes("adsb.fi");
+  const faaSource = sourceText.includes("faa tais") || sourceText.includes("faa-tais");
+  const liveStratus = sourceText.includes("stratus") && !stale;
+  const staleStratus = sourceText.includes("stratus") && stale;
+  const liveLocalWifi = localWifi && !stale;
+  const staleLocalWifi = localWifi && stale;
+  const baseDelay = liveStratus
+    ? 750
+    : staleStratus
+      ? 1400
+      : liveLocalWifi
+        ? 1200
+        : staleLocalWifi
+          ? 1800
+          : faaSource
+            ? internetTrafficPollMs
+          : internetSource && !stale
+            ? internetTrafficPollMs
+            : internetSource && stale
+              ? internetTrafficStalePollMs
+              : 6500;
+  const jitter =
+    liveStratus || liveLocalWifi
+      ? randomJitter(50, 180)
+      : (internetSource || faaSource) && !stale
+        ? randomJitter(100, 250)
+        : staleStratus || staleLocalWifi || internetSource || faaSource
+        ? randomJitter(100, 400)
+        : randomJitter(500, 2500);
   nextTrafficFetchAt = Date.now() + baseDelay + jitter;
 }
 
@@ -774,18 +1009,50 @@ function isLocalNetworkUrl(url) {
 }
 
 function internetTrafficSourceLabel() {
-  const connectionType = String(navigator.connection?.type || "").toLowerCase();
-  if (connectionType === "cellular") return "Cellular";
-  return "WiFi ADS-B";
+  return "Internet ADS-B";
 }
 
 function classifyTrafficSource(data = {}) {
   const source = String(data.displaySource || data.source || "").toLowerCase();
   if (source.includes("stratus")) return { type: "stratus", label: "STRATUS" };
+  if (source.includes("faa tais") || source.includes("faa-tais") || source.includes("faa traffic")) {
+    return { type: "faa", label: "FAA TAIS" };
+  }
+  if (
+    source.includes("internet") ||
+    source.includes("network") ||
+    source.includes("airplanes.live") ||
+    source.includes("adsb.lol") ||
+    source.includes("adsb.fi")
+  ) {
+    return { type: "internet", label: "INTERNET ADS-B" };
+  }
   if (source.includes("wifi")) return { type: "wifi", label: "WIFI ADS-B" };
   if (source.includes("cellular")) return { type: "cellular", label: "CELLULAR" };
   if (isLocalNetworkUrl(adsbProxyBaseUrl)) return { type: "wifi", label: "WIFI ADS-B" };
-  return { type: "cellular", label: "CELLULAR" };
+  return { type: "internet", label: "INTERNET ADS-B" };
+}
+
+function selectTrafficSourceDiagnostics({ source = "none", reason = "" } = {}) {
+  trafficPipelineDiagnostics.selectedTrafficSource = source;
+  trafficPipelineDiagnostics.selectedTrafficSourceReason = reason;
+  if (trafficDebugEnabled) {
+    console.info("Traffic source arbitration", {
+      selectedSource: trafficPipelineDiagnostics.selectedTrafficSource,
+      reason: trafficPipelineDiagnostics.selectedTrafficSourceReason,
+      stratusActive: trafficPipelineDiagnostics.lastStratusActive,
+      stratusPacketAgeSeconds: trafficPipelineDiagnostics.lastStratusPacketAgeSeconds,
+      internetPollingActive: trafficPipelineDiagnostics.lastInternetPollingActive,
+      internetLastRequestAgeSeconds: trafficPipelineDiagnostics.internetLastRequestStartedAt
+        ? ((Date.now() - trafficPipelineDiagnostics.internetLastRequestStartedAt) / 1000).toFixed(1)
+        : "--",
+      internetHttpStatus: trafficPipelineDiagnostics.internetLastHttpStatus,
+      internetTargetCount: trafficPipelineDiagnostics.internetLastTargetCount,
+      internetDataAgeSeconds: trafficPipelineDiagnostics.internetLastDataAgeSeconds,
+      internetNextRefreshEligibleSeconds: trafficPipelineDiagnostics.internetLastNextRefreshEligibleSeconds,
+      internetError: trafficPipelineDiagnostics.internetLastError
+    });
+  }
 }
 
 function updateDataSourceIndicator(data = null) {
@@ -794,28 +1061,298 @@ function updateDataSourceIndicator(data = null) {
   const source = data
     ? classifyTrafficSource(data)
     : {
-        type: nativeStratusHandler ? "stratus" : "offline",
-        label: nativeStratusHandler ? "STRATUS CONNECTING" : offlineAirportDataActive || offlineAirspaceDataActive ? "OFFLINE DATA" : "NO TRAFFIC DATA"
+        type: "offline",
+        label: "NO TRAFFIC DATA"
       };
   const stale = Boolean(data?.stale);
+  const receiverState = String(data?.receiverState || "").toLowerCase();
   const label =
-    stale && source.type === "stratus"
+    source.type === "stratus" && receiverState === "degraded"
+      ? "STRATUS DEGRADED"
+      : stale && source.type === "stratus"
       ? "STRATUS STALE"
       : stale
         ? `${source.label} STALE`
         : source.label;
-  const stateKey = `${source.type}:${label}:${stale ? "stale" : "live"}:${data ? "data" : "none"}`;
+  const stateKey = `${source.type}:${label}:${receiverState || (stale ? "stale" : "live")}:${data ? "data" : "none"}`;
   if (dataSourceIndicator.dataset.stateKey === stateKey) return;
+  if (source.type === "stratus" && stateKey !== lastStratusReceiverState) {
+    console.info("Stratus receiver state", {
+      label,
+      receiverState,
+      stale,
+      ageSeconds: data?.ageSeconds,
+      lastUdpReceiveAgeSeconds: data?.lastUdpReceiveAgeSeconds,
+      lastDecodedFrameAgeSeconds: data?.lastDecodedFrameAgeSeconds,
+      lastTrafficReportAgeSeconds: data?.lastTrafficReportAgeSeconds,
+      lastOwnshipReportAgeSeconds: data?.lastOwnshipReportAgeSeconds,
+      packetsPerSecond: data?.packetsPerSecond,
+      framesPerSecond: data?.framesPerSecond,
+      trafficFramesPerSecond: data?.trafficFramesPerSecond,
+      trafficPipelineDiagnostics: {
+        lastRangeChangeSecondsAgo: trafficPipelineDiagnostics.lastRangeChangeAt
+          ? ((Date.now() - trafficPipelineDiagnostics.lastRangeChangeAt) / 1000).toFixed(1)
+          : "--",
+        lastRangeChangeValue: trafficPipelineDiagnostics.lastRangeChangeValue,
+        lastNativeRequestSecondsAgo: trafficPipelineDiagnostics.lastNativeRequestAt
+          ? ((Date.now() - trafficPipelineDiagnostics.lastNativeRequestAt) / 1000).toFixed(1)
+          : "--",
+        lastNativeWebResponseSecondsAgo: trafficPipelineDiagnostics.lastNativeWebResponseAt
+          ? ((Date.now() - trafficPipelineDiagnostics.lastNativeWebResponseAt) / 1000).toFixed(1)
+          : "--",
+        lastJsTrafficStateUpdateSecondsAgo: trafficPipelineDiagnostics.lastJsTrafficStateUpdateAt
+          ? ((Date.now() - trafficPipelineDiagnostics.lastJsTrafficStateUpdateAt) / 1000).toFixed(1)
+          : "--",
+        lastRadarTrafficRenderSecondsAgo: trafficPipelineDiagnostics.lastRadarTrafficRenderAt
+          ? ((Date.now() - trafficPipelineDiagnostics.lastRadarTrafficRenderAt) / 1000).toFixed(1)
+          : "--",
+        renderTimerAliveSecondsAgo: trafficPipelineDiagnostics.lastRenderTimerAliveAt
+          ? ((Date.now() - trafficPipelineDiagnostics.lastRenderTimerAliveAt) / 1000).toFixed(1)
+          : "--"
+      },
+      staleReason: data?.staleReason || data?.warning
+    });
+    lastStratusReceiverState = stateKey;
+  }
   dataSourceIndicator.dataset.stateKey = stateKey;
 
   dataSourceIndicator.hidden = false;
   dataSourceIndicator.classList.toggle("stratus", source.type === "stratus");
   dataSourceIndicator.classList.toggle("wifi", source.type === "wifi");
   dataSourceIndicator.classList.toggle("cellular", source.type === "cellular");
+  dataSourceIndicator.classList.toggle("internet", source.type === "internet");
+  dataSourceIndicator.classList.toggle("faa", source.type === "faa");
   dataSourceIndicator.classList.toggle("offline", source.type === "offline" || !data);
-  dataSourceIndicator.classList.toggle("stale", stale);
-  dataSourceIndicator.classList.toggle("steady", source.type === "cellular" || source.type === "offline" || stale);
+  dataSourceIndicator.classList.toggle("stale", stale || receiverState === "degraded");
+  dataSourceIndicator.classList.toggle(
+    "steady",
+    source.type === "cellular" || source.type === "internet" || source.type === "faa" || source.type === "offline" || stale || receiverState === "degraded"
+  );
   dataSourceLabel.textContent = label;
+}
+
+function logTrafficPipelineDiagnostics(data, reason = "sample") {
+  const source = classifyTrafficSource(data);
+  if (source.type !== "stratus" && source.type !== "internet" && source.type !== "faa") return;
+
+  const now = Date.now();
+  if (source.type === "internet" || source.type === "faa") {
+    if (reason === "sample" && now - lastTrafficPipelineDebugAt < 15000) return;
+    if (reason === "sample") lastTrafficPipelineDebugAt = now;
+    console.info(source.type === "faa" ? "FAA TAIS traffic pipeline diagnostics" : "Internet ADS-B traffic pipeline diagnostics", {
+      reason,
+      provider: data?.providerSource || data?.source || trafficPipelineDiagnostics.internetLastProvider || "unknown",
+      sourceUrl: trafficPipelineDiagnostics.internetLastSourceUrl,
+      stale: Boolean(data?.stale),
+      aircraft: aircraft.length,
+      targetCount: trafficPipelineDiagnostics.internetLastTargetCount,
+      httpStatus: trafficPipelineDiagnostics.internetLastHttpStatus,
+      requestsPerMinute: Number((diagnosticRate(trafficPipelineDiagnostics.internetRequestTimestamps) * 60).toFixed(1)),
+      successesPerMinute: Number((diagnosticRate(trafficPipelineDiagnostics.internetSuccessTimestamps) * 60).toFixed(1)),
+      lastRequestStartedSecondsAgo: trafficPipelineDiagnostics.internetLastRequestStartedAt
+        ? ((now - trafficPipelineDiagnostics.internetLastRequestStartedAt) / 1000).toFixed(1)
+        : "--",
+      lastRequestCompletedSecondsAgo: trafficPipelineDiagnostics.internetLastRequestCompletedAt
+        ? ((now - trafficPipelineDiagnostics.internetLastRequestCompletedAt) / 1000).toFixed(1)
+        : "--",
+      lastSuccessAgeSeconds: trafficPipelineDiagnostics.internetLastSuccessAt
+        ? ((now - trafficPipelineDiagnostics.internetLastSuccessAt) / 1000).toFixed(1)
+        : "--",
+      requestDurationMs: trafficPipelineDiagnostics.internetLastRequestDurationMs,
+      lastStoreMutationSecondsAgo: trafficPipelineDiagnostics.internetLastStoreMutationAt
+        ? ((now - trafficPipelineDiagnostics.internetLastStoreMutationAt) / 1000).toFixed(1)
+        : "--",
+      jsTrafficStateUpdateSecondsAgo: trafficPipelineDiagnostics.lastJsTrafficStateUpdateAt
+        ? ((now - trafficPipelineDiagnostics.lastJsTrafficStateUpdateAt) / 1000).toFixed(1)
+        : "--",
+      sweepCount: trafficPipelineDiagnostics.sweepCount,
+      sweepPeriodSeconds: trafficPipelineDiagnostics.sweepPeriodSeconds,
+      freshTargetsThisSweep: trafficPipelineDiagnostics.freshTargetsThisSweep,
+      predictedTargetsThisSweep: trafficPipelineDiagnostics.predictedTargetsThisSweep,
+      fadingTargetsThisSweep: trafficPipelineDiagnostics.fadingTargetsThisSweep,
+      removedTargetsThisSweep: trafficPipelineDiagnostics.removedTargetsThisSweep,
+      debugTargetState: trafficPipelineDiagnostics.debugTargetState,
+      selectedTargetSourceObservationAgeSeconds: Number.isFinite(Number(trafficPipelineDiagnostics.debugTargetState?.confirmedTimestamp))
+        ? ((now - Number(trafficPipelineDiagnostics.debugTargetState.confirmedTimestamp)) / 1000).toFixed(1)
+        : "--",
+      recentPredictionCorrections: trafficPipelineDiagnostics.predictionCorrections.slice(-10),
+      nextTrafficFetchSeconds: ((nextTrafficFetchAt - now) / 1000).toFixed(2),
+      lastRangeChangeSecondsAgo: trafficPipelineDiagnostics.lastRangeChangeAt
+        ? ((now - trafficPipelineDiagnostics.lastRangeChangeAt) / 1000).toFixed(1)
+        : "--",
+      workerCacheAgeSeconds: data?.ageSeconds ?? "--",
+      workerCacheTtlSeconds: data?.cacheTtlSeconds ?? "--",
+      workerDataAgeSeconds: data?.dataAgeSeconds ?? trafficPipelineDiagnostics.internetLastDataAgeSeconds ?? "--",
+      nextRefreshEligibleInSeconds: data?.nextRefreshEligibleInSeconds ?? trafficPipelineDiagnostics.internetLastNextRefreshEligibleSeconds ?? "--",
+      selectedSource: trafficPipelineDiagnostics.selectedTrafficSource,
+      selectedSourceReason: trafficPipelineDiagnostics.selectedTrafficSourceReason,
+      upstreamWarning: data?.warning || data?.upstreamFailures || "",
+      taisGatewayConnected: data?.tais?.state === "live",
+      taisLastMessageAgeSeconds: data?.tais?.lastMessageAgeSeconds ?? data?.gateway?.lastMessageAgeSeconds ?? "--",
+      taisMessagesPerSecond: data?.tais?.messagesPerSecond ?? data?.gateway?.messagesPerSecond ?? "--",
+      taisActiveTracks: data?.tais?.activeTracks ?? data?.gateway?.activeTracks ?? "--",
+      taisFallbackReason: data?.tais?.fallbackReason || ""
+    });
+    return;
+  }
+
+  const receiverState = String(data?.receiverState || "").toLowerCase();
+  const stateKey = `${reason}:${receiverState}:${data?.packetCount}:${data?.frameCount}:${data?.trafficFrameCount}:${aircraft.length}`;
+  if (reason === "sample" && now - lastTrafficPipelineDebugAt < 30000) return;
+  if (reason !== "sample" && trafficPipelineDiagnostics.lastStaleLogKey === stateKey) return;
+
+  if (reason === "sample") lastTrafficPipelineDebugAt = now;
+  trafficPipelineDiagnostics.lastStaleLogKey = stateKey;
+  console.info("Stratus traffic pipeline diagnostics", {
+    reason,
+    receiverState,
+    stale: Boolean(data?.stale),
+    aircraft: aircraft.length,
+    packetCount: data?.packetCount,
+    frameCount: data?.frameCount,
+    trafficFrameCount: data?.trafficFrameCount,
+    ownshipFrameCount: data?.ownshipFrameCount,
+    packetsPerSecond: data?.packetsPerSecond,
+    framesPerSecond: data?.framesPerSecond,
+    trafficFramesPerSecond: data?.trafficFramesPerSecond,
+    lastUdpReceiveAgeSeconds: data?.lastUdpReceiveAgeSeconds,
+    lastDecodedFrameAgeSeconds: data?.lastDecodedFrameAgeSeconds,
+    lastTrafficReportAgeSeconds: data?.lastTrafficReportAgeSeconds,
+    lastNativeRequestSecondsAgo: trafficPipelineDiagnostics.lastNativeRequestAt
+      ? ((now - trafficPipelineDiagnostics.lastNativeRequestAt) / 1000).toFixed(1)
+      : "--",
+    lastNativeWebResponseSecondsAgo: trafficPipelineDiagnostics.lastNativeWebResponseAt
+      ? ((now - trafficPipelineDiagnostics.lastNativeWebResponseAt) / 1000).toFixed(1)
+      : "--",
+    lastJsTrafficStateUpdateSecondsAgo: trafficPipelineDiagnostics.lastJsTrafficStateUpdateAt
+      ? ((now - trafficPipelineDiagnostics.lastJsTrafficStateUpdateAt) / 1000).toFixed(1)
+      : "--",
+    lastRadarTrafficRenderSecondsAgo: trafficPipelineDiagnostics.lastRadarTrafficRenderAt
+      ? ((now - trafficPipelineDiagnostics.lastRadarTrafficRenderAt) / 1000).toFixed(1)
+      : "--",
+    renderedContacts: trafficPipelineDiagnostics.lastTrafficRenderCount,
+    sweepCount: trafficPipelineDiagnostics.sweepCount,
+    sweepPeriodSeconds: trafficPipelineDiagnostics.sweepPeriodSeconds,
+    freshTargetsThisSweep: trafficPipelineDiagnostics.freshTargetsThisSweep,
+    fadingTargetsThisSweep: trafficPipelineDiagnostics.fadingTargetsThisSweep,
+    removedTargetsThisSweep: trafficPipelineDiagnostics.removedTargetsThisSweep,
+    debugTargetState: trafficPipelineDiagnostics.debugTargetState,
+    renderTimerAliveSecondsAgo: trafficPipelineDiagnostics.lastRenderTimerAliveAt
+      ? ((now - trafficPipelineDiagnostics.lastRenderTimerAliveAt) / 1000).toFixed(1)
+      : "--",
+    nextTrafficFetchSeconds: ((nextTrafficFetchAt - now) / 1000).toFixed(2),
+    lastRangeChangeSecondsAgo: trafficPipelineDiagnostics.lastRangeChangeAt
+      ? ((now - trafficPipelineDiagnostics.lastRangeChangeAt) / 1000).toFixed(1)
+      : "--",
+    staleReason: data?.staleReason || data?.warning || ""
+  });
+}
+
+function pushDiagnosticTimestamp(bucket, timestamp = Date.now()) {
+  bucket.push(timestamp);
+  const cutoff = timestamp - 10000;
+  while (bucket.length && bucket[0] < cutoff) bucket.shift();
+}
+
+function diagnosticRate(bucket) {
+  return bucket.length ? bucket.length / 10 : 0;
+}
+
+function formatDiagnosticAge(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${Math.max(0, number).toFixed(1)}s` : "--";
+}
+
+function updateTrafficDebugOverlay(data = null) {
+  if (!stratusDiagnosticsEl) return;
+  if (!trafficDebugEnabled) {
+    stratusDiagnosticsEl.hidden = true;
+    stratusDiagnosticsEl.innerHTML = "";
+    return;
+  }
+
+  const now = Date.now();
+  const bridgeAge = trafficPipelineDiagnostics.lastNativeWebResponseAt
+    ? (now - trafficPipelineDiagnostics.lastNativeWebResponseAt) / 1000
+    : null;
+  const jsAge = trafficPipelineDiagnostics.lastJsTrafficStateUpdateAt
+    ? (now - trafficPipelineDiagnostics.lastJsTrafficStateUpdateAt) / 1000
+    : null;
+  const renderAge = trafficPipelineDiagnostics.lastRadarTrafficRenderAt
+    ? (now - trafficPipelineDiagnostics.lastRadarTrafficRenderAt) / 1000
+    : null;
+  const payloadRate = diagnosticRate(trafficPipelineDiagnostics.jsPayloadTimestamps);
+  const internetRequestAge = trafficPipelineDiagnostics.internetLastRequestStartedAt
+    ? (now - trafficPipelineDiagnostics.internetLastRequestStartedAt) / 1000
+    : null;
+  const internetSuccessAge = trafficPipelineDiagnostics.internetLastSuccessAt
+    ? (now - trafficPipelineDiagnostics.internetLastSuccessAt) / 1000
+    : null;
+  const internetRequestRate = diagnosticRate(trafficPipelineDiagnostics.internetRequestTimestamps) * 60;
+  const internetSuccessRate = diagnosticRate(trafficPipelineDiagnostics.internetSuccessTimestamps) * 60;
+  const state = String(data?.receiverState || trafficPipelineDiagnostics.lastBridgeState || "waiting").toUpperCase();
+  const target = trafficPipelineDiagnostics.debugTargetState;
+  const confirmedAge = target?.confirmedTimestamp ? (now - Number(target.confirmedTimestamp)) / 1000 : null;
+  const upstreamAge = trafficPipelineDiagnostics.internetLastUpstreamFetchedAt
+    ? (now - Date.parse(trafficPipelineDiagnostics.internetLastUpstreamFetchedAt)) / 1000
+    : null;
+  const confirmedPosition = target?.confirmedPosition;
+  const displayedPosition = target?.displayedPosition;
+
+  stratusDiagnosticsEl.hidden = false;
+  stratusDiagnosticsEl.innerHTML = `
+    <span>UDP <strong>${formatDiagnosticAge(data?.lastUdpReceiveAgeSeconds)}</strong></span>
+    <span>PKT/S <strong>${Number(data?.packetsPerSecond || 0).toFixed(1)}</strong></span>
+    <span>FRAME <strong>${formatDiagnosticAge(data?.lastDecodedFrameAgeSeconds)}</strong></span>
+    <span>FR/S <strong>${Number(data?.framesPerSecond || 0).toFixed(1)}</strong></span>
+    <span>TRAFFIC <strong>${formatDiagnosticAge(data?.lastTrafficReportAgeSeconds)}</strong></span>
+    <span>TR/S <strong>${Number(data?.trafficFramesPerSecond || 0).toFixed(1)}</strong></span>
+    <span>SWEEP <strong>${trafficPipelineDiagnostics.sweepCount}</strong></span>
+    <span>PERIOD <strong>${Number(trafficPipelineDiagnostics.sweepPeriodSeconds || sweepSeconds).toFixed(1)}s</strong></span>
+    <span>FRESH <strong>${trafficPipelineDiagnostics.freshTargetsThisSweep}</strong></span>
+    <span>FADE <strong>${trafficPipelineDiagnostics.fadingTargetsThisSweep}</strong></span>
+    <span>BRIDGE <strong>${formatDiagnosticAge(bridgeAge)}</strong></span>
+    <span>JS <strong>${formatDiagnosticAge(jsAge)}</strong></span>
+    <span>PUSH/S <strong>${payloadRate.toFixed(1)}</strong></span>
+    <span>NET REQ <strong>${formatDiagnosticAge(internetRequestAge)}</strong></span>
+    <span>NET OK <strong>${formatDiagnosticAge(internetSuccessAge)}</strong></span>
+    <span>NET/M <strong>${internetRequestRate.toFixed(1)}</strong></span>
+    <span>OK/M <strong>${internetSuccessRate.toFixed(1)}</strong></span>
+    <span>NET MS <strong>${Math.round(trafficPipelineDiagnostics.internetLastRequestDurationMs || 0)}</strong></span>
+    <span>INTERNET HTTP <strong>${escapeHtml(String(trafficPipelineDiagnostics.internetLastHttpStatus || "--"))}</strong></span>
+    <span>TARGETS <strong>${trafficPipelineDiagnostics.internetLastTargetCount ?? "--"}</strong></span>
+    <span>DATA AGE <strong>${escapeHtml(String(trafficPipelineDiagnostics.internetLastDataAgeSeconds ?? "--"))}</strong></span>
+    <span>NEXT REFRESH <strong>${escapeHtml(String(trafficPipelineDiagnostics.internetLastNextRefreshEligibleSeconds ?? "--"))}</strong></span>
+    <span>PROV <strong>${escapeHtml(trafficPipelineDiagnostics.internetLastProvider || "--")}</strong></span>
+    <span>CACHE <strong>${escapeHtml(trafficPipelineDiagnostics.internetLastCacheSource || target?.cacheSource || "--")}</strong></span>
+    <span>SNAP <strong>${escapeHtml((trafficPipelineDiagnostics.internetLastSnapshotId || target?.receivedSnapshotId || "--").slice(0, 16))}</strong></span>
+    <span>HASH <strong>${escapeHtml((trafficPipelineDiagnostics.internetLastSnapshotHash || "--").slice(0, 12))}</strong></span>
+    <span>UP AGE <strong>${formatDiagnosticAge(upstreamAge)}</strong></span>
+    <span>AC <strong>${escapeHtml(target?.callsign || target?.key || "--")}</strong></span>
+    <span>SEQ <strong>${target?.positionSequence ?? "--"}</strong></span>
+    <span>OBS AGE <strong>${formatDiagnosticAge(confirmedAge)}</strong></span>
+    <span>DECISION <strong>${escapeHtml(target?.observationDecision || "--")}</strong></span>
+    <span>POS <strong>${escapeHtml(
+      confirmedPosition
+        ? `${Number(confirmedPosition.lat).toFixed(5)},${Number(confirmedPosition.lon).toFixed(5)}`
+        : "--"
+    )}</strong></span>
+    <span>DISPLAY POS <strong>${escapeHtml(
+      displayedPosition
+        ? `${Number(displayedPosition.lat).toFixed(5)},${Number(displayedPosition.lon).toFixed(5)}`
+        : "--"
+    )}</strong></span>
+    <span>DISPLAY MODE <strong>${escapeHtml(target?.displayPositionSource || "--")}</strong></span>
+    <span>PRED AGE <strong>${formatDiagnosticAge(target?.predictionAgeSeconds)}</strong></span>
+    <span>RENDER <strong>${formatDiagnosticAge(renderAge)}</strong></span>
+    <span>DISPLAY <strong>${aircraft.length}</strong></span>
+    <span>ASP <strong>${trafficPipelineDiagnostics.airspaceFeatureCount}</strong></span>
+    <span>DUP <strong>${trafficPipelineDiagnostics.airspaceDuplicateFeatureCount}</strong></span>
+    <span>ASP LAYOUT/M <strong>${trafficPipelineDiagnostics.airspaceLabelLayoutRecalculationsPerMinute}</strong></span>
+    <span>ASP DRAW/M <strong>${trafficPipelineDiagnostics.airspaceRedrawsPerMinute}</strong></span>
+    <span>SRC <strong>${escapeHtml(trafficPipelineDiagnostics.selectedTrafficSource || "none")}</strong></span>
+    <span>STATE <strong>${escapeHtml(state)}</strong></span>
+  `;
 }
 
 function setStatusText(message) {
@@ -842,9 +1379,7 @@ function activeTrackHeadingSource() {
 
 function updateStratusDiagnostics(data = null) {
   if (!stratusDiagnosticsEl) return;
-
-  stratusDiagnosticsEl.hidden = true;
-  stratusDiagnosticsEl.innerHTML = "";
+  updateTrafficDebugOverlay(data);
 }
 
 function setOrientationMode(mode, { persist = true } = {}) {
@@ -895,7 +1430,7 @@ function applyNativeDeviceHeading(data = {}) {
   const heading = parseHeadingDegrees(data.deviceHeading);
   if (!Number.isFinite(heading)) return;
   if (Number.isFinite(headingAge) && headingAge > 15) return;
-  compassHeadingDegrees = heading;
+  applyCompassHeading(heading, { accuracy: data.deviceHeadingAccuracy, source: "native" });
 }
 
 function updateDeviceThermalBadge(data = null) {
@@ -1151,11 +1686,14 @@ function updatePerformanceTelemetry() {
   `;
 }
 
-function setPerformanceMode(mode, { automatic = false } = {}) {
+function setPerformanceMode(mode, { automatic = false, persist = true } = {}) {
   performanceMode = ["cool", "reduced", "fast"].includes(mode) ? mode : "reduced";
   reducedLoad = performanceMode !== "fast";
-  window.localStorage.setItem("ADSB_RADAR_PERFORMANCE_MODE", performanceMode);
-  window.localStorage.setItem("ADSB_RADAR_REDUCED_LOAD", reducedLoad ? "true" : "false");
+  if (persist && !automatic) {
+    window.localStorage.setItem(performanceModeStorageKey, performanceMode);
+    window.localStorage.setItem(performanceModeSelectionKey, "true");
+    window.localStorage.setItem("ADSB_RADAR_REDUCED_LOAD", reducedLoad ? "true" : "false");
+  }
   document.body.classList.toggle("reduced-load", reducedLoad);
   shell.classList.toggle("reduced-load", reducedLoad);
   document.body.classList.toggle("cool-load", performanceMode === "cool");
@@ -1208,11 +1746,30 @@ function maybeRefreshDeviceStatus() {
 
 function updatePanelToggle() {
   const collapsed = shell.classList.contains("panel-collapsed");
+  shell.classList.toggle("portrait-menu-open", isPortraitLayout() && !collapsed);
   panelToggle.setAttribute("aria-label", collapsed ? "Show panel" : "Hide panel");
   panelToggle.setAttribute("aria-expanded", String(!collapsed));
   if (!collapsed) renderList({ force: true });
   updateProximityAlert();
   updateBottomRangeButton();
+}
+
+function isPortraitLayout() {
+  const width = window.innerWidth || document.documentElement.clientWidth || 0;
+  const height = window.innerHeight || document.documentElement.clientHeight || 0;
+  return height > width;
+}
+
+function applyResponsivePanelMode({ initial = false } = {}) {
+  const portrait = isPortraitLayout();
+  shell.classList.toggle("portrait-layout", portrait);
+  if (portrait && initial) {
+    shell.classList.add("panel-collapsed");
+  }
+  if (!portrait) {
+    shell.classList.remove("portrait-menu-open");
+  }
+  updatePanelToggle();
 }
 
 function milesBetween(latA, lonA, latB, lonB) {
@@ -1328,7 +1885,7 @@ function parseAirportsCsv(csv) {
       const type = row[index.type];
       const ident = row[index.ident];
 
-      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !usefulTypes.has(type) || ident?.startsWith("US") || ident?.startsWith("AZ")) {
+      if (!Number.isFinite(lat) || !Number.isFinite(lon) || !usefulTypes.has(type)) {
         return null;
       }
 
@@ -1386,11 +1943,20 @@ function normalizeAircraft(raw) {
   const lon = parseNumber(raw.lon);
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
 
+  const rawAircraftType = String(raw.rawAircraftType || raw.t || raw.type || "").trim();
   return {
-    hex: String(raw.hex || raw.icao || ""),
+    hex: String(raw.hex || raw.icao || "").trim(),
+    icao: String(raw.icao || raw.hex || "").trim(),
     nNumber: String(raw.nNumber || raw.r || raw.reg || raw.registration || "").trim(),
+    registration: String(raw.registration || raw.nNumber || raw.r || raw.reg || "").trim(),
     callsign: String(raw.callsign || raw.flight || raw.call || "").trim(),
-    type: String(raw.t || raw.type || "").trim(),
+    rawAircraftType,
+    type: rawAircraftType,
+    manufacturer: String(raw.manufacturer || "").trim(),
+    model: String(raw.model || "").trim(),
+    displayType: String(raw.displayType || "").trim(),
+    aircraftCategory: String(raw.aircraftCategory || raw.category || "").trim(),
+    registryYear: Number(raw.registryYear) || null,
     sourceType: String(raw.sourceType || raw.source || raw.messagesource || raw.mlat_source || "").trim(),
     lat,
     lon,
@@ -1399,6 +1965,22 @@ function normalizeAircraft(raw) {
     track: raw.track ?? raw.true_heading ?? raw.nav_heading ?? null,
     verticalRate: raw.verticalRate ?? raw.baro_rate ?? raw.geom_rate ?? null,
     seen: raw.seen ?? null,
+    seenPos: raw.seenPos ?? raw.seen_pos ?? null,
+    positionObservedAt: raw.positionObservedAt ?? raw.updatedAt ?? raw.lastSeenAt ?? raw.timestamp ?? null,
+    positionTimestampTrusted: raw.positionTimestampTrusted ?? null,
+    positionTimestampSource: raw.positionTimestampSource || "",
+    sourceMessageTimestamp: raw.sourceMessageTimestamp ?? null,
+    sourcePositionAgeSeconds: raw.sourcePositionAgeSeconds ?? raw.seen_pos ?? null,
+    workerRetrievedAt: raw.workerRetrievedAt ?? null,
+    updatedAt: raw.updatedAt ?? raw.positionObservedAt ?? raw.lastSeenAt ?? raw.timestamp ?? null,
+    upstreamSnapshotId: raw.upstreamSnapshotId || "",
+    upstreamSnapshotHash: raw.upstreamSnapshotHash || "",
+    faaTrackNumber: String(raw.faaTrackNumber || "").trim(),
+    sourceFacility: String(raw.sourceFacility || "").trim(),
+    beaconCode: String(raw.beaconCode || "").trim(),
+    departure: String(raw.departure || "").trim(),
+    destination: String(raw.destination || "").trim(),
+    flightPlanCorrelated: Boolean(raw.flightPlanCorrelated),
     emergency: raw.emergency || null,
     category: raw.category || null
   };
@@ -1637,30 +2219,9 @@ function shouldPredictAircraft(plane) {
 }
 
 function predictedAircraftForDisplay(plane, now = Date.now()) {
-  if (!plane || !shouldPredictAircraft(plane)) return plane;
-
-  const key = aircraftKey(plane);
-  const latest = aircraftByKey(key) || plane;
-  const merged = { ...plane, ...latest };
-  const speedKts = Number(merged.speed);
-  const trackDegrees = Number(merged.track);
-  const updatedAt = Number(merged.positionReceivedAt || merged.liveUpdatedAt || lastFetchAt || now);
-  const ageSeconds = Math.max(0, (now - updatedAt) / 1000);
-
-  if (!Number.isFinite(speedKts) || speedKts < 20 || !Number.isFinite(trackDegrees) || ageSeconds < 0.25) {
-    return merged;
-  }
-
-  const predictionSeconds = Math.min(ageSeconds, 18);
-  const predictionMiles = (speedKts / 3600) * predictionSeconds * 1.15078;
-  const predicted = destinationPoint(merged.lat, merged.lon, trackDegrees, predictionMiles);
-  return {
-    ...merged,
-    lat: predicted.lat,
-    lon: predicted.lon,
-    predicted: true,
-    predictionAgeSeconds: predictionSeconds
-  };
+  if (!plane) return plane;
+  const displayPlane = trafficTargetStates.get(aircraftKey(plane))?.displayPlane;
+  return displayPlane ? { ...plane, ...displayPlane } : plane;
 }
 
 function altitudeBracketLabel() {
@@ -1953,13 +2514,11 @@ function renderManualThreatFocus() {
 
 function updateProximityAlert() {
   if (!proximityAlertEl) return;
-  const panelHidden = shell.classList.contains("panel-collapsed");
-  if (!gpsActive || !panelHidden || !isAlertDisplayDevice()) {
+  if (preparingTrafficAlertUI) return;
+  if (!gpsActive || !isAlertDisplayDevice()) {
     clearProximityAlert();
     return;
   }
-
-  if (renderManualThreatFocus()) return;
 
   const alert = visibleAircraft()
     .map(proximityCandidate)
@@ -1967,6 +2526,7 @@ function updateProximityAlert() {
     .sort((a, b) => a.distance - b.distance)[0];
 
   if (!alert) {
+    if (renderManualThreatFocus()) return;
     dismissedTrafficAlertKey = "";
     clearProximityAlert();
     return;
@@ -1984,13 +2544,10 @@ function updateProximityAlert() {
     return;
   }
 
+  const isNewAlert = alertKey !== proximityAlertKey || !trafficAlertActive || Boolean(manualThreatFocusKey);
+  if (isNewAlert) prepareUIForTrafficAlert();
+
   if (alertKey !== proximityAlertKey) {
-    const shouldReturnToArcAfterThreat = weatherMode;
-    if (weatherMode) {
-      returnToArcAfterThreat = shouldReturnToArcAfterThreat;
-      setWeatherMode(false);
-      setOrientationMode("track", { persist: false });
-    }
     if (!isDesktopArcDisplay() && radiusMiles !== 5) {
       setRange(5);
       fetchAirspace();
@@ -2167,7 +2724,8 @@ function breadcrumbLimitForAircraft(plane) {
   if (isTrackedAircraft(plane)) return trackedBreadcrumbLimit;
   const speed = aircraftSpeed(plane);
   const speedFactor = speed <= 60 ? 0.45 : speed <= 160 ? 0.7 : speed <= 300 ? 1 : speed <= 450 ? 1.35 : 1.7;
-  return Math.max(4, Math.min(40, Math.round(breadcrumbBaseLimit * speedFactor)));
+  const slowAircraftFactor = speed <= 160 ? slowAircraftBreadcrumbMultiplier : 1;
+  return Math.max(4, Math.min(40, Math.round(breadcrumbBaseLimit * speedFactor * slowAircraftFactor)));
 }
 
 function formatAirspaceAltitude(value, code) {
@@ -2182,6 +2740,76 @@ function getVisibleAirspaceClasses() {
   );
 }
 
+function getRequiredAirspaceClasses() {
+  const requiredClasses = getVisibleAirspaceClasses();
+  if (!showSmallAirports) {
+    requiredClasses.add("B");
+    requiredClasses.add("C");
+    requiredClasses.add("D");
+  }
+  return requiredClasses;
+}
+
+function applySavedAirspaceDefaults() {
+  if (!airspaceToggles) return;
+  for (const input of airspaceToggles.querySelectorAll("input[data-class]")) {
+    const saved = window.localStorage.getItem(`ADSB_RADAR_AIRSPACE_CLASS_${input.dataset.class}`);
+    if (saved === "true" || saved === "false") {
+      input.checked = saved === "true";
+    } else if (input.dataset.class === "SUA") {
+      input.checked = true;
+    }
+  }
+}
+
+function airspaceStableId(airspace, index = 0) {
+  return String(
+    airspace?.id ||
+      airspace?.ident ||
+      `${airspace?.classCode || "?"}:${airspace?.name || "unnamed"}:${airspace?.lower || "--"}:${airspace?.upper || "--"}:${index}`
+  );
+}
+
+function normalizeAirspaceSet(rows) {
+  const byId = new Map();
+  let duplicates = 0;
+  rows.forEach((airspace, index) => {
+    const id = airspaceStableId(airspace, index);
+    if (byId.has(id)) duplicates += 1;
+    byId.set(id, { ...airspace, id });
+  });
+  return {
+    rows: Array.from(byId.values()).sort((a, b) =>
+      `${a.classCode}:${a.name}:${a.id}`.localeCompare(`${b.classCode}:${b.name}:${b.id}`)
+    ),
+    duplicates
+  };
+}
+
+function invalidateAirspaceLayer(reason) {
+  airspaceLayerCache = null;
+  trafficPipelineDiagnostics.airspaceLayoutInvalidationReason = reason;
+}
+
+function setAirspaces(nextRows, reason) {
+  const normalized = normalizeAirspaceSet(nextRows || []);
+  airspaces = normalized.rows;
+  airportControlledAirspaceCache.clear();
+  airspaceDatasetVersion += 1;
+  airspaceLabelAnchorCache = new Map();
+  trafficPipelineDiagnostics.airspaceFeatureCount = airspaces.length;
+  trafficPipelineDiagnostics.airspaceDuplicateFeatureCount = normalized.duplicates;
+  invalidateAirspaceLayer(reason);
+  if (trafficDebugEnabled) {
+    console.info("Airspace dataset updated", {
+      reason,
+      featureCount: airspaces.length,
+      duplicateFeatureCount: normalized.duplicates,
+      loadedTileIds: trafficPipelineDiagnostics.airspaceLoadedTileIds
+    });
+  }
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -2191,16 +2819,25 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
-function normalizeNNumber(value) {
+function normalizeTrackingIdentifier(value, { assumeNNumber = false } = {}) {
   const cleaned = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (!cleaned) return "";
-  return cleaned.startsWith("N") ? cleaned : `N${cleaned}`;
+  return assumeNNumber && !cleaned.startsWith("N") ? `N${cleaned}` : cleaned;
+}
+
+function normalizeNNumber(value) {
+  return normalizeTrackingIdentifier(value, { assumeNNumber: true });
 }
 
 function loadTrackedAircraft() {
   try {
+    const suppressedUntil = Number(window.localStorage.getItem("ADSB_RADAR_TRACKING_CLEARED_UNTIL") || "0");
+    if (Number.isFinite(suppressedUntil) && Date.now() < suppressedUntil) {
+      window.localStorage.removeItem("ADSB_RADAR_TRACKED_AIRCRAFT");
+      return null;
+    }
     const saved = JSON.parse(window.localStorage.getItem("ADSB_RADAR_TRACKED_AIRCRAFT") || "null");
-    const nNumber = normalizeNNumber(saved?.nNumber);
+    const nNumber = normalizeTrackingIdentifier(saved?.nNumber);
     const criterion = saved?.criterion === "time" ? "time" : "distance";
     const value = Number(saved?.value);
     const isolate = Boolean(saved?.isolate);
@@ -2217,6 +2854,7 @@ function saveTrackedAircraft() {
     return;
   }
 
+  window.localStorage.removeItem("ADSB_RADAR_TRACKING_CLEARED_UNTIL");
   window.localStorage.setItem(
     "ADSB_RADAR_TRACKED_AIRCRAFT",
     JSON.stringify({
@@ -2228,8 +2866,45 @@ function saveTrackedAircraft() {
   );
 }
 
+function trackingDebugSnapshot() {
+  return {
+    trackedAircraft: trackedAircraft ? { ...trackedAircraft } : null,
+    savedTracking: window.localStorage.getItem("ADSB_RADAR_TRACKED_AIRCRAFT"),
+    clearedUntilSeconds: trackedAircraftClearedUntil ? ((trackedAircraftClearedUntil - Date.now()) / 1000).toFixed(1) : "none",
+    trackingButtonActive: Boolean(trackingOpen?.classList.contains("active")),
+    shellTrackingActive: Boolean(shell?.classList.contains("tracking-active")),
+    trackingAlertHidden: trackingAlertEl ? trackingAlertEl.hidden : null,
+    highlightedAircraft: Array.from(aircraftHighlights.keys()).slice(0, 8)
+  };
+}
+
+function logTrackingClearState(stage, extra = {}) {
+  if (!trafficDebugEnabled) return;
+  console.info("Tracking CLEAR diagnostics", {
+    stage,
+    ...extra,
+    snapshot: trackingDebugSnapshot()
+  });
+}
+
+function suppressTrackingRestore(durationMs = 5000) {
+  trackedAircraftClearedUntil = Date.now() + durationMs;
+  window.localStorage.setItem("ADSB_RADAR_TRACKING_CLEARED_UNTIL", String(trackedAircraftClearedUntil));
+  window.setTimeout(() => {
+    if (Date.now() >= trackedAircraftClearedUntil) {
+      window.localStorage.removeItem("ADSB_RADAR_TRACKING_CLEARED_UNTIL");
+      trackedAircraftClearedUntil = 0;
+    }
+  }, durationMs + 250);
+}
+
 function trackedAircraftKeyValue(plane) {
-  return normalizeNNumber(plane?.nNumber || (/^N[0-9A-Z]+$/i.test(String(plane?.callsign || "").trim()) ? plane.callsign : ""));
+  const nNumber = normalizeNNumber(plane?.nNumber);
+  if (nNumber) return nNumber;
+
+  const callsign = normalizeTrackingIdentifier(plane?.callsign);
+  if (callsign && !["UNKNOWN", "TISBOTHER", "TISB"].includes(callsign)) return callsign;
+  return "";
 }
 
 function isTrackedAircraft(plane) {
@@ -2423,7 +3098,17 @@ function finishQuickNotesClearHold(event) {
 }
 
 function planeLabel(plane) {
-  return plane.nNumber || plane.callsign || plane.hex || "Unknown";
+  const callsign = usefulAircraftCallsign(plane);
+  if (callsign || plane.registration || plane.nNumber) return callsign || plane.registration || plane.nNumber;
+  const icaoHex = normalizeIcaoHex(plane.hex || plane.icao);
+  if (icaoHex) return `ICAO ${icaoHex}`;
+  const trackId = plane.faaTrackNumber || plane.hex;
+  return trackId ? `TRACK ${String(trackId).toUpperCase()}` : "Unknown";
+}
+
+function usefulAircraftCallsign(plane) {
+  const callsign = String(plane?.callsign || "").trim().toUpperCase();
+  return callsign && !["UNKNOWN", "TISB_OTHER", "TIS-B", "TISBOTHER"].includes(callsign) ? callsign : "";
 }
 
 function isAsiArcher(plane) {
@@ -2442,7 +3127,7 @@ function aircraftType(plane) {
   if (isAsiArcher(plane)) return "PA28";
   if (isScaCessna172(plane)) return "C172";
   if (isVarCirrusSr20(plane)) return "SR20";
-  const type = String(plane.type || plane.resolvedType || "").trim();
+  const type = String(plane.displayType || plane.type || plane.resolvedType || "").trim();
   return type.toLowerCase() === "adsb_icao" ? "Pvt" : type;
 }
 
@@ -2464,6 +3149,8 @@ function titleCaseAircraftText(value) {
 
 function friendlyAircraftType(plane) {
   if (plane.friendlyType) return plane.friendlyType;
+  const registryType = [plane.manufacturer, plane.model].filter(Boolean).join(" ").trim();
+  if (registryType) return titleCaseAircraftText(registryType);
   if (isAsiArcher(plane)) return "Piper Archer";
   if (isScaCessna172(plane)) return "Cessna 172";
   if (isVarCirrusSr20(plane)) return "Cirrus SR20";
@@ -2481,6 +3168,33 @@ function aircraftDisplayLabel(plane) {
   const type = aircraftType(plane);
   const ident = planeLabel(plane);
   return type ? `${type} ${ident}` : ident;
+}
+
+async function enrichAircraftIdentities(nextAircraft) {
+  const byHex = new Map();
+  for (const plane of nextAircraft) {
+    const hex = normalizeIcaoHex(plane.hex || plane.icao);
+    if (!hex) continue;
+    if (!byHex.has(hex)) byHex.set(hex, []);
+    byHex.get(hex).push(plane);
+  }
+
+  await Promise.all(
+    [...byHex.entries()].map(async ([hex, planes]) => {
+      const record = await faaAircraftRegistry.resolve(hex);
+      if (!record) return;
+      for (const plane of planes) {
+        plane.registration = plane.registration || plane.nNumber || record.registration;
+        plane.nNumber = plane.nNumber || record.registration;
+        plane.manufacturer = plane.manufacturer || record.manufacturer;
+        plane.model = plane.model || record.model;
+        plane.aircraftCategory = plane.aircraftCategory || record.category;
+        plane.registryYear = plane.registryYear || record.year;
+        plane.displayType = plane.displayType || record.displayType;
+        plane.identitySource = "FAA_REGISTRY";
+      }
+    })
+  );
 }
 
 function aircraftCompactLabel(plane) {
@@ -2687,6 +3401,440 @@ function appendTrackHistory(plane) {
   tracks.set(key, history.slice(-breadcrumbLimitForAircraft(plane)));
 }
 
+function trafficReportTimestamp(plane, receivedAt = Date.now()) {
+  const sourceTimestamp = sourcePositionTimestamp(plane);
+  if (Number.isFinite(sourceTimestamp)) return sourceTimestamp;
+
+  const seenSeconds = Number(plane.seen);
+  if (Number.isFinite(seenSeconds) && seenSeconds >= 0) return receivedAt - seenSeconds * 1000;
+  return receivedAt;
+}
+
+function trafficPositionChanged(previousPlane, nextPlane) {
+  return coordinatesMateriallyChanged(previousPlane, nextPlane);
+}
+
+function finiteMotionValue(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function predictionCorrectionDistance(previousDisplayPlane, confirmedPlane) {
+  if (!previousDisplayPlane?.predicted) return null;
+  const correctionMiles = distanceMilesBetween(
+    previousDisplayPlane.lat,
+    previousDisplayPlane.lon,
+    confirmedPlane.lat,
+    confirmedPlane.lon
+  );
+  return Number.isFinite(correctionMiles) ? correctionMiles : null;
+}
+
+function isPredictionDebugTarget(plane) {
+  const key = aircraftKey(plane);
+  return isTrackedAircraft(plane) || (proximityAlertKey && key === proximityAlertKey);
+}
+
+function recordPredictionCorrection(plane, previousState, confirmedTimestamp) {
+  const projectedAtConfirmation = projectInternetTrafficState(previousState, confirmedTimestamp);
+  const correctionMiles = predictionCorrectionDistance(projectedAtConfirmation, plane);
+  if (!Number.isFinite(correctionMiles)) return;
+
+  const sample = {
+    key: aircraftKey(plane),
+    callsign: plane.callsign || plane.nNumber || plane.hex || aircraftKey(plane),
+    confirmedTimestamp,
+    predictionAgeSeconds: Number(projectedAtConfirmation.predictionAgeSeconds || 0),
+    correctionMeters: Number((correctionMiles * 1609.344).toFixed(1)),
+    correctionNm: Number((correctionMiles * 0.868976).toFixed(3))
+  };
+  trafficPipelineDiagnostics.predictionCorrections.push(sample);
+  trafficPipelineDiagnostics.predictionCorrections = trafficPipelineDiagnostics.predictionCorrections.slice(-120);
+
+  if (trafficDebugEnabled && isPredictionDebugTarget(plane)) {
+    console.info("Traffic prediction corrected", {
+      ...sample,
+      confirmedPosition: { lat: plane.lat, lon: plane.lon },
+      projectedPosition: { lat: projectedAtConfirmation.lat, lon: projectedAtConfirmation.lon }
+    });
+  }
+}
+
+function projectInternetTrafficState(state, now = Date.now()) {
+  const projected = projectConfirmedTraffic(state, now);
+  if (!projected) return null;
+
+  return {
+    ...state.pendingPlane,
+    lat: projected.lat,
+    lon: projected.lon,
+    altitude: projected.altitude,
+    predicted: true,
+    displayPositionSource: "PREDICTED",
+    predictionAgeSeconds: projected.predictionAgeSeconds,
+    predictionGeneratedAt: projected.predictionGeneratedAt,
+    confirmedLat: state.confirmedLat,
+    confirmedLon: state.confirmedLon,
+    confirmedAltitude: state.confirmedAltitude,
+    confirmedTrack: state.confirmedTrack,
+    confirmedGroundSpeed: state.confirmedGroundSpeed,
+    confirmedVerticalRate: state.confirmedVerticalRate,
+    confirmedTimestamp: state.confirmedTimestamp
+  };
+}
+
+function ingestTrafficPositions(
+  nextAircraft,
+  receivedAt = Date.now(),
+  { sourceType = "unknown", snapshotId = "", responseMetadata = {} } = {}
+) {
+  const seenKeys = new Set();
+
+  for (const plane of nextAircraft) {
+    const key = aircraftKey(plane);
+    if (!key) continue;
+    seenKeys.add(key);
+
+    const previous = trafficTargetStates.get(key);
+    const reportTimestamp = trafficReportTimestamp(plane, receivedAt);
+    const previousReportTimestamp = Number(previous?.lastValidPositionTimestamp || 0);
+    const reportChanged = Math.abs(reportTimestamp - previousReportTimestamp) > 1;
+    const positionChanged = trafficPositionChanged(previous?.pendingPlane || previous?.displayPlane, plane);
+    const sourceChanged = Boolean(previous && previous.sourceType !== sourceType);
+    const observation =
+      sourceType === "internet" || sourceType === "faa"
+        ? classifyInternetPositionObservation(previous, plane, snapshotId)
+        : {
+            isNewPosition: !previous || sourceChanged || reportChanged || positionChanged,
+            reason: !previous
+              ? "first observation"
+              : sourceChanged
+                ? "traffic source changed"
+                : reportChanged
+                  ? "source report timestamp advanced"
+                  : positionChanged
+                    ? "coordinates changed"
+                    : "duplicate observation",
+            positionTimestamp: reportTimestamp,
+            snapshotId: ""
+          };
+    const hasFreshPosition = !previous || sourceChanged || observation.isNewPosition;
+    const confirmedTimestamp = observation.positionTimestamp ?? receivedAt;
+    const nativeTrack = finiteMotionValue(plane.track);
+    const nativeSpeed = finiteMotionValue(plane.speed);
+    const derivedMotion =
+      hasFreshPosition && sourceType === "faa" && previous && !sourceChanged
+        ? deriveConfirmedMotion(previous, plane, confirmedTimestamp)
+        : {
+            accepted: false,
+            reason: previous ? "no new FAA position" : "first FAA position",
+            track: finiteMotionValue(previous?.derivedTrack ?? previous?.confirmedTrack),
+            groundspeed: finiteMotionValue(previous?.derivedGroundSpeed ?? previous?.confirmedGroundSpeed)
+          };
+    const effectiveTrack = nativeTrack ?? derivedMotion.track;
+    const effectiveGroundSpeed = nativeSpeed ?? derivedMotion.groundspeed;
+    const confirmedPlane = {
+      ...plane,
+      track: effectiveTrack,
+      speed: effectiveGroundSpeed,
+      derivedTrack: sourceType === "faa" && nativeTrack === null ? effectiveTrack : null,
+      derivedGroundSpeed: sourceType === "faa" && nativeSpeed === null ? effectiveGroundSpeed : null,
+      motionSource:
+        nativeTrack !== null && nativeSpeed !== null
+          ? "SOURCE"
+          : derivedMotion.accepted
+            ? "CONFIRMED_POSITIONS"
+            : effectiveTrack !== null
+              ? "PREVIOUS_CONFIRMED_MOTION"
+              : "UNKNOWN"
+    };
+    const positionSequence = hasFreshPosition ? ++trafficPositionSequence : previous.positionSequence;
+    const pendingPlane = {
+      ...(previous?.pendingPlane || {}),
+      ...confirmedPlane,
+      positionReceivedAt: receivedAt,
+      lastValidPositionTimestamp: hasFreshPosition
+        ? observation.positionTimestamp ?? receivedAt
+        : previous?.lastValidPositionTimestamp ?? observation.positionTimestamp ?? receivedAt,
+      positionSequence
+    };
+
+    if (hasFreshPosition && (sourceType === "internet" || sourceType === "faa")) {
+      recordPredictionCorrection(confirmedPlane, previous, confirmedTimestamp);
+    }
+
+    trafficTargetStates.set(key, {
+      key,
+      pendingPlane,
+      displayPlane: previous?.displayPlane || null,
+      positionSequence,
+      lastSweepSeenSequence: previous?.lastSweepSeenSequence || 0,
+      lastValidPositionTimestamp: hasFreshPosition
+        ? observation.positionTimestamp ?? receivedAt
+        : previous?.lastValidPositionTimestamp ?? observation.positionTimestamp ?? receivedAt,
+      previousValidPositionTimestamp: hasFreshPosition
+        ? previous?.lastValidPositionTimestamp || null
+        : previous?.previousValidPositionTimestamp || null,
+      lastIngestAt: receivedAt,
+      receivedFreshPositionSinceLastSweep: Boolean(hasFreshPosition || previous?.receivedFreshPositionSinceLastSweep),
+      opacity: previous?.opacity ?? 1,
+      sourceType,
+      previousConfirmedLat: hasFreshPosition ? previous?.confirmedLat ?? null : previous?.previousConfirmedLat ?? null,
+      previousConfirmedLon: hasFreshPosition ? previous?.confirmedLon ?? null : previous?.previousConfirmedLon ?? null,
+      previousConfirmedTimestamp: hasFreshPosition
+        ? previous?.confirmedTimestamp ?? null
+        : previous?.previousConfirmedTimestamp ?? null,
+      confirmedLat: hasFreshPosition ? confirmedPlane.lat : previous?.confirmedLat ?? confirmedPlane.lat,
+      confirmedLon: hasFreshPosition ? confirmedPlane.lon : previous?.confirmedLon ?? confirmedPlane.lon,
+      confirmedAltitude: hasFreshPosition
+        ? confirmedPlane.altitude
+        : previous?.confirmedAltitude ?? confirmedPlane.altitude,
+      confirmedTrack: hasFreshPosition
+        ? effectiveTrack
+        : previous?.confirmedTrack ?? effectiveTrack,
+      confirmedGroundSpeed: hasFreshPosition
+        ? effectiveGroundSpeed
+        : previous?.confirmedGroundSpeed ?? effectiveGroundSpeed,
+      confirmedVerticalRate: hasFreshPosition
+        ? confirmedPlane.verticalRate
+        : previous?.confirmedVerticalRate ?? confirmedPlane.verticalRate,
+      confirmedTimestamp: hasFreshPosition
+        ? confirmedTimestamp
+        : previous?.confirmedTimestamp ?? confirmedTimestamp,
+      derivedTrack: hasFreshPosition
+        ? sourceType === "faa" && nativeTrack === null
+          ? effectiveTrack
+          : null
+        : previous?.derivedTrack ?? null,
+      derivedGroundSpeed: hasFreshPosition
+        ? sourceType === "faa" && nativeSpeed === null
+          ? effectiveGroundSpeed
+          : null
+        : previous?.derivedGroundSpeed ?? null,
+      motionDerivation: hasFreshPosition ? derivedMotion : previous?.motionDerivation ?? derivedMotion,
+      confirmedSnapshotId: hasFreshPosition
+        ? observation.snapshotId || snapshotId
+        : previous?.confirmedSnapshotId || observation.snapshotId || snapshotId,
+      lastReceivedSnapshotId: observation.snapshotId || snapshotId,
+      lastObservationDecision: observation.reason,
+      lastResponseMetadata: responseMetadata
+    });
+
+    if (trafficDebugEnabled && isPredictionDebugTarget(plane)) {
+    console.info(sourceType === "faa" ? "FAA TAIS traffic ingestion" : "Internet traffic ingestion", {
+        receivedAt,
+        snapshotId: observation.snapshotId || snapshotId || "--",
+        hex: plane.hex,
+        callsign: plane.callsign,
+        receivedPosition: { lat: confirmedPlane.lat, lon: confirmedPlane.lon },
+        sourcePositionTimestamp: observation.positionTimestamp,
+        previousConfirmedPosition: previous
+          ? { lat: previous.confirmedLat, lon: previous.confirmedLon }
+          : null,
+        previousConfirmedTimestamp: previous?.confirmedTimestamp ?? null,
+        classifiedAsNewPosition: hasFreshPosition,
+        positionSequence,
+        reason: observation.reason,
+        sourceIdentity: confirmedPlane.icao || confirmedPlane.hex || key,
+        faaTrackIdentity:
+          confirmedPlane.sourceFacility && confirmedPlane.faaTrackNumber
+            ? `${confirmedPlane.sourceFacility}-${confirmedPlane.faaTrackNumber}`
+            : "--",
+        derivedTrack: effectiveTrack,
+        derivedGroundSpeed: effectiveGroundSpeed,
+        motionDerivation: derivedMotion,
+        predictionOriginReset: hasFreshPosition && (sourceType === "internet" || sourceType === "faa")
+      });
+    }
+  }
+
+  const staleCutoff = receivedAt - 10 * 60 * 1000;
+  for (const [key, state] of trafficTargetStates.entries()) {
+    if (!seenKeys.has(key) && Number(state.lastIngestAt || 0) < staleCutoff) {
+      trafficTargetStates.delete(key);
+    }
+  }
+}
+
+function trafficSweepFadeStep() {
+  const fadeSweeps = Math.max(3, Math.round(radarFadeMs / (sweepSeconds * 1000)));
+  return 1 / fadeSweeps;
+}
+
+function removeTrafficTargetPresentation(key) {
+  radarBlips.delete(key);
+  trafficTargetStates.delete(key);
+}
+
+function processTrafficSweepPresentation(
+  previousBearing,
+  currentBearing,
+  { mode = "radar", sweepPassId = "", direction = "clockwise" } = {}
+) {
+  const now = Date.now();
+  const fadeStep = trafficSweepFadeStep();
+  let fresh = 0;
+  let fading = 0;
+  let predicted = 0;
+  let removed = 0;
+  let debugState = null;
+
+  for (const [key, state] of trafficTargetStates.entries()) {
+    const pendingPlane = state.pendingPlane;
+    const currentBlip = radarBlips.get(key);
+    const referencePlane = pendingPlane || currentBlip;
+    if (!referencePlane) {
+      removeTrafficTargetPresentation(key);
+      removed += 1;
+      continue;
+    }
+
+    const targetTooOld = now - Number(state.lastValidPositionTimestamp || state.lastIngestAt || 0) > 10 * 60 * 1000;
+    const outOfRange = milesBetween(center.lat, center.lon, referencePlane.lat, referencePlane.lon) > radiusMiles + 1;
+    if (targetTooOld || outOfRange) {
+      removeTrafficTargetPresentation(key);
+      removed += 1;
+      continue;
+    }
+
+    const hasFreshPosition = state.positionSequence !== state.lastSweepSeenSequence;
+    const confirmedCandidate = hasFreshPosition
+      ? { ...pendingPlane, predicted: false, displayPositionSource: "CONFIRMED", predictionAgeSeconds: 0 }
+      : null;
+    const predictedPlane = hasFreshPosition ? null : projectInternetTrafficState(state, now);
+    const candidatePlane = confirmedCandidate || predictedPlane || currentBlip || pendingPlane;
+    const candidateBearing = bearingDegrees(center.lat, center.lon, candidatePlane.lat, candidatePlane.lon);
+    // The 360 sweep arm rotates in screen space. Track Up rotates traffic beneath it,
+    // so gate each return on its displayed bearing rather than its raw compass bearing.
+    const candidateSweepBearing =
+      mode === "radar"
+        ? displaySweepBearing(candidateBearing, radarRotationDegrees())
+        : candidateBearing;
+    const crossed =
+      state.lastPaintedSweepPassId !== sweepPassId &&
+      sweepCrossedBearing(previousBearing, currentBearing, candidateSweepBearing, { direction });
+    if (!crossed) continue;
+
+    const decision = sweepPaintDecision(
+      { opacity: currentBlip?.radarOpacity ?? state.opacity ?? 1 },
+      { crossed, confirmedCandidate, predictedCandidate: predictedPlane, fadeStep }
+    );
+    if (decision.action === "remove") {
+      removeTrafficTargetPresentation(key);
+      removed += 1;
+      continue;
+    }
+
+    const nextOpacity = decision.opacity;
+    const displayPlane = decision.candidate || currentBlip || pendingPlane;
+    const nextBlip = {
+      ...displayPlane,
+      radarSeenAt: hasFreshPosition ? now : currentBlip?.radarSeenAt || now,
+      liveUpdatedAt: pendingPlane?.positionReceivedAt || currentBlip?.liveUpdatedAt || now,
+      radarOpacity: nextOpacity,
+      lastRenderedSweep: sweepSequence,
+      lastSweepPassId: sweepPassId,
+      lastPaintedBearing: candidateBearing,
+      lastPositionSequence: state.positionSequence
+    };
+
+    radarBlips.set(key, nextBlip);
+    trafficTargetStates.set(key, {
+      ...state,
+      displayPlane: nextBlip,
+      lastSweepSeenSequence: hasFreshPosition ? state.positionSequence : state.lastSweepSeenSequence,
+      receivedFreshPositionSinceLastSweep: false,
+      opacity: nextOpacity,
+      lastRenderedSweep: sweepSequence,
+      lastPaintedBearing: candidateBearing,
+      lastPaintedSweepPassId: sweepPassId
+    });
+
+    if (hasFreshPosition) {
+      fresh += 1;
+      appendTrackHistory(nextBlip);
+    } else if (predictedPlane) {
+      predicted += 1;
+    } else {
+      fading += 1;
+    }
+
+    if (!debugState || isTrackedAircraft(nextBlip) || key === proximityAlertKey) {
+      const latestCorrection = [...trafficPipelineDiagnostics.predictionCorrections]
+        .reverse()
+        .find((sample) => sample.key === key);
+      debugState = {
+        key,
+        callsign: nextBlip.callsign || nextBlip.nNumber || nextBlip.hex || key,
+        sourceIdentity: nextBlip.icao || nextBlip.hex || key,
+        faaTrackIdentity:
+          nextBlip.sourceFacility && nextBlip.faaTrackNumber
+            ? `${nextBlip.sourceFacility}-${nextBlip.faaTrackNumber}`
+            : "--",
+        mode,
+        sweepSequence,
+        fresh: hasFreshPosition,
+        displayPositionSource: nextBlip.displayPositionSource || "CONFIRMED",
+        predictionAgeSeconds: Number(Number(nextBlip.predictionAgeSeconds || 0).toFixed(1)),
+        previousConfirmedPosition:
+          finiteMotionValue(state.previousConfirmedLat) !== null && finiteMotionValue(state.previousConfirmedLon) !== null
+            ? { lat: state.previousConfirmedLat, lon: state.previousConfirmedLon }
+            : null,
+        confirmedPosition: { lat: state.confirmedLat, lon: state.confirmedLon },
+        confirmedTimestamp: state.confirmedTimestamp,
+        previousConfirmedTimestamp: state.previousConfirmedTimestamp,
+        derivedTrack: state.derivedTrack,
+        derivedGroundSpeed: state.derivedGroundSpeed,
+        motionDerivation: state.motionDerivation,
+        displayedPosition: { lat: nextBlip.lat, lon: nextBlip.lon },
+        displayedTimestamp: nextBlip.predictionGeneratedAt || now,
+        opacity: Number(nextOpacity.toFixed(2)),
+        positionSequence: state.positionSequence,
+        confirmedSnapshotId: state.confirmedSnapshotId || "--",
+        receivedSnapshotId: state.lastReceivedSnapshotId || "--",
+        observationDecision: state.lastObservationDecision || "--",
+        provider: state.lastResponseMetadata?.provider || "--",
+        cacheSource: state.lastResponseMetadata?.cacheSource || "--",
+        upstreamFetchedAt: state.lastResponseMetadata?.upstreamFetchedAt || null,
+        lastSweepSeenSequence: hasFreshPosition ? state.positionSequence : state.lastSweepSeenSequence,
+        reportAgeSeconds: Number(((now - Number(state.lastValidPositionTimestamp || now)) / 1000).toFixed(1)),
+        reportIntervalSeconds:
+          state.previousValidPositionTimestamp && state.lastValidPositionTimestamp
+            ? Number(((state.lastValidPositionTimestamp - state.previousValidPositionTimestamp) / 1000).toFixed(1))
+            : null,
+        latestCorrectionErrorMeters: latestCorrection?.correctionMeters ?? null,
+        latestCorrectionErrorNm: latestCorrection?.correctionNm ?? null
+      };
+    }
+  }
+
+  trafficPipelineDiagnostics.sweepCount = sweepSequence;
+  trafficPipelineDiagnostics.sweepPeriodSeconds = mode === "wx" ? wxSweepSeconds : sweepSeconds;
+  trafficPipelineDiagnostics.freshTargetsThisSweep = fresh;
+  trafficPipelineDiagnostics.predictedTargetsThisSweep = predicted;
+  trafficPipelineDiagnostics.fadingTargetsThisSweep = fading;
+  trafficPipelineDiagnostics.removedTargetsThisSweep = removed;
+  trafficPipelineDiagnostics.debugTargetKey = debugState?.key || "";
+  trafficPipelineDiagnostics.debugTargetState = debugState;
+
+  if (trafficDebugEnabled && debugState) {
+    console.info("Sweep traffic presentation", {
+      sweepSequence,
+      mode,
+      previousBearing,
+      currentBearing,
+      sweepPassId,
+      freshTargets: fresh,
+      predictedTargets: predicted,
+      fadingTargets: fading,
+      removedTargets: removed,
+      liveTargets: trafficTargetStates.size,
+      debugTarget: debugState
+    });
+  }
+}
+
 function pruneRadarBlips(nextAircraft) {
   const latestKeys = new Set(nextAircraft.map(aircraftKey));
   const latestByKey = new Map(nextAircraft.map((plane) => [aircraftKey(plane), plane]));
@@ -2708,39 +3856,12 @@ function pruneRadarBlips(nextAircraft) {
 function refreshLiveStratusBlips(nextAircraft, data = {}) {
   const source = String(data.source || data.displaySource || "").toLowerCase();
   if (!source.includes("stratus") || data.stale) return;
-
-  for (const plane of nextAircraft) {
-    if (!isVisibleTraffic(plane)) continue;
-    if (milesBetween(center.lat, center.lon, plane.lat, plane.lon) > radiusMiles + 1) continue;
-
-    const key = aircraftKey(plane);
-    const previous = radarBlips.get(key);
-    if (previous) {
-      radarBlips.set(key, {
-        ...previous,
-        lat: plane.lat,
-        lon: plane.lon,
-        speed: plane.speed ?? previous.speed,
-        track: plane.track ?? previous.track,
-        verticalRate: plane.verticalRate ?? previous.verticalRate,
-        altitude: plane.altitude ?? previous.altitude,
-        geoAltitude: plane.geoAltitude ?? previous.geoAltitude,
-        seen: plane.seen ?? previous.seen,
-        positionReceivedAt: plane.positionReceivedAt ?? previous.positionReceivedAt,
-        liveUpdatedAt: Date.now()
-      });
-    } else {
-      radarBlips.set(key, {
-        ...plane,
-        radarSeenAt: 0,
-        liveUpdatedAt: Date.now()
-      });
-    }
-    appendTrackHistory(plane);
-  }
+  ingestTrafficPositions(nextAircraft, Date.now(), { sourceType: "stratus" });
 }
 
 function radarBlipAlpha(plane, now = Date.now()) {
+  if (Number.isFinite(Number(plane.radarOpacity))) return Math.max(0, Math.min(1, Number(plane.radarOpacity)));
+
   const age = now - (plane.radarSeenAt || 0);
   const sweepAlpha = Math.max(0, Math.min(1, 1 - age / radarFadeMs));
   const liveAge = now - (plane.liveUpdatedAt || 0);
@@ -2764,17 +3885,10 @@ function visibleRadarAircraft() {
 function updateRadarBlipsForSweep(angle) {
   const currentSweepAngle = normalizeRadians(angle);
 
-  for (const plane of aircraft) {
-    if (!isVisibleTraffic(plane)) continue;
-    if (milesBetween(center.lat, center.lon, plane.lat, plane.lon) > radiusMiles + 1) continue;
-
+  for (const plane of visibleRadarAircraft()) {
     const targetAngle = planeSweepAngle(plane);
     if (!sweepCrossedAngle(previousSweepAngle, currentSweepAngle, targetAngle)) continue;
-
-    const snapshot = { ...plane, radarSeenAt: Date.now() };
-    radarBlips.set(aircraftKey(plane), snapshot);
-    appendTrackHistory(snapshot);
-    if (wxDisplayMode !== "wxOnly") playContactBlip();
+    if (radarBlipAlpha(plane) > 0.85 && wxDisplayMode !== "wxOnly") playContactBlip();
   }
 
   previousSweepAngle = currentSweepAngle;
@@ -2788,21 +3902,10 @@ function angularDifference(a, b) {
 function updateRadarBlipsForWeatherSweep(angle) {
   const currentSweepAngle = normalizeRadians(angle);
 
-  for (const plane of aircraft) {
-    if (!isVisibleTraffic(plane)) continue;
-    if (milesBetween(center.lat, center.lon, plane.lat, plane.lon) > radiusMiles + 1) continue;
-
+  for (const plane of visibleRadarAircraft()) {
     const targetAngle = planeSweepAngle(plane);
     if (angularDifference(currentSweepAngle, targetAngle) > 0.16) continue;
-
-    const key = aircraftKey(plane);
-    const previousBlip = radarBlips.get(key);
-    if (previousBlip?.radarSeenAt && Date.now() - previousBlip.radarSeenAt < 450) continue;
-
-    const snapshot = { ...plane, radarSeenAt: Date.now() };
-    radarBlips.set(key, snapshot);
-    appendTrackHistory(snapshot);
-    if (wxDisplayMode !== "wxOnly") playContactBlip();
+    if (radarBlipAlpha(plane) > 0.85 && wxDisplayMode !== "wxOnly") playContactBlip();
   }
 }
 
@@ -2811,16 +3914,19 @@ async function getJson(url) {
 }
 
 async function loadAirportCache() {
-  if (airportRowsCache) {
+  const tileKey = offlineTileIdsForView(1.9).sort().join("|");
+  if (airportRowsCache && airportRowsCacheTileKey === tileKey) {
     refreshAirportCacheInBackground();
     return airportRowsCache;
   }
 
-  if (!airportsCachePromise) {
+  if (!airportsCachePromise || airportRowsCacheTileKey !== tileKey) {
+    airportRowsCacheTileKey = tileKey;
     airportsCachePromise = loadLocalAirportRows();
   }
 
   airportRowsCache = await airportsCachePromise;
+  airportRowsCacheTileKey = tileKey;
   refreshAirportCacheInBackground();
   return airportRowsCache;
 }
@@ -2853,6 +3959,11 @@ function normalizeBundledAirportRows(payload) {
       lon: parseNumber(airport.lon),
       elevationFt: parseNumber(airport.elevationFt),
       municipality: airport.municipality || "",
+      state: airport.state || "",
+      isoRegion: airport.isoRegion || airport.region || "",
+      icao: airport.icao || airport.gpsCode || "",
+      gpsCode: airport.gpsCode || airport.icao || "",
+      localCode: airport.localCode || airport.faa || "",
       iata: airport.iata || "",
       runways: Array.isArray(airport.runways) ? airport.runways : []
     }))
@@ -2911,13 +4022,181 @@ async function loadBundledAirportSeed() {
   }
 }
 
+async function loadBundledTileIndex() {
+  if (!bundledTileIndexPromise) {
+    bundledTileIndexPromise = fetchJsonWithTimeout(bundledTileIndexUrl, {
+      timeoutMs: 900,
+      cache: "force-cache"
+    }).catch((error) => {
+      console.warn("Bundled offline tile index unavailable; falling back to national files", error);
+      return null;
+    });
+  }
+  return bundledTileIndexPromise;
+}
+
+async function loadBundledAirportTile(tileId, tileInfo) {
+  if (!tileInfo?.file) return [];
+  if (!bundledAirportTilePromises.has(tileId)) {
+    bundledAirportTilePromises.set(
+      tileId,
+      fetchJsonWithTimeout(new URL(tileInfo.file, bundledTilesBaseUrl).href, {
+        timeoutMs: 900,
+        cache: "force-cache"
+      })
+        .then(normalizeBundledAirportRows)
+        .catch((error) => {
+          console.warn(`Bundled airport tile ${tileId} unavailable`, error);
+          return [];
+        })
+    );
+  }
+  return bundledAirportTilePromises.get(tileId);
+}
+
+async function loadLocalAirportTileRows() {
+  const index = await loadBundledTileIndex();
+  if (!index?.airports) return [];
+  const tileIds = offlineTileIdsForView(1.9);
+  const rows = (await Promise.all(tileIds.map((tileId) => loadBundledAirportTile(tileId, index.airports[tileId])))).flat();
+  return mergeRowsByKey(rows, [], "ident");
+}
+
 async function loadLocalAirportRows() {
   const persisted = storageReadJson("ADSB_RADAR_AIRPORT_ROWS", []);
-  const bundledPayload = await loadBundledAirportSeed();
-  const bundledRows = normalizeBundledAirportRows(bundledPayload);
+  const tiledRows = await loadLocalAirportTileRows();
+  const bundledRows = tiledRows.length ? tiledRows : normalizeBundledAirportRows(await loadBundledAirportSeed());
   const rows = mergeRowsByKey(persisted, bundledRows, "ident");
   offlineAirportDataActive = rows.length > 0;
   return rows;
+}
+
+async function loadNationwideAirportSearchRows() {
+  if (!nationwideAirportSearchPromise) {
+    nationwideAirportSearchPromise = loadBundledAirportSeed()
+      .then(normalizeBundledAirportRows)
+      .then((rows) => mergeRowsByKey(rows, storageReadJson("ADSB_RADAR_AIRPORT_ROWS", []), "ident"))
+      .catch((error) => {
+        console.warn("Nationwide airport search unavailable; using visible local airport cache", error);
+        return loadAirportCache();
+      });
+  }
+  return nationwideAirportSearchPromise;
+}
+
+function airportContextLabel(airport) {
+  const parts = [airport.municipality, airport.state, airport.isoRegion]
+    .map((part) => String(part || "").replace(/^US-/, "").trim())
+    .filter(Boolean);
+  return parts.join(", ");
+}
+
+function airportSearchText(airport) {
+  return [
+    airport.ident,
+    airport.icao,
+    airport.gpsCode,
+    airport.localCode,
+    airport.iata,
+    airport.name,
+    airport.municipality,
+    airport.state,
+    airport.isoRegion
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function scoreAirportSearchResult(airport, query) {
+  const q = query.toLowerCase().trim();
+  if (!q) return -1;
+  const identifiers = [airport.ident, airport.icao, airport.gpsCode, airport.localCode, airport.iata]
+    .filter(Boolean)
+    .map((value) => String(value).toLowerCase());
+  if (identifiers.some((value) => value === q)) return 100000 + airportSizeScore(airport);
+  if (identifiers.some((value) => value.startsWith(q))) return 80000 + airportSizeScore(airport);
+  const name = String(airport.name || "").toLowerCase();
+  if (name === q) return 70000 + airportSizeScore(airport);
+  if (name.startsWith(q)) return 60000 + airportSizeScore(airport);
+  const context = airportSearchText(airport);
+  if (context.includes(q)) return 30000 + airportSizeScore(airport);
+  const words = q.split(/\s+/).filter(Boolean);
+  if (words.length > 1 && words.every((word) => context.includes(word))) return 20000 + airportSizeScore(airport);
+  return -1;
+}
+
+function renderAirportSearchResults(results) {
+  if (!airportSearchResults || !airportSearchInput) return;
+  airportSearchResults.innerHTML = "";
+  if (!results.length) {
+    airportSearchResults.hidden = true;
+    airportSearchInput.setAttribute("aria-expanded", "false");
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  for (const airport of results) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "airport-result";
+    button.setAttribute("role", "option");
+    button.dataset.lat = String(airport.lat);
+    button.dataset.lon = String(airport.lon);
+    button.dataset.ident = airport.ident || "";
+    button.dataset.label = `${airport.ident || airport.iata || "AIRPORT"} - ${airport.name || "Airport"}`;
+    const context = airportContextLabel(airport);
+    button.innerHTML = `<strong>${escapeHtml(airport.ident || airport.iata || "----")} - ${escapeHtml(airport.name || "Airport")}</strong><span>${escapeHtml(context || airport.type || "")}</span>`;
+    fragment.appendChild(button);
+  }
+  airportSearchResults.appendChild(fragment);
+  airportSearchResults.hidden = false;
+  airportSearchInput.setAttribute("aria-expanded", "true");
+}
+
+async function updateAirportSearchResults() {
+  if (!airportSearchInput) return;
+  const query = airportSearchInput.value.trim();
+  if (!query || query.length < 2) {
+    renderAirportSearchResults([]);
+    return;
+  }
+  const rows = await loadNationwideAirportSearchRows();
+  const ranked = rows
+    .map((airport) => ({ airport, score: scoreAirportSearchResult(airport, query) }))
+    .filter((entry) => entry.score >= 0)
+    .sort((a, b) => b.score - a.score || String(a.airport.ident).localeCompare(String(b.airport.ident)))
+    .slice(0, 12)
+    .map((entry) => entry.airport);
+  renderAirportSearchResults(ranked);
+}
+
+function setAirportSearchLabel(label) {
+  selectedAirportLabel = label || selectedAirportLabel;
+  if (airportSearchLabel) airportSearchLabel.textContent = selectedAirportLabel;
+  if (airportSearchInput && document.activeElement !== airportSearchInput) {
+    airportSearchInput.value = selectedAirportLabel;
+  }
+}
+
+function openAirportSearchModal() {
+  if (!airportSearchModal || !airportSearchInput) return;
+  airportSearchModal.hidden = false;
+  shell.classList.add("airport-search-open");
+  airportSearchInput.value = selectedAirportLabel === "Use GPS location" || selectedAirportLabel === "Custom coordinates" ? "" : selectedAirportLabel;
+  renderAirportSearchResults([]);
+  window.setTimeout(() => {
+    airportSearchInput.focus();
+    airportSearchInput.select();
+  }, 80);
+}
+
+function closeAirportSearchModal() {
+  if (!airportSearchModal) return;
+  airportSearchModal.hidden = true;
+  shell.classList.remove("airport-search-open");
+  renderAirportSearchResults([]);
+  setAirportSearchLabel(selectedAirportLabel);
 }
 
 async function loadLocalRunwayRows() {
@@ -2937,6 +4216,7 @@ function refreshAirportCacheInBackground() {
     .then((rows) => {
       if (!rows.length) throw new Error("Airport refresh returned no usable rows");
       airportRowsCache = rows;
+      airportRowsCacheTileKey = "online";
       airportsCachePromise = Promise.resolve(rows);
       storageWriteJson("ADSB_RADAR_AIRPORT_ROWS", rows);
       offlineAirportDataActive = false;
@@ -2994,19 +4274,14 @@ function attachRunwaysToAirports(airportRows, runwayRows) {
 
   return airportRows.map((airport) => ({
     ...airport,
-    runways: (runwaysByAirport.get(airport.ident) || [])
+    runways: (runwaysByAirport.get(airport.ident) || airport.runways || [])
       .sort((a, b) => (b.lengthFt || 0) - (a.lengthFt || 0))
       .slice(0, 12)
   }));
 }
 
-async function fetchStaticTraffic() {
-  const [trafficResult, airportResult, runwayResult] = await Promise.allSettled([
-    fetchPreferredAircraftFeed(),
-    loadAirportCache(),
-    loadRunwayCache()
-  ]);
-
+async function loadNearbyAirportContext() {
+  const [airportResult, runwayResult] = await Promise.allSettled([loadAirportCache(), loadRunwayCache()]);
   const airportRows = airportResult.status === "fulfilled" ? airportResult.value : [];
   const runwayRows = runwayResult.status === "fulfilled" ? runwayResult.value : [];
   if (airportResult.status === "rejected") {
@@ -3016,32 +4291,8 @@ async function fetchStaticTraffic() {
     console.warn("Unable to load local runway database", runwayResult.reason);
   }
 
-  const trafficData =
-    trafficResult.status === "fulfilled"
-      ? trafficResult.value
-      : {
-          source: nativeStratusHandler ? "Stratus" : "Offline",
-          displaySource: nativeStratusHandler ? "Stratus" : "Offline",
-          stale: true,
-          ageSeconds: null,
-          warning: trafficResult.reason?.message || "Traffic source unavailable",
-          aircraft: [],
-          ac: [],
-          total: 0
-        };
-
-  const aircraftRows = dropDuplicateTisbOtherTargets(
-    (trafficData.aircraft || trafficData.ac || []).map(normalizeAircraft).filter(Boolean)
-  );
-  applyNativeDeviceHeading(trafficData);
-  applyStratusHeading(trafficData);
-  if ((trafficData.displaySource === "Stratus" || trafficData.source === "Stratus") && !trafficData.stale) {
-    ensureStratusTrackUp();
-  }
-  applyStratusOwnship(trafficData);
-
   const airportContextMiles = radiusMiles * 1.7;
-  const airportMatches = pruneLargeRangeAirports(
+  return pruneLargeRangeAirports(
     attachRunwaysToAirports(airportRows, runwayRows)
     .map((airport) => ({
       ...airport,
@@ -3051,12 +4302,45 @@ async function fetchStaticTraffic() {
     .sort((a, b) => a.distanceMiles - b.distanceMiles)
     .slice(0, 120)
   );
+}
+
+function refreshNearbyAirportContext() {
+  const requestId = ++airportContextRequestId;
+  loadNearbyAirportContext().then((airportMatches) => {
+    if (requestId !== airportContextRequestId) return;
+    airports = airportMatches;
+    renderList();
+    scheduleRender();
+  });
+}
+
+async function fetchStaticTraffic() {
+  const trafficData = await fetchPreferredAircraftFeed();
+  const snapshotId = trafficData.upstreamSnapshotId || trafficData.responseSnapshotId || "";
+  const snapshotHash = trafficData.upstreamSnapshotHash || trafficData.responseSnapshotHash || "";
+  const aircraftRows = dropDuplicateTisbOtherTargets(
+    (trafficData.aircraft || trafficData.ac || [])
+      .map(normalizeAircraft)
+      .filter(Boolean)
+      .map((plane) => ({
+        ...plane,
+        upstreamSnapshotId: plane.upstreamSnapshotId || snapshotId,
+        upstreamSnapshotHash: plane.upstreamSnapshotHash || snapshotHash
+      }))
+  );
+  applyNativeDeviceHeading(trafficData);
+  applyStratusHeading(trafficData);
+  if ((trafficData.displaySource === "Stratus" || trafficData.source === "Stratus") && !trafficData.stale) {
+    ensureStratusTrackUp();
+  }
+  applyStratusOwnship(trafficData);
+  refreshNearbyAirportContext();
 
   return {
     ...trafficData,
     aircraft: aircraftRows,
-    airports: airportMatches,
-    source: trafficData.displaySource || trafficData.source || "Cellular",
+    airports,
+    source: trafficData.displaySource || trafficData.source || "Internet ADS-B",
     stale: Boolean(trafficData.stale),
     ageSeconds: trafficData.ageSeconds ?? 0,
     warning: trafficData.warning || ""
@@ -3111,7 +4395,10 @@ function applyStratusOwnship(trafficData) {
   if (shouldRefresh) {
     tracks.clear();
     radarBlips.clear();
+    trafficTargetStates.clear();
     previousSweepAngle = null;
+    previousRadarSweepBearing = null;
+    previousWxTrafficSweepBearing = null;
     lastAirspaceKey = "";
     fetchAirspace();
   }
@@ -3123,7 +4410,19 @@ async function fetchAircraftFeed(baseUrl, { displaySource, timeoutMs = 6500 } = 
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   const requestRadiusMiles = radiusMiles <= 15 ? closeRangeNearestTargetMiles : radiusMiles;
-  const aircraftUrl = `${baseUrl}/api/aircraft?lat=${center.lat}&lon=${center.lon}&radiusMiles=${requestRadiusMiles}`;
+  const debugAircraft = trafficDebugEnabled
+    ? aircraft.find((plane) => isTrackedAircraft(plane) || aircraftKey(plane) === proximityAlertKey)
+    : null;
+  const debugHex = String(debugAircraft?.hex || "").trim().toLowerCase();
+  const debugQuery = debugHex ? `&debugHex=${encodeURIComponent(debugHex)}` : "";
+  const aircraftUrl = `${baseUrl}/api/aircraft?lat=${center.lat}&lon=${center.lon}&radiusMiles=${requestRadiusMiles}${debugQuery}`;
+  const sourceIsInternet = !isLocalNetworkUrl(baseUrl) && !String(displaySource || "").toLowerCase().includes("stratus");
+  const requestStartedAt = Date.now();
+  if (sourceIsInternet) {
+    trafficPipelineDiagnostics.internetLastRequestStartedAt = requestStartedAt;
+    trafficPipelineDiagnostics.internetLastSourceUrl = aircraftUrl;
+    pushDiagnosticTimestamp(trafficPipelineDiagnostics.internetRequestTimestamps, requestStartedAt);
+  }
 
   try {
     const response = await fetch(aircraftUrl, {
@@ -3133,12 +4432,36 @@ async function fetchAircraftFeed(baseUrl, { displaySource, timeoutMs = 6500 } = 
       }
     });
     const data = await response.json().catch(() => ({}));
+    const completedAt = Date.now();
+    if (sourceIsInternet) {
+      trafficPipelineDiagnostics.internetLastRequestCompletedAt = completedAt;
+      trafficPipelineDiagnostics.internetLastRequestDurationMs = completedAt - requestStartedAt;
+      trafficPipelineDiagnostics.internetLastHttpStatus = response.status;
+      trafficPipelineDiagnostics.internetLastDataAgeSeconds = data.dataAgeSeconds ?? null;
+      trafficPipelineDiagnostics.internetLastNextRefreshEligibleSeconds = data.nextRefreshEligibleInSeconds ?? null;
+      trafficPipelineDiagnostics.internetLastTargetCount = Number(data.total ?? data.aircraft?.length ?? data.ac?.length ?? 0);
+      trafficPipelineDiagnostics.internetLastProvider = data.provider || data.source || displaySource || "Internet ADS-B";
+      trafficPipelineDiagnostics.internetLastSnapshotId = data.upstreamSnapshotId || data.responseSnapshotId || "";
+      trafficPipelineDiagnostics.internetLastSnapshotHash = data.upstreamSnapshotHash || data.responseSnapshotHash || "";
+      trafficPipelineDiagnostics.internetLastCacheSource = data.cacheSource || "";
+      trafficPipelineDiagnostics.internetLastUpstreamFetchedAt = data.upstreamFetchedAt || null;
+      trafficPipelineDiagnostics.internetLastDataTimestamp = data.dataTimestamp || null;
+    }
     if (!response.ok) {
+      if (sourceIsInternet) {
+        trafficPipelineDiagnostics.internetLastError = data.error || data.detail || data.warning || `HTTP ${response.status}`;
+      }
       throw new Error(data.error || data.detail || `${displaySource || "aircraft source"} returned ${response.status}`);
+    }
+    if (sourceIsInternet) {
+      trafficPipelineDiagnostics.internetLastSuccessAt = completedAt;
+      trafficPipelineDiagnostics.internetLastError = "";
+      pushDiagnosticTimestamp(trafficPipelineDiagnostics.internetSuccessTimestamps, completedAt);
     }
     return {
       ...data,
-      displaySource
+      providerSource: data.source,
+      displaySource: data.displaySource || displaySource
     };
   } finally {
     window.clearTimeout(timeout);
@@ -3150,6 +4473,7 @@ async function fetchNativeStratusFeed({ timeoutMs = 900 } = {}) {
 
   const requestId = `${Date.now()}-${++nativeStratusRequestId}`;
   const requestRadiusMiles = radiusMiles <= 15 ? closeRangeNearestTargetMiles : radiusMiles;
+  trafficPipelineDiagnostics.lastNativeRequestAt = Date.now();
 
   return new Promise((resolve, reject) => {
     const timeout = window.setTimeout(() => {
@@ -3169,6 +4493,12 @@ async function fetchNativeStratusFeed({ timeoutMs = 900 } = {}) {
         return;
       }
 
+      trafficPipelineDiagnostics.lastNativeWebResponseAt = Date.now();
+      trafficPipelineDiagnostics.lastNativePayloadGeneratedAt =
+        Number(detail.payload?.nativePayloadGeneratedAt || 0) * 1000 || trafficPipelineDiagnostics.lastNativePayloadGeneratedAt;
+      trafficPipelineDiagnostics.jsPayloadsReceived += 1;
+      pushDiagnosticTimestamp(trafficPipelineDiagnostics.jsPayloadTimestamps, trafficPipelineDiagnostics.lastNativeWebResponseAt);
+      trafficPipelineDiagnostics.lastBridgeState = String(detail.payload?.receiverState || "received");
       resolve({
         ...(detail.payload || {}),
         displaySource: "Stratus"
@@ -3187,19 +4517,27 @@ async function fetchNativeStratusFeed({ timeoutMs = 900 } = {}) {
 }
 
 async function fetchPreferredAircraftFeed() {
-  let staleNativeData = null;
+  trafficPipelineDiagnostics.lastInternetPollingActive = Boolean(adsbProxyBaseUrl);
 
   if (nativeStratusHandler) {
     try {
       const nativeData = await fetchNativeStratusFeed({ timeoutMs: 1500 });
       applyNativeDeviceHeading(nativeData);
+      trafficPipelineDiagnostics.lastStratusPacketAgeSeconds = Number.isFinite(Number(nativeData.lastUdpReceiveAgeSeconds))
+        ? Number(nativeData.lastUdpReceiveAgeSeconds)
+        : Number.isFinite(Number(nativeData.ageSeconds))
+          ? Number(nativeData.ageSeconds)
+          : null;
+      trafficPipelineDiagnostics.lastStratusActive = !nativeData.stale;
       if (nativeData.stale) {
-        staleNativeData = nativeData;
         const age = Number.isFinite(Number(nativeData.ageSeconds)) ? `${Math.round(Number(nativeData.ageSeconds))}s old` : "not receiving packets";
+        selectTrafficSourceDiagnostics({ source: "internet", reason: `native Stratus stale (${age}); trying Internet ADS-B` });
         throw new Error(`Native Stratus receiver is stale (${age})`);
       }
+      selectTrafficSourceDiagnostics({ source: "stratus", reason: "native Stratus live packets" });
       return nativeData;
     } catch (error) {
+      trafficPipelineDiagnostics.lastStratusActive = false;
       console.warn("Native Stratus traffic source unavailable; falling back to cellular/configured sources", error);
     }
   }
@@ -3212,30 +4550,39 @@ async function fetchPreferredAircraftFeed() {
       });
       if (stratusData.stale) {
         const age = Number.isFinite(Number(stratusData.ageSeconds)) ? `${Math.round(Number(stratusData.ageSeconds))}s old` : "not receiving packets";
+        selectTrafficSourceDiagnostics({ source: "internet", reason: `HTTP Stratus bridge stale (${age}); trying Internet ADS-B` });
         throw new Error(`Stratus bridge is stale (${age})`);
       }
       fetchStratusAuxiliaryData();
+      trafficPipelineDiagnostics.lastStratusActive = true;
+      selectTrafficSourceDiagnostics({ source: "stratus", reason: "HTTP Stratus bridge live" });
       return stratusData;
     } catch (error) {
+      trafficPipelineDiagnostics.lastStratusActive = false;
       console.warn("Stratus traffic source unavailable; falling back to cellular source", error);
     }
   }
 
   if (!adsbProxyBaseUrl) {
-    if (staleNativeData) return staleNativeData;
+    selectTrafficSourceDiagnostics({ source: "none", reason: "Internet ADS-B proxy is not configured" });
     throw new Error("Cloudflare Worker proxy is not configured");
   }
 
   try {
-    return await fetchAircraftFeed(adsbProxyBaseUrl, {
+    const internetData = await fetchAircraftFeed(adsbProxyBaseUrl, {
       displaySource: internetTrafficSourceLabel(),
       timeoutMs: 6500
     });
+    const sourceInfo = classifyTrafficSource(internetData);
+    selectTrafficSourceDiagnostics({
+      source: sourceInfo.type,
+      reason: internetData.stale
+        ? `${sourceInfo.label} cached/stale snapshot (${internetData.dataAgeSeconds ?? internetData.ageSeconds ?? "--"}s old)`
+        : `${sourceInfo.label} live response (${internetData.total ?? internetData.aircraft?.length ?? 0} targets)`
+    });
+    return internetData;
   } catch (error) {
-    if (staleNativeData) {
-      console.warn("Configured ADS-B source unavailable; keeping stale native Stratus diagnostics", error);
-      return staleNativeData;
-    }
+    selectTrafficSourceDiagnostics({ source: "none", reason: `Internet ADS-B unavailable: ${error.message}` });
     throw error;
   }
 }
@@ -3273,6 +4620,32 @@ function airspaceEnvelope() {
   const latPad = radiusMiles / 69 + 0.08;
   const lonPad = radiusMiles / (69 * Math.max(0.2, Math.cos((center.lat * Math.PI) / 180))) + 0.08;
   return `${center.lon - lonPad},${center.lat - latPad},${center.lon + lonPad},${center.lat + latPad}`;
+}
+
+function offlineTileIdFor(lat, lon, tileDegrees = 4) {
+  const latBase = Math.floor(Number(lat) / tileDegrees) * tileDegrees;
+  const lonBase = Math.floor(Number(lon) / tileDegrees) * tileDegrees;
+  const ns = latBase >= 0 ? "n" : "s";
+  const ew = lonBase >= 0 ? "e" : "w";
+  return `${ns}${String(Math.abs(latBase)).padStart(2, "0")}${ew}${String(Math.abs(lonBase)).padStart(3, "0")}`;
+}
+
+function offlineTileIdsForView(multiplier = 1.8) {
+  const tileDegrees = 4;
+  const radius = Math.max(25, radiusMiles * multiplier);
+  const latPad = radius / 69;
+  const lonPad = radius / (69 * Math.max(0.2, Math.cos((center.lat * Math.PI) / 180)));
+  const ids = [];
+  const latStart = Math.floor((center.lat - latPad) / tileDegrees) * tileDegrees;
+  const latEnd = Math.floor((center.lat + latPad) / tileDegrees) * tileDegrees;
+  const lonStart = Math.floor((center.lon - lonPad) / tileDegrees) * tileDegrees;
+  const lonEnd = Math.floor((center.lon + lonPad) / tileDegrees) * tileDegrees;
+  for (let lat = latStart; lat <= latEnd; lat += tileDegrees) {
+    for (let lon = lonStart; lon <= lonEnd; lon += tileDegrees) {
+      ids.push(offlineTileIdFor(lat, lon, tileDegrees));
+    }
+  }
+  return [...new Set(ids)];
 }
 
 function weatherZoomLevel() {
@@ -3464,7 +4837,10 @@ function updateCenter(lat, lon, { clearTracks = true, source = "manual" } = {}) 
   if (clearTracks) {
     tracks.clear();
     radarBlips.clear();
+    trafficTargetStates.clear();
     previousSweepAngle = null;
+    previousRadarSweepBearing = null;
+    previousWxTrafficSweepBearing = null;
   }
   lastAirspaceKey = "";
   resetWeatherImage();
@@ -3503,6 +4879,8 @@ function normalizeSpecialUseClass(attributes) {
   if (classText === "P" || combined.includes("PROHIB")) return "P";
   if (classText === "R" || combined.includes("RESTRICT")) return "R";
   if (classText === "MOA" || combined.includes("MOA") || combined.includes("MILITARY OPERATIONS")) return "MOA";
+  if (classText === "W" || typeText === "W" || combined.includes("WARNING")) return "W";
+  if (classText === "A" || typeText === "A" || combined.includes("ALERT")) return "A";
   return "";
 }
 
@@ -3529,6 +4907,40 @@ function normalizeSpecialUseAirspaceFeature(feature) {
 
 function airspaceMatchesSelection(airspace, visibleClasses) {
   return visibleClasses.has(airspace.classCode);
+}
+
+function pointIsInsideRing(lat, lon, ring) {
+  let inside = false;
+  for (let current = 0, previous = ring.length - 1; current < ring.length; previous = current++) {
+    const currentPoint = ring[current];
+    const previousPoint = ring[previous];
+    const crossesLatitude = currentPoint.lat > lat !== previousPoint.lat > lat;
+    const crossingLongitude =
+      ((previousPoint.lon - currentPoint.lon) * (lat - currentPoint.lat)) /
+        (previousPoint.lat - currentPoint.lat || Number.EPSILON) +
+      currentPoint.lon;
+    if (crossesLatitude && lon < crossingLongitude) inside = !inside;
+  }
+  return inside;
+}
+
+function airportIsInsideControlledAirspace(airport) {
+  const cacheKey = `${airport.ident || airport.iata || "?"}:${Number(airport.lat).toFixed(5)}:${Number(airport.lon).toFixed(5)}`;
+  const cached = airportControlledAirspaceCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const isControlled = airspaces.some(
+    (airspace) =>
+      ["B", "C", "D"].includes(airspace.classCode) &&
+      airspace.lower === "SFC" &&
+      airspace.rings.some((ring) => ring.length >= 3 && pointIsInsideRing(airport.lat, airport.lon, ring))
+  );
+  airportControlledAirspaceCache.set(cacheKey, isControlled);
+  return isControlled;
+}
+
+function airportShouldBeVisible(airport) {
+  return showSmallAirports || airportIsInsideControlledAirspace(airport);
 }
 
 const airspaceCachePrefix = "ADSB_RADAR_AIRSPACE_";
@@ -3652,6 +5064,10 @@ function normalizeBundledAirspaceRows(payload) {
         name: airspace.name || "",
         classCode: airspace.classCode || airspace.class || "",
         sector: airspace.sector || "",
+        type: airspace.type || "",
+        typeCode: airspace.typeCode || "",
+        controllingFacility: airspace.controllingFacility || "",
+        usage: airspace.usage || null,
         lower: airspace.lower || "--",
         upper: airspace.upper || "--",
         bbox: Array.isArray(airspace.bbox) ? airspace.bbox : null,
@@ -3677,6 +5093,35 @@ async function loadBundledAirspaceRows() {
   return bundledAirspacePromise;
 }
 
+async function loadBundledAirspaceTile(tileId, tileInfo) {
+  if (!tileInfo?.file) return [];
+  if (!bundledAirspaceTilePromises.has(tileId)) {
+    bundledAirspaceTilePromises.set(
+      tileId,
+      fetchJsonWithTimeout(new URL(tileInfo.file, bundledTilesBaseUrl).href, {
+        timeoutMs: 900,
+        cache: "force-cache"
+      })
+        .then(normalizeBundledAirspaceRows)
+        .catch((error) => {
+          console.warn(`Bundled airspace tile ${tileId} unavailable`, error);
+          return [];
+        })
+    );
+  }
+  return bundledAirspaceTilePromises.get(tileId);
+}
+
+async function loadBundledAirspaceTileRows() {
+  const index = await loadBundledTileIndex();
+  if (!index?.airspace) return [];
+  const tileIds = offlineTileIdsForView(2.3);
+  airspaceLastTileIds = tileIds.slice().sort();
+  trafficPipelineDiagnostics.airspaceLoadedTileIds = airspaceLastTileIds;
+  const rows = (await Promise.all(tileIds.map((tileId) => loadBundledAirspaceTile(tileId, index.airspace[tileId])))).flat();
+  return Array.from(new Map(rows.map((airspace) => [airspace.id, airspace])).values());
+}
+
 function airspaceIntersectsCurrentView(airspace) {
   const maxDistance = Math.max(15, radiusMiles * 2.2);
   if (Array.isArray(airspace.bbox) && airspace.bbox.length === 4) {
@@ -3697,48 +5142,54 @@ function airspaceIntersectsCurrentView(airspace) {
 }
 
 async function loadLocalAirspaceFallback(visibleClasses) {
-  const rows = (await loadBundledAirspaceRows())
+  const tiledRows = await loadBundledAirspaceTileRows();
+  const candidateRows = tiledRows.length ? tiledRows : await loadBundledAirspaceRows();
+  const rows = candidateRows
     .filter((airspace) => airspaceMatchesSelection(airspace, visibleClasses))
     .filter(airspaceIntersectsCurrentView)
-    .slice(0, 160);
+    .slice(0, 220);
   if (rows.length) offlineAirspaceDataActive = true;
   return rows;
 }
 
 async function fetchAirspace() {
-  const visibleClasses = getVisibleAirspaceClasses();
-  if (!visibleClasses.size) {
-    airspaces = [];
+  const requiredClasses = getRequiredAirspaceClasses();
+  if (!requiredClasses.size) {
+    setAirspaces([], "airspace classes disabled");
     lastAirspaceKey = "";
     return;
   }
 
-  const classKey = Array.from(visibleClasses).sort().join("");
+  const classKey = Array.from(requiredClasses).sort().join("");
   const key = `smooth3:${center.lat.toFixed(4)},${center.lon.toFixed(4)},${radiusMiles}:${classKey}`;
   if (key === lastAirspaceKey && airspaces.length) return;
   const cachedAirspace = loadNearestCachedAirspace(key);
-  const cachedRows = (cachedAirspace?.rows || []).filter((airspace) => airspaceMatchesSelection(airspace, visibleClasses));
+  const cachedRows = (cachedAirspace?.rows || []).filter((airspace) => airspaceMatchesSelection(airspace, requiredClasses));
   const cachedClasses = new Set(cachedRows.map((airspace) => airspace.classCode));
-  const cacheCoversSelection = Array.from(visibleClasses).every((classCode) => cachedClasses.has(classCode));
+  const cacheCoversSelection = Array.from(requiredClasses).every((classCode) => cachedClasses.has(classCode));
   if (cachedRows.length) {
-    airspaces = cachedRows;
+    setAirspaces(cachedRows, "nearest cached airspace");
     lastAirspaceKey = key;
     offlineAirspaceDataActive = true;
   }
 
   if (!cacheCoversSelection) {
-    const localAirspace = await loadLocalAirspaceFallback(visibleClasses);
+    const localAirspace = await loadLocalAirspaceFallback(requiredClasses);
     if (localAirspace.length) {
       const mergedAirspaces = new Map(cachedRows.map((airspace) => [airspace.id, airspace]));
       for (const airspace of localAirspace) mergedAirspaces.set(airspace.id, airspace);
-      airspaces = Array.from(mergedAirspaces.values());
+      setAirspaces(Array.from(mergedAirspaces.values()), "offline airspace tiles");
       lastAirspaceKey = key;
       updateDataSourceIndicator(null);
     }
   }
 
+  if (nativeStratusHandler && airspaces.length) {
+    return;
+  }
+
   const airspaceRequests = [];
-  const classCodes = Array.from(visibleClasses).filter((classCode) => ["B", "C", "D"].includes(classCode));
+  const classCodes = Array.from(requiredClasses).filter((classCode) => ["B", "C", "D"].includes(classCode));
 
   if (classCodes.length) {
     const classParams = new URLSearchParams({
@@ -3761,7 +5212,7 @@ async function fetchAirspace() {
     );
   }
 
-  if (visibleClasses.has("SUA")) {
+  if (requiredClasses.has("SUA")) {
     const specialUseParams = new URLSearchParams({
       f: "json",
       where: "1=1",
@@ -3790,7 +5241,7 @@ async function fetchAirspace() {
       lastAirspaceKey = key;
       return;
     }
-    airspaces = fetchedAirspaces;
+    setAirspaces(fetchedAirspaces, "online FAA airspace refresh");
     lastAirspaceKey = key;
     offlineAirspaceDataActive = false;
     if (airspaces.length) saveCachedAirspace(key, airspaces);
@@ -3800,27 +5251,54 @@ async function fetchAirspace() {
 }
 
 async function fetchTraffic({ force = false } = {}) {
-  if (scratchpadPaused) {
-    nextTrafficFetchAt = Date.now() + 1000;
-    return;
-  }
   if (trafficFetchInFlight) return;
   if (!force && Date.now() < nextTrafficFetchAt) return;
 
   trafficFetchInFlight = true;
+  trafficPipelineDiagnostics.lastFetchStartedAt = Date.now();
 
   try {
     const data = await fetchStaticTraffic();
     const receivedAt = Date.now();
+    const sourceInfo = classifyTrafficSource(data);
+    const incomingAircraft = data.aircraft.map((plane) => ({ ...plane, positionReceivedAt: receivedAt }));
+    await enrichAircraftIdentities(incomingAircraft);
+    const keepLastGoodLocalWifiTraffic =
+      data.stale &&
+      sourceInfo.type === "wifi" &&
+      aircraft.length > 0 &&
+      incomingAircraft.length === 0;
 
-    aircraft = data.aircraft.map((plane) => ({ ...plane, positionReceivedAt: receivedAt }));
+    if (!keepLastGoodLocalWifiTraffic) {
+      aircraft = incomingAircraft;
+      ingestTrafficPositions(aircraft, receivedAt, {
+        sourceType: sourceInfo.type,
+        snapshotId: data.upstreamSnapshotId || data.responseSnapshotId || "",
+        responseMetadata: {
+          provider: data.provider || data.providerSource || data.source || "",
+          cacheSource: data.cacheSource || "",
+          upstreamFetchedAt: data.upstreamFetchedAt || null,
+          dataTimestamp: data.dataTimestamp || null,
+          dataAgeSeconds: data.dataAgeSeconds ?? null,
+          cacheAgeSeconds: data.cacheAgeSeconds ?? null
+        }
+      });
+      trafficPipelineDiagnostics.lastJsTrafficStateUpdateAt = receivedAt;
+      if (sourceInfo.type === "internet" || sourceInfo.type === "faa") {
+        trafficPipelineDiagnostics.internetLastStoreMutationAt = receivedAt;
+      }
+    }
+    trafficPipelineDiagnostics.lastFetchCompletedAt = receivedAt;
     airports = data.airports;
     lastDataSource = data.source;
     updateStratusDiagnostics(data);
     updateDataSourceIndicator(data);
+    logTrafficPipelineDiagnostics(data, data.stale ? "stale" : "sample");
     if (data.stale) {
       const age = Number.isFinite(Number(data.ageSeconds)) ? `${Math.round(Number(data.ageSeconds))}s old` : "stale";
-      setStatusText(`${lastDataSource} receiver waiting. Last packet ${age}.`);
+      setStatusText(`${lastDataSource} receiver waiting. Last packet ${age}. ${data.staleReason || ""}`.trim());
+    } else if (String(data.receiverState || "").toLowerCase() === "degraded") {
+      setStatusText(`${lastDataSource} receiver degraded. ${data.staleReason || "Packet cadence is slower than expected."}`);
     } else {
       setStatusText(
         gpsActive
@@ -3830,16 +5308,20 @@ async function fetchTraffic({ force = false } = {}) {
             : `${lastDataSource} traffic returned no aircraft for ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.${offlineDataNotice()}`
       );
     }
-    updateTrackedAircraftHistory(aircraft);
-    resolveMissingAircraftTypes(aircraft);
-    pruneRadarBlips(aircraft);
-    refreshLiveStratusBlips(aircraft, data);
+    if (!keepLastGoodLocalWifiTraffic) {
+      updateTrackedAircraftHistory(aircraft);
+      resolveMissingAircraftTypes(aircraft);
+      pruneRadarBlips(aircraft);
+    }
     lastFetchAt = receivedAt;
     scheduleNextTrafficFetch({ source: data.source, stale: data.stale });
+    scheduleRender();
   } catch (error) {
     lastDataSource = "offline";
     updateStratusDiagnostics(null);
     updateDataSourceIndicator(null);
+    selectTrafficSourceDiagnostics({ source: "none", reason: `traffic fetch failed: ${error.message}` });
+    refreshNearbyAirportContext();
     scheduleNextTrafficFetch({ failed: true });
     const retrySeconds = Math.max(1, Math.round((nextTrafficFetchAt - Date.now()) / 1000));
     const keepDataHint = aircraft.length ? " Keeping last radar picture." : offlineDataNotice();
@@ -3850,6 +5332,17 @@ async function fetchTraffic({ force = false } = {}) {
 
   renderList();
   updateProximityAlert();
+}
+
+function pumpTrafficFeed() {
+  if (!running) return;
+  if (Date.now() < nextTrafficFetchAt) return;
+  fetchTraffic();
+}
+
+function startTrafficPump() {
+  if (trafficPumpTimer) return;
+  trafficPumpTimer = window.setInterval(pumpTrafficFeed, 250);
 }
 
 function renderList({ force = false } = {}) {
@@ -3869,21 +5362,31 @@ function renderList({ force = false } = {}) {
 
   aircraftListEl.innerHTML = sorted
     .map(
-      (plane) => `
+      (plane) => {
+        const key = aircraftKey(plane);
+        const trackIdentifier = trafficTrackIdentifier(plane);
+        return `
         <li>
-          <button type="button" class="aircraft-row" data-aircraft-key="${escapeHtml(aircraftKey(plane))}">
-          <div class="plane-head">
-            <span>${escapeHtml(aircraftDisplayLabel(plane))}</span>
-            <span>${escapeHtml(friendlyAircraftType(plane) || aircraftType(plane) || "TYPE ?")}</span>
+          <div class="aircraft-row" data-aircraft-key="${escapeHtml(key)}">
+            <button type="button" class="aircraft-summary" data-aircraft-key="${escapeHtml(key)}">
+              <div class="plane-head">
+                <span>${escapeHtml(aircraftDisplayLabel(plane))}</span>
+                <span>${escapeHtml(friendlyAircraftType(plane) || aircraftType(plane) || "TYPE ?")}</span>
+              </div>
+              <div class="plane-meta">
+                <span>${formatAltitude(plane.altitude)}</span>
+                <span>${formatSpeed(plane.speed)}</span>
+                <span>${plane.distance.toFixed(1)} mi</span>
+              </div>
+            </button>
+            <div class="aircraft-actions">
+              <button type="button" class="aircraft-action" data-action="show" data-aircraft-key="${escapeHtml(key)}">SHOW</button>
+              <button type="button" class="aircraft-action" data-action="track" data-aircraft-key="${escapeHtml(key)}" ${trackIdentifier ? "" : "disabled"}>TRACK</button>
+            </div>
           </div>
-          <div class="plane-meta">
-            <span>${formatAltitude(plane.altitude)}</span>
-            <span>${formatSpeed(plane.speed)}</span>
-            <span>${plane.distance.toFixed(1)} mi</span>
-          </div>
-          </button>
         </li>
-      `
+      `;
+      }
     )
     .join("");
 }
@@ -4057,6 +5560,7 @@ function drawAirports(scope) {
   ctx.save();
   ctx.font = "700 11px ui-monospace, SFMono-Regular, Consolas, monospace";
   for (const airport of airports) {
+    if (!airportShouldBeVisible(airport)) continue;
     const point = project(airport.lat, airport.lon, scope);
     const margin = 36;
     if (point.x < -margin || point.x > scope.width + margin || point.y < -margin || point.y > scope.height + margin) continue;
@@ -4081,6 +5585,143 @@ function drawAirports(scope) {
   ctx.restore();
 }
 
+function airspaceLayerKey(scope, visibleClasses) {
+  const rotationBucket = Math.round(radarRotationDegrees() * 2) / 2;
+  return [
+    airspaceDatasetVersion,
+    Array.from(visibleClasses).sort().join(""),
+    center.lat.toFixed(4),
+    center.lon.toFixed(4),
+    radiusMiles,
+    Math.round(scope.width),
+    Math.round(scope.height),
+    Math.round(scope.radius),
+    rotationBucket
+  ].join("|");
+}
+
+function airspaceLabelAnchorKey(airspace) {
+  const ringLengths = airspace.rings.map((ring) => ring.length).join(",");
+  const bbox = Array.isArray(airspace.bbox) ? airspace.bbox.map((value) => Number(value).toFixed(4)).join(",") : "";
+  return `${airspace.id}|${airspace.lower}|${airspace.upper}|${bbox}|${ringLengths}`;
+}
+
+function airspaceGeometryCenter(airspace) {
+  if (Array.isArray(airspace.bbox) && airspace.bbox.length === 4) {
+    const [west, south, east, north] = airspace.bbox.map(Number);
+    if ([west, south, east, north].every(Number.isFinite)) {
+      return { lat: (south + north) / 2, lon: (west + east) / 2 };
+    }
+  }
+
+  let latSum = 0;
+  let lonSum = 0;
+  let count = 0;
+  for (const ring of airspace.rings) {
+    for (const point of ring) {
+      if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) continue;
+      latSum += point.lat;
+      lonSum += point.lon;
+      count += 1;
+    }
+  }
+  return count ? { lat: latSum / count, lon: lonSum / count } : null;
+}
+
+function stableAirspaceLabelAnchor(airspace) {
+  const key = airspaceLabelAnchorKey(airspace);
+  const cached = airspaceLabelAnchorCache.get(key);
+  if (cached) return cached;
+
+  const centerPoint = airspaceGeometryCenter(airspace);
+  if (!centerPoint) return null;
+  let bestPoint = null;
+  let bestScore = Infinity;
+
+  airspace.rings.forEach((ring, ringIndex) => {
+    ring.forEach((point, pointIndex) => {
+      if (!Number.isFinite(point.lat) || !Number.isFinite(point.lon)) return;
+      const score =
+        Math.abs(point.lat - centerPoint.lat) +
+        Math.abs(point.lon - centerPoint.lon) * Math.max(0.25, Math.cos((centerPoint.lat * Math.PI) / 180)) +
+        ringIndex * 0.00001 +
+        pointIndex * 0.0000001;
+      if (score < bestScore) {
+        bestScore = score;
+        bestPoint = { lat: point.lat, lon: point.lon };
+      }
+    });
+  });
+
+  const anchor = bestPoint || centerPoint;
+  airspaceLabelAnchorCache.set(key, anchor);
+  return anchor;
+}
+
+function buildProjectedAirspaceLayer(scope, visibleClasses, styles) {
+  const layoutStartedAt = Date.now();
+  const projectedFeatures = [];
+  const labelBoxes = [];
+
+  for (const airspace of airspaces) {
+    if (!airspaceMatchesSelection(airspace, visibleClasses)) continue;
+    const style = styles[airspace.classCode] || styles.D;
+    const rings = [];
+
+    for (const ring of airspace.rings) {
+      if (ring.length < 2) continue;
+      const projectedRing = ring.map((point) => project(point.lat, point.lon, scope));
+      rings.push(projectedRing);
+    }
+
+    let label = null;
+    const anchor = stableAirspaceLabelAnchor(airspace);
+    if (showRadarData && anchor) {
+      const labelPoint = project(anchor.lat, anchor.lon, scope);
+      if (labelPoint.distance <= radiusMiles * 1.15) {
+        const airspaceLabel = airspace.classCode === "SUA" ? airspace.typeCode || "SUA" : airspace.classCode;
+        const text = `${airspaceLabel} ${airspace.lower}/${airspace.upper}`;
+        const x = Math.min(scope.width - 76, Math.max(8, labelPoint.x + 5));
+        const y = Math.min(scope.height - 12, Math.max(18, labelPoint.y - 5));
+        const box = textBox(x, y, text, 14);
+        const collidesWithAirspaceLabel = labelBoxes.some(
+          (existing) =>
+            box.x < existing.x + existing.width &&
+            box.x + box.width > existing.x &&
+            box.y < existing.y + existing.height &&
+            box.y + box.height > existing.y
+        );
+        if (!collidesWithAirspaceLabel) {
+          labelBoxes.push(box);
+          label = { text, x, y };
+        }
+      }
+    }
+
+    projectedFeatures.push({
+      id: airspace.id,
+      classCode: airspace.classCode,
+      style,
+      rings,
+      label
+    });
+  }
+
+  pushDiagnosticTimestamp(trafficPipelineDiagnostics.airspaceLayoutRecalculationTimestamps, layoutStartedAt);
+  trafficPipelineDiagnostics.airspaceLabelLayoutRecalculationsPerMinute = Number(
+    (diagnosticRate(trafficPipelineDiagnostics.airspaceLayoutRecalculationTimestamps) * 60).toFixed(1)
+  );
+  return projectedFeatures;
+}
+
+function projectedAirspaceLayer(scope, visibleClasses, styles) {
+  const key = airspaceLayerKey(scope, visibleClasses);
+  if (airspaceLayerCache?.key === key) return airspaceLayerCache.features;
+  const features = buildProjectedAirspaceLayer(scope, visibleClasses, styles);
+  airspaceLayerCache = { key, features };
+  return features;
+}
+
 function drawAirspace(scope) {
   const visibleClasses = getVisibleAirspaceClasses();
   if (!visibleClasses.size || !airspaces.length) return;
@@ -4101,35 +5742,29 @@ function drawAirspace(scope) {
   ctx.lineCap = "round";
   ctx.lineJoin = "round";
 
-  for (const airspace of airspaces) {
-    if (!airspaceMatchesSelection(airspace, visibleClasses)) continue;
-    const style = styles[airspace.classCode] || styles.D;
-    const labelPoints = [];
+  const projectedFeatures = projectedAirspaceLayer(scope, visibleClasses, styles);
+  pushDiagnosticTimestamp(trafficPipelineDiagnostics.airspaceDrawTimestamps, Date.now());
+  trafficPipelineDiagnostics.airspaceRedrawsPerMinute = Number(
+    (diagnosticRate(trafficPipelineDiagnostics.airspaceDrawTimestamps) * 60).toFixed(1)
+  );
 
+  for (const feature of projectedFeatures) {
+    const style = feature.style;
     ctx.strokeStyle = style.stroke;
     ctx.fillStyle = style.fill;
     ctx.setLineDash(style.dash);
+    ctx.lineDashOffset = 0;
 
-    for (const ring of airspace.rings) {
-      if (ring.length < 2) continue;
-      const projectedRing = ring.map((point) => project(point.lat, point.lon, scope));
-      labelPoints.push(...projectedRing);
+    for (const projectedRing of feature.rings) {
       drawAirspaceRingPath(projectedRing);
       ctx.fill();
       ctx.stroke();
     }
 
-    const inScope = labelPoints.filter((point) => point.distance <= radiusMiles * 1.05);
-    if (showRadarData && inScope.length) {
-      const labelPoint = inScope[Math.floor(inScope.length / 2)];
-      const airspaceLabel = airspace.classCode === "SUA" ? airspace.typeCode || "SUA" : airspace.classCode;
-      const label = `${airspaceLabel} ${airspace.lower}/${airspace.upper}`;
-      const labelX = Math.min(scope.width - 76, Math.max(8, labelPoint.x + 5));
-      const labelY = Math.min(scope.height - 12, Math.max(18, labelPoint.y - 5));
-      if (intersectsAircraftText(textBox(labelX, labelY, label, 14))) continue;
+    if (feature.label) {
       ctx.setLineDash([]);
       ctx.fillStyle = style.stroke;
-      ctx.fillText(label, labelX, labelY);
+      ctx.fillText(feature.label.text, feature.label.x, feature.label.y);
     }
   }
 
@@ -4197,13 +5832,14 @@ function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   const theme = currentRadarTheme();
   const highlightMix = highlight?.highlightMix || 0;
   const tracked = isTrackedAircraft(plane);
-  const heading = Number.isFinite(Number(plane.track))
-    ? ((Number(plane.track) - radarRotationDegrees() - 90) * Math.PI) / 180
-    : -Math.PI / 2;
+  const track = finiteMotionValue(plane.track);
+  const hasTrack = track !== null;
+  const screenAngle = trafficSymbolScreenAngleDegrees(track, radarRotationDegrees());
+  const heading = screenAngle === null ? 0 : (screenAngle * Math.PI) / 180;
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(point.x, point.y);
-  ctx.rotate(heading);
+  if (hasTrack) ctx.rotate(heading);
   ctx.scale(highlight?.scale || 1, highlight?.scale || 1);
   if (tracked) {
     ctx.save();
@@ -4216,18 +5852,30 @@ function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
     ctx.stroke();
     ctx.restore();
   }
-  ctx.fillStyle =
+  const targetColor =
     plane.emergency && plane.emergency !== "none"
       ? platformColors.red
       : highlightMix > 0
         ? `rgba(${platformColors.redRgb}, ${isAndroidWeb ? 0.62 + highlightMix * 0.38 : 0.42 + highlightMix * 0.58})`
         : altitudeColorStyle(plane).target;
+  ctx.fillStyle = targetColor;
+  ctx.shadowColor = lightTheme && targetColor === theme.lowTarget ? "rgba(255, 255, 255, 0.98)" : targetColor;
+  ctx.shadowBlur = lightTheme && targetColor === theme.lowTarget ? 10 : 8;
   ctx.beginPath();
-  ctx.moveTo(10, 0);
-  ctx.lineTo(-7, -5);
-  ctx.lineTo(-4, 0);
-  ctx.lineTo(-7, 5);
-  ctx.closePath();
+  if (hasTrack) {
+    ctx.moveTo(10, 0);
+    ctx.lineTo(-7, -5);
+    ctx.lineTo(-4, 0);
+    ctx.lineTo(-7, 5);
+    ctx.closePath();
+  } else {
+    // Unknown TAIS motion is intentionally nondirectional rather than a false north heading.
+    ctx.moveTo(0, -6);
+    ctx.lineTo(6, 0);
+    ctx.lineTo(0, 6);
+    ctx.lineTo(-6, 0);
+    ctx.closePath();
+  }
   ctx.fill();
   ctx.restore();
 
@@ -4796,7 +6444,7 @@ function setScratchpadPaused(paused) {
   if (scratchpadPaused) {
     renderLoopScheduled = false;
     if (performanceTelemetry) {
-      performanceTelemetry.dataset.notice = "Radar rendering and feed refresh paused while the ATC pad is open.";
+      performanceTelemetry.dataset.notice = "Radar rendering paused while the ATC pad is open; traffic alert monitoring remains active.";
     }
     updatePerformanceTelemetry();
     return;
@@ -4813,6 +6461,7 @@ function setScratchpadPaused(paused) {
 function render(now) {
   renderLoopScheduled = false;
   if (scratchpadPaused) return;
+  trafficPipelineDiagnostics.lastRenderTimerAliveAt = Date.now();
 
   const targetFrameMs = 1000 / performanceModeConfig().fps;
   if (targetFrameMs && lastRenderedAt && now - lastRenderedAt < targetFrameMs) {
@@ -4822,6 +6471,7 @@ function render(now) {
   lastRenderedAt = now;
   const frameStartedAt = performance.now();
   maybeRefreshDeviceStatus();
+  if (trafficDebugEnabled) updateTrafficDebugOverlay();
 
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
@@ -4830,6 +6480,7 @@ function render(now) {
   const sweepProgress = ((now / 1000) % sweepSeconds) / sweepSeconds;
   const sweepBucket = Math.floor(now / (sweepSeconds * 1000));
   const angle = sweepProgress * Math.PI * 2 - Math.PI / 2;
+  const radarSweepBearing = sweepProgress * 360;
   const wxProgress = ((now / 1000) % wxSweepSeconds) / wxSweepSeconds;
   const wxSweepBucket = Math.floor(now / (wxSweepSeconds * 1000));
   if (weatherMode) updateArcForwardHeading(now);
@@ -4837,18 +6488,40 @@ function render(now) {
   const wxSweepBearing = weatherSectorSweepBearing(wxProgress);
   const wxAngle = screenAngleForBearing(wxSweepBearing);
 
-  if (running && !weatherMode && sweepBucket !== lastSweepBucket) {
-    lastSweepBucket = sweepBucket;
-    playSweepTick();
+  if (running && !weatherMode) {
+    if (sweepBucket !== lastSweepBucket) {
+      lastSweepBucket = sweepBucket;
+      sweepSequence += 1;
+      playSweepTick();
+    }
+    if (Number.isFinite(previousRadarSweepBearing)) {
+      processTrafficSweepPresentation(previousRadarSweepBearing, radarSweepBearing, {
+        mode: "radar",
+        sweepPassId: `radar:${sweepBucket}`,
+        direction: "clockwise"
+      });
+    }
+    previousRadarSweepBearing = radarSweepBearing;
+    previousWxTrafficSweepBearing = null;
   }
 
-  if (running && weatherMode && wxSweepBucket !== lastWxSweepBucket) {
-    lastWxSweepBucket = wxSweepBucket;
-    playSweepTick();
-  }
-
-  if (running && Date.now() >= nextTrafficFetchAt) {
-    fetchTraffic();
+  if (running && weatherMode) {
+    if (wxSweepBucket !== lastWxSweepBucket) {
+      lastWxSweepBucket = wxSweepBucket;
+      sweepSequence += 1;
+      playSweepTick();
+    }
+    const wxDirection = wxProgress < 0.5 ? "clockwise" : "counterclockwise";
+    const wxLeg = wxProgress < 0.5 ? "outbound" : "return";
+    if (Number.isFinite(previousWxTrafficSweepBearing)) {
+      processTrafficSweepPresentation(previousWxTrafficSweepBearing, wxSweepBearing, {
+        mode: "wx",
+        sweepPassId: `wx:${wxSweepBucket}:${wxLeg}`,
+        direction: wxDirection
+      });
+    }
+    previousWxTrafficSweepBearing = wxSweepBearing;
+    previousRadarSweepBearing = null;
   }
 
   ctx.clearRect(0, 0, width, height);
@@ -4869,6 +6542,8 @@ function render(now) {
   if (weatherMode) updateRadarBlipsForWeatherSweep(wxAngle);
   else updateRadarBlipsForSweep(angle);
   prepareAircraftLabels(scope, Date.now());
+  trafficPipelineDiagnostics.lastRadarTrafficRenderAt = Date.now();
+  trafficPipelineDiagnostics.lastTrafficRenderCount = currentAircraftContacts.length;
   if (weatherMode) {
     drawWeatherScopeBackground(scope);
     withWeatherSectorClip(scope, () => {
@@ -4903,10 +6578,78 @@ function render(now) {
 function setRange(nextRange) {
   radiusMiles = allowedRanges.includes(nextRange) ? nextRange : 20;
   resetWeatherImage();
-  for (const button of rangeButtons.querySelectorAll("button")) {
-    button.classList.toggle("active", Number(button.dataset.range) === radiusMiles);
-  }
   updateBottomRangeButton();
+}
+
+function updateRangeIndicator() {
+  if (rangeIndicator) rangeIndicator.textContent = `RNG ${radiusMiles} NM`;
+}
+
+function stepRadarRange(direction) {
+  const currentIndex = allowedRanges.indexOf(radiusMiles);
+  const safeIndex = currentIndex >= 0 ? currentIndex : allowedRanges.indexOf(10);
+  const nextIndex = clamp(safeIndex + direction, 0, allowedRanges.length - 1);
+  const nextRange = allowedRanges[nextIndex];
+  if (nextRange === radiusMiles) return;
+  setRange(nextRange);
+  trafficPipelineDiagnostics.lastRangeChangeAt = Date.now();
+  trafficPipelineDiagnostics.lastRangeChangeValue = nextRange;
+  console.info("Traffic pipeline range-change marker", {
+    rangeMiles: nextRange,
+    nextTrafficFetchInSeconds: ((nextTrafficFetchAt - Date.now()) / 1000).toFixed(2),
+    inFlight: trafficFetchInFlight
+  });
+  fetchAirspace();
+  fetchTraffic({ force: true });
+}
+
+function installRadarRangePinch() {
+  if (!radarWrap) return;
+  let pinchStartDistance = 0;
+  let pinchLastRange = radiusMiles;
+
+  const touchDistance = (touches) => {
+    if (!touches || touches.length < 2) return 0;
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  };
+
+  radarWrap.addEventListener(
+    "touchstart",
+    (event) => {
+      if (event.touches.length !== 2) return;
+      pinchStartDistance = touchDistance(event.touches);
+      pinchLastRange = radiusMiles;
+      event.preventDefault();
+    },
+    { passive: false }
+  );
+
+  radarWrap.addEventListener(
+    "touchmove",
+    (event) => {
+      if (event.touches.length !== 2 || !pinchStartDistance) return;
+      event.preventDefault();
+      const distance = touchDistance(event.touches);
+      if (!distance) return;
+      const ratio = distance / pinchStartDistance;
+      if (ratio > 1.18 && radiusMiles === pinchLastRange) {
+        stepRadarRange(-1);
+        pinchLastRange = radiusMiles;
+        pinchStartDistance = distance;
+      } else if (ratio < 0.84 && radiusMiles === pinchLastRange) {
+        stepRadarRange(1);
+        pinchLastRange = radiusMiles;
+        pinchStartDistance = distance;
+      }
+    },
+    { passive: false }
+  );
+
+  radarWrap.addEventListener("touchend", () => {
+    pinchStartDistance = 0;
+  });
 }
 
 function rangeForDistance(distance) {
@@ -4927,28 +6670,7 @@ function zoomToAircraftIfNeeded(plane) {
 }
 
 function updateBottomRangeButton() {
-  if (!wxRangeButton) return;
-  if (bottomRangeButtons) {
-    const showBottomRanges = shell.classList.contains("panel-collapsed");
-    bottomRangeButtons.hidden = !showBottomRanges;
-    for (const button of bottomRangeButtons.querySelectorAll("button")) {
-      button.classList.toggle("active", Number(button.dataset.range) === radiusMiles);
-    }
-  }
-
-  if (weatherMode) {
-    wxRangeButton.hidden = true;
-    return;
-  }
-
-  if (trafficAlertActive) {
-    wxRangeButton.hidden = false;
-    wxRangeButton.textContent = radiusMiles === 2 ? "5 NM" : "2 NM";
-    wxRangeButton.setAttribute("aria-label", "Change traffic alert range");
-    return;
-  }
-
-  wxRangeButton.hidden = true;
+  updateRangeIndicator();
 }
 
 function setWeatherMode(enabled) {
@@ -4982,6 +6704,8 @@ function setWeatherMode(enabled) {
   updateArcHeadingOverrideControl();
   setQuickNotesVisible(weatherMode);
   previousSweepAngle = null;
+  previousRadarSweepBearing = null;
+  previousWxTrafficSweepBearing = null;
 }
 
 function setWxDisplayMode(mode, { persist = true } = {}) {
@@ -5013,21 +6737,21 @@ function cycleWxDisplayMode() {
   setWxDisplayMode(nextMode);
 }
 
-rangeButtons.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-range]");
-  if (!button) return;
-  setRange(Number(button.dataset.range));
-  fetchAirspace();
-  fetchTraffic({ force: true });
-});
+document.addEventListener(
+  "gesturestart",
+  (event) => {
+    if (!event.target?.closest?.(".radar-wrap")) event.preventDefault();
+  },
+  { passive: false }
+);
 
-bottomRangeButtons?.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-range]");
-  if (!button) return;
-  setRange(Number(button.dataset.range));
-  fetchAirspace();
-  fetchTraffic({ force: true });
-});
+document.addEventListener(
+  "gesturechange",
+  (event) => {
+    if (!event.target?.closest?.(".radar-wrap")) event.preventDefault();
+  },
+  { passive: false }
+);
 
 arcHeadingOverrideEl?.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-heading]");
@@ -5051,14 +6775,6 @@ radarModeToggle?.addEventListener("click", () => {
 
 wxToggle?.addEventListener("click", () => {
   cycleWxDisplayMode();
-});
-
-wxRangeButton?.addEventListener("click", () => {
-  if (weatherMode) return;
-  const nextRange = radiusMiles === 2 ? 5 : 2;
-  setRange(nextRange);
-  fetchAirspace();
-  fetchTraffic({ force: true });
 });
 
 wxNearestTarget?.addEventListener("click", focusNearestTargetFromArc);
@@ -5104,13 +6820,25 @@ quickNotesClear?.addEventListener("click", (event) => {
 altitudeBracketButton?.addEventListener("click", cycleAltitudeBracket);
 
 airspaceToggles.addEventListener("change", () => {
-  if (!getVisibleAirspaceClasses().size) {
-    airspaces = [];
+  for (const input of airspaceToggles.querySelectorAll("input[data-class]")) {
+    window.localStorage.setItem(`ADSB_RADAR_AIRSPACE_CLASS_${input.dataset.class}`, String(input.checked));
+  }
+
+  if (!getRequiredAirspaceClasses().size) {
+    setAirspaces([], "airspace classes disabled");
     lastAirspaceKey = "";
     return;
   }
 
   fetchAirspace();
+});
+
+smallAirportsToggle?.addEventListener("change", () => {
+  showSmallAirports = smallAirportsToggle.checked;
+  airportControlledAirspaceCache.clear();
+  lastAirspaceKey = "";
+  if (!showSmallAirports) fetchAirspace();
+  scheduleRender();
 });
 
 function openSettings() {
@@ -5133,9 +6861,9 @@ function closeLegend() {
 }
 
 function updateTrackingControls() {
-  if (!trackingOpen) return;
   shell.classList.toggle("tracking-active", Boolean(trackedAircraft));
-  trackingOpen.classList.toggle("active", Boolean(trackedAircraft));
+  trackingOpen?.classList.toggle("active", Boolean(trackedAircraft));
+  radarTrackingOpen?.classList.toggle("active", Boolean(trackedAircraft));
   if (trackingNNumberInput) trackingNNumberInput.value = trackedAircraft?.nNumber || "";
   if (trackingCriterionSelect) trackingCriterionSelect.value = trackedAircraft?.criterion || "distance";
   if (trackingValueInput) trackingValueInput.value = trackedAircraft?.value ?? "10";
@@ -5153,13 +6881,41 @@ function closeTracking() {
   trackingModal.hidden = true;
 }
 
+function hideTrackedAircraftAlert() {
+  if (!trackingAlertEl) return;
+  trackingAlertEl.hidden = true;
+  trackingAlertEl.dataset.contentKey = "";
+  trackingAlertEl.innerHTML = "";
+}
+
 function clearTrackedAircraft() {
+  logTrackingClearState("before-clear");
+  const previousTracking = trackedAircraft ? { ...trackedAircraft } : null;
+  const trackedPlane = findTrackedAircraft();
+  if (trackedPlane) aircraftHighlights.delete(aircraftKey(trackedPlane));
   clearTrackedAircraftHistory(trackedAircraft);
   trackedAircraft = null;
+  suppressTrackingRestore();
   saveTrackedAircraft();
-  if (trackingAlertEl) trackingAlertEl.hidden = true;
+  hideTrackedAircraftAlert();
   updateTrackingControls();
   renderList();
+  scheduleRender();
+  logTrackingClearState("after-clear", { previousTracking });
+  if (trafficDebugEnabled) {
+    window.setTimeout(() => {
+      if (trackedAircraft) logTrackingClearState("restored-after-clear", { previousTracking });
+    }, 5000);
+  }
+}
+
+function handleTrackedAircraftClear(event) {
+  const clearButton = event.target.closest(".tracking-alert-clear");
+  if (!clearButton) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  clearTrackedAircraft();
+  return true;
 }
 
 function updateTrackingStatus(message = "") {
@@ -5178,9 +6934,19 @@ function updateTrackingStatus(message = "") {
 
 function trackedAircraftMetrics(plane) {
   if (!plane) return null;
-  const distanceMiles = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
+  const key = aircraftKey(plane);
+  const state = trafficTargetStates.get(key);
+  const displayPlane = predictedAircraftForDisplay(plane);
+  const rawSpeed = finiteMotionValue(plane.speed);
+  const confirmedSpeed = finiteMotionValue(
+    state?.confirmedGroundSpeed ?? state?.derivedGroundSpeed ?? state?.pendingPlane?.speed
+  );
+  const distanceMiles = milesBetween(center.lat, center.lon, displayPlane.lat, displayPlane.lon);
   const distanceNm = milesToNauticalMiles(distanceMiles);
-  const speedKts = aircraftSpeed(plane);
+  const speedKts = Math.max(
+    0,
+    rawSpeed != null && rawSpeed > 1 ? rawSpeed : confirmedSpeed ?? rawSpeed ?? 0
+  );
   const etaMinutes = speedKts > 1 ? (distanceNm / speedKts) * 60 : Infinity;
   return { distanceMiles, distanceNm, speedKts, etaMinutes };
 }
@@ -5192,10 +6958,15 @@ function trackedAircraftColor(alpha = 1) {
 
 function updateTrackedAircraftAlert() {
   if (!trackingAlertEl) return;
+  if (trackedAircraft && trackedAircraftClearedUntil && Date.now() < trackedAircraftClearedUntil) {
+    logTrackingClearState("blocked-restore-at-alert-refresh");
+    trackedAircraft = null;
+    saveTrackedAircraft();
+  }
   const plane = findTrackedAircraft();
 
   if (!trackedAircraft || !plane) {
-    trackingAlertEl.hidden = true;
+    hideTrackedAircraftAlert();
     updateTrackingStatus();
     return;
   }
@@ -5210,35 +6981,65 @@ function updateTrackedAircraftAlert() {
     `${trackedAircraft.nNumber} acquired: ${metrics.distanceNm.toFixed(1)} NM, ${formatTrackedEta(metrics.etaMinutes)} at ${Math.round(metrics.speedKts)} kt.`
   );
 
-  if (!thresholdMet) {
-    trackingAlertEl.hidden = true;
-    trackedAircraft.alerted = false;
-    return;
-  }
-
-  trackedAircraft.alerted = true;
+  trackedAircraft.alerted = thresholdMet;
   trackingAlertEl.hidden = false;
-  trackingAlertEl.innerHTML = `<strong>${escapeHtml(trackedAircraft.nNumber)}</strong> ${metrics.distanceNm.toFixed(1)} NM ${formatTrackedEta(metrics.etaMinutes)} at ${Math.round(metrics.speedKts)} kt`;
+  const contentKey = [
+    trackedAircraft.nNumber,
+    metrics.distanceNm.toFixed(1),
+    formatTrackedEta(metrics.etaMinutes),
+    Math.round(metrics.speedKts)
+  ].join("|");
+  if (trackingAlertEl.dataset.contentKey === contentKey) return;
+  trackingAlertEl.dataset.contentKey = contentKey;
+  trackingAlertEl.innerHTML = `
+    <span class="tracking-alert-content">
+      <strong>${escapeHtml(trackedAircraft.nNumber)}</strong>
+      ${metrics.distanceNm.toFixed(1)} NM
+      ${formatTrackedEta(metrics.etaMinutes)}
+      ${Math.round(metrics.speedKts)} KT
+    </span>
+    <button type="button" class="tracking-alert-clear" aria-label="Clear tracked aircraft">CLEAR</button>
+  `;
 }
 
 function openAircraftDetails(plane) {
   if (!plane) return;
   const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
-  const bearing = bearingDegrees(center.lat, center.lon, plane.lat, plane.lon);
-  const friendlyType = friendlyAircraftType(plane) || "Unknown aircraft type";
-  aircraftTitle.innerHTML = plane.nNumber
-    ? `Aircraft - <a href="${faaRegistryUrl(plane.nNumber)}" target="_blank" rel="noopener noreferrer">${escapeHtml(plane.nNumber)}</a>`
-    : "Aircraft";
+  const friendlyType = friendlyAircraftType(plane) || aircraftType(plane) || "Aircraft type unavailable";
+  const registration = plane.registration || plane.nNumber || "";
+  const callsign = usefulAircraftCallsign(plane);
+  const rawType = String(plane.rawAircraftType || plane.type || "").trim();
+  const icaoHex = normalizeIcaoHex(plane.hex || plane.icao);
+  const primaryIdentity = callsign || registration || (icaoHex ? `ICAO ${icaoHex}` : planeLabel(plane));
+  const detailKey = aircraftKey(plane);
+  const trackIdentifier = trafficTrackIdentifier(plane);
+  aircraftModal.dataset.aircraftKey = detailKey;
+  aircraftTitle.textContent = primaryIdentity;
+  if (aircraftTrack) {
+    aircraftTrack.disabled = !trackIdentifier;
+    aircraftTrack.classList.toggle("active", Boolean(trackIdentifier && trackedAircraft?.nNumber === trackIdentifier));
+    aircraftTrack.textContent = trackIdentifier && trackedAircraft?.nNumber === trackIdentifier ? "Tracking" : "Track";
+    aircraftTrack.setAttribute(
+      "aria-label",
+      trackIdentifier && trackedAircraft?.nNumber === trackIdentifier
+        ? `Tracking ${trackIdentifier}`
+        : trackIdentifier
+          ? `Track ${trackIdentifier}`
+          : "Aircraft cannot be tracked without a registration or callsign"
+    );
+  }
   aircraftDetail.innerHTML = `
     <div class="detail-title">${escapeHtml(friendlyType)}</div>
     <dl>
-      <div><dt>Callsign</dt><dd>${escapeHtml(plane.callsign || "Unknown")}</dd></div>
+      <div><dt>Registration</dt><dd>${escapeHtml(registration || "Not available")}</dd></div>
+      <div><dt>Callsign</dt><dd>${escapeHtml(callsign || "Not available")}</dd></div>
+      <div><dt>Aircraft type</dt><dd>${escapeHtml(rawType || "Not available")}</dd></div>
       <div><dt>Altitude</dt><dd>${formatAltitude(plane.altitude)}</dd></div>
       <div><dt>Speed</dt><dd>${formatSpeed(plane.speed)}</dd></div>
-      <div><dt>Track</dt><dd>${Number.isFinite(Number(plane.track)) ? `${Math.round(Number(plane.track))} deg` : "Unknown"}</dd></div>
       <div><dt>Distance</dt><dd>${distance.toFixed(1)} mi</dd></div>
-      <div><dt>Bearing</dt><dd>${Math.round(bearing)} deg</dd></div>
-      <div><dt>Vertical rate</dt><dd>${Number.isFinite(Number(plane.verticalRate)) ? `${Math.round(Number(plane.verticalRate))} fpm` : "Unknown"}</dd></div>
+      <div><dt>Departure</dt><dd>${escapeHtml(plane.departure || "Not available")}</dd></div>
+      <div><dt>Destination</dt><dd>${escapeHtml(plane.destination || "Not available")}</dd></div>
+      <div><dt>Displayed position</dt><dd>${escapeHtml(plane.displayPositionSource || "CONFIRMED")}</dd></div>
     </dl>
   `;
   aircraftModal.hidden = false;
@@ -5246,6 +7047,7 @@ function openAircraftDetails(plane) {
 
 function closeAircraftDetails() {
   aircraftModal.hidden = true;
+  aircraftModal.dataset.aircraftKey = "";
   aircraftTitle.textContent = "Aircraft";
 }
 
@@ -5264,6 +7066,7 @@ function stopGpsTracking() {
 function fallbackToKdvt(message = "GPS unavailable. Using KDVT fallback.") {
   stopGpsTracking();
   airportSelect.value = `${kdvtFallbackCenter.lat},${kdvtFallbackCenter.lon}`;
+  setAirportSearchLabel("KDVT - Phoenix Deer Valley");
   updateCoordinateVisibility();
   statusEl.textContent = message;
   updateCenter(kdvtFallbackCenter.lat, kdvtFallbackCenter.lon);
@@ -5320,7 +7123,10 @@ function startGpsTracking() {
       if (shouldRefresh) {
         tracks.clear();
         radarBlips.clear();
+        trafficTargetStates.clear();
         previousSweepAngle = null;
+        previousRadarSweepBearing = null;
+        previousWxTrafficSweepBearing = null;
         lastAirspaceKey = "";
         fetchAirspace();
         fetchTraffic({ force: true });
@@ -5346,10 +7152,20 @@ function trimTrackHistories() {
 }
 
 settingsOpen.addEventListener("click", openSettings);
+radarSettingsOpen?.addEventListener("click", openSettings);
 settingsClose.addEventListener("click", closeSettings);
 trackingOpen?.addEventListener("click", openTracking);
+radarTrackingOpen?.addEventListener("click", openTracking);
 trackingClose?.addEventListener("click", closeTracking);
 trackingClear?.addEventListener("click", clearTrackedAircraft);
+document.addEventListener(
+  "pointerdown",
+  (event) => {
+    handleTrackedAircraftClear(event);
+  },
+  { capture: true }
+);
+trackingAlertEl?.addEventListener("click", handleTrackedAircraftClear);
 legendOpen.addEventListener("click", openLegend);
 legendClose.addEventListener("click", closeLegend);
 
@@ -5407,11 +7223,19 @@ legendModal.addEventListener("click", (event) => {
 
 aircraftClose.addEventListener("click", closeAircraftDetails);
 
+aircraftTrack?.addEventListener("click", () => {
+  const key = aircraftModal.dataset.aircraftKey;
+  if (!key || !trackTrafficTarget(key)) return;
+  const trackedPlane = findTrackedAircraft();
+  if (trackedPlane) openAircraftDetails(predictedAircraftForDisplay(trackedPlane));
+});
+
 aircraftModal.addEventListener("click", (event) => {
   if (event.target === aircraftModal) closeAircraftDetails();
 });
 
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && airportSearchModal && !airportSearchModal.hidden) closeAirportSearchModal();
   if (event.key === "Escape" && !settingsModal.hidden) closeSettings();
   if (event.key === "Escape" && trackingModal && !trackingModal.hidden) closeTracking();
   if (event.key === "Escape" && !legendModal.hidden) closeLegend();
@@ -5447,10 +7271,6 @@ trackingForm?.addEventListener("submit", (event) => {
   renderList();
 });
 
-sweepColorToggle.addEventListener("change", () => {
-  sweepColor = sweepColorToggle.checked ? "orange" : "green";
-});
-
 groundTrafficToggle.addEventListener("change", () => {
   showGroundTraffic = groundTrafficToggle.checked;
   renderList();
@@ -5472,7 +7292,7 @@ performanceModeSelect?.addEventListener("change", () => {
 radarSoundStyleSelect.value = radarSoundStyle;
 if (settingsVersionEl) settingsVersionEl.textContent = APP_ROLLOUT_VERSION;
 setLightTheme(lightTheme);
-setPerformanceMode(performanceMode);
+setPerformanceMode(performanceMode, { persist: false });
 setOrientationMode(orientationMode, { persist: Boolean(savedOrientationMode) });
 setWeatherMode(false);
 setWxDisplayMode(wxDisplayMode, { persist: false });
@@ -5480,6 +7300,7 @@ updateAltitudeBracketButton();
 updateTrackingControls();
 installRadarAudioRecovery();
 queueRadarAudioUnlock();
+installRadarRangePinch();
 
 radarSoundStyleSelect.addEventListener("change", async () => {
   const selectedStyle = [
@@ -5513,6 +7334,17 @@ orientationModeSelect.addEventListener("change", () => {
 });
 
 aircraftListEl.addEventListener("click", (event) => {
+  const actionButton = event.target.closest(".aircraft-action");
+  if (actionButton) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (actionButton.disabled) return;
+    const key = actionButton.dataset.aircraftKey;
+    if (actionButton.dataset.action === "track") trackTrafficTarget(key);
+    else showTrafficTarget(key);
+    return;
+  }
+
   const button = event.target.closest("[data-aircraft-key]");
   if (!button) return;
   const key = button.dataset.aircraftKey;
@@ -5532,11 +7364,13 @@ canvas.addEventListener("click", (event) => {
 function applySelectedAirport() {
   updateCoordinateVisibility();
   if (airportSelect.value === "gps") {
+    setAirportSearchLabel("Use GPS location");
     startGpsTracking();
     return true;
   }
 
   if (!airportSelect.value) {
+    setAirportSearchLabel("Custom coordinates");
     stopGpsTracking();
     return false;
   }
@@ -5552,10 +7386,80 @@ airportSelect.addEventListener("change", () => {
   applySelectedAirport();
 });
 
+function setHiddenAirportSelection(value, label) {
+  const existingOption = Array.from(airportSelect.options).find((option) => option.value === value);
+  if (!existingOption) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    airportSelect.appendChild(option);
+  }
+  airportSelect.value = value;
+  setAirportSearchLabel(label);
+}
+
+function selectAirportSearchResult(button) {
+  const lat = Number(button.dataset.lat);
+  const lon = Number(button.dataset.lon);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+  const label = button.dataset.label || `${button.dataset.ident || "Airport"} selected`;
+  setHiddenAirportSelection(`${lat},${lon}`, label);
+  renderAirportSearchResults([]);
+  applySelectedAirport();
+  closeAirportSearchModal();
+}
+
+airportSearchOpen?.addEventListener("click", openAirportSearchModal);
+airportSearchClose?.addEventListener("click", closeAirportSearchModal);
+airportSearchModal?.addEventListener("click", (event) => {
+  if (event.target === airportSearchModal) closeAirportSearchModal();
+});
+
+airportSearchInput?.addEventListener("input", () => {
+  updateAirportSearchResults();
+});
+
+airportSearchInput?.addEventListener("focus", () => {
+  airportSearchInput.select();
+  updateAirportSearchResults();
+});
+
+airportSearchInput?.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    renderAirportSearchResults([]);
+    setAirportSearchLabel(selectedAirportLabel);
+    closeAirportSearchModal();
+    return;
+  }
+  if (event.key !== "Enter") return;
+  const firstResult = airportSearchResults?.querySelector(".airport-result");
+  if (!firstResult) return;
+  event.preventDefault();
+  selectAirportSearchResult(firstResult);
+});
+
+airportSearchResults?.addEventListener("click", (event) => {
+  const button = event.target.closest(".airport-result");
+  if (!button) return;
+  selectAirportSearchResult(button);
+});
+
+document.addEventListener("click", (event) => {
+  if (
+    airportSearchModal?.hidden &&
+    !airportSearchInput?.contains(event.target) &&
+    !airportSearchResults?.contains(event.target)
+  ) {
+    renderAirportSearchResults([]);
+    setAirportSearchLabel(selectedAirportLabel);
+  }
+});
+
 for (const input of [latInput, lonInput]) {
   input.addEventListener("input", () => {
     stopGpsTracking();
     airportSelect.value = "";
+    setAirportSearchLabel("Custom coordinates");
     updateCoordinateVisibility();
   });
 }
@@ -5600,16 +7504,29 @@ window.addEventListener("adsb-scratchpad-pause", (event) => {
   setScratchpadPaused(Boolean(event.detail?.paused));
 });
 
-window.addEventListener("resize", resizeCanvas);
+window.addEventListener("adsb-native-device-heading", (event) => {
+  const detail = event.detail || {};
+  applyCompassHeading(detail.heading, { accuracy: detail.accuracy, source: "native" });
+});
+
+window.addEventListener("resize", () => {
+  applyResponsivePanelMode();
+  resizeCanvas();
+});
 window.addEventListener("resize", updateProximityAlert);
 window.addEventListener("resize", resizeQuickNotesCanvas);
 window.visualViewport?.addEventListener("resize", resizeCanvas);
 window.visualViewport?.addEventListener("scroll", resizeCanvas);
 window.addEventListener("orientationchange", () => {
+  window.setTimeout(() => applyResponsivePanelMode(), 80);
+  window.setTimeout(() => applyResponsivePanelMode(), 320);
   window.setTimeout(resizeCanvas, 80);
   window.setTimeout(resizeCanvas, 320);
 });
-window.addEventListener("pageshow", resizeCanvas);
+window.addEventListener("pageshow", () => {
+  applyResponsivePanelMode();
+  resizeCanvas();
+});
 window.addEventListener("online", refreshNetworkFeeds);
 window.addEventListener("focus", refreshNetworkFeeds);
 document.addEventListener("visibilitychange", () => {
@@ -5628,11 +7545,14 @@ if ("ResizeObserver" in window && radarWrap) {
 }
 
 const initialCenterApplied = applySelectedAirport();
+applySavedAirspaceDefaults();
 updateCoordinateVisibility();
-updatePanelToggle();
+applyResponsivePanelMode({ initial: true });
+updateRangeIndicator();
 resizeCanvas();
 renderList();
 updateDataSourceIndicator(null);
+startTrafficPump();
 if (airportSelect.value === "gps" && getVisibleAirspaceClasses().size) {
   fetchAirspace();
 }

@@ -3,6 +3,7 @@ import { readFile, stat } from "node:fs/promises";
 
 const airportsPath = new URL("../public/data/offline-airports.json", import.meta.url);
 const airspacePath = new URL("../public/data/offline-airspace.json", import.meta.url);
+const tileIndexPath = new URL("../public/data/tiles/index.json", import.meta.url);
 
 const expectedAirports = ["KPHX", "KLAX", "KJFK", "KORD", "KATL", "KSEA", "PANC", "PHNL", "TJSJ"];
 const expectedClassB = [
@@ -42,8 +43,17 @@ function validateAltitude(text) {
   return text === "SFC" || text === "UNLTD" || text === "--" || /^-?[0-9]+$/.test(String(text));
 }
 
+function tileIdFor(lat, lon, tileDegrees = 4) {
+  const latBase = Math.floor(Number(lat) / tileDegrees) * tileDegrees;
+  const lonBase = Math.floor(Number(lon) / tileDegrees) * tileDegrees;
+  const ns = latBase >= 0 ? "n" : "s";
+  const ew = lonBase >= 0 ? "e" : "w";
+  return `${ns}${String(Math.abs(latBase)).padStart(2, "0")}${ew}${String(Math.abs(lonBase)).padStart(3, "0")}`;
+}
+
 const airportsData = JSON.parse(await readFile(airportsPath, "utf8"));
 const airspaceData = JSON.parse(await readFile(airspacePath, "utf8"));
+const tileIndex = JSON.parse(await readFile(tileIndexPath, "utf8"));
 const airports = airportsData.airports || [];
 const airspaces = airspaceData.airspaces || [];
 const errors = [];
@@ -69,7 +79,10 @@ for (const aliases of expectedClassB) {
 }
 
 for (const airspace of airspaces) {
-  if (!["B", "C", "D", "E"].includes(airspace.classCode)) errors.push(`Unexpected class ${airspace.classCode}`);
+  if (!["B", "C", "D", "E", "SUA"].includes(airspace.classCode)) errors.push(`Unexpected class ${airspace.classCode}`);
+  if (airspace.classCode === "SUA" && !["P", "R", "MOA", "W", "A"].includes(airspace.typeCode)) {
+    errors.push(`Unexpected special-use type ${airspace.typeCode} for ${airspace.id}`);
+  }
   if (!validateAltitude(airspace.lower) || !validateAltitude(airspace.upper)) {
     errors.push(`Bad floor/ceiling for ${airspace.id}`);
   }
@@ -87,9 +100,12 @@ for (const airspace of airspaces) {
 for (const check of coverageChecks) {
   const nearbyAirports = airports.filter((airport) => milesBetween(check.lat, check.lon, airport.lat, airport.lon) <= 60);
   const nearbyAirspaces = airspaces.filter((airspace) => bboxIntersectsPointRadius(airspace.bbox, check.lat, check.lon, 100));
+  const tileId = tileIdFor(check.lat, check.lon, tileIndex.metadata?.tileDegrees || 4);
   if (!nearbyAirports.length) errors.push(`No nearby airports found for ${check.name}`);
   if (!nearbyAirspaces.length) errors.push(`No nearby airspace found for ${check.name}`);
-  console.log(`${check.name}: ${nearbyAirports.length} airports within 60 mi, ${nearbyAirspaces.length} airspace features near 100 mi view`);
+  if (!tileIndex.airports?.[tileId]) errors.push(`No airport tile ${tileId} found for ${check.name}`);
+  if (!tileIndex.airspace?.[tileId]) errors.push(`No airspace tile ${tileId} found for ${check.name}`);
+  console.log(`${check.name}: ${nearbyAirports.length} airports within 60 mi, ${nearbyAirspaces.length} airspace features near 100 mi view, tile ${tileId}`);
 }
 
 if (errors.length) {
@@ -101,3 +117,5 @@ const airportSize = (await stat(airportsPath)).size;
 const airspaceSize = (await stat(airspacePath)).size;
 console.log(`Validated ${airports.length} airports (${airportSize.toLocaleString()} bytes)`);
 console.log(`Validated ${airspaces.length} airspace features (${airspaceSize.toLocaleString()} bytes)`);
+console.log(`Special-use airspace features: ${airspaces.filter((airspace) => airspace.classCode === "SUA").length}`);
+console.log(`Validated tile index: ${Object.keys(tileIndex.airports || {}).length} airport tiles, ${Object.keys(tileIndex.airspace || {}).length} airspace tiles`);

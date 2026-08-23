@@ -8,7 +8,17 @@
     "start": "node server.js",
     "dev": "node server.js",
     "stratus": "node stratus-bridge.js",
-    "desktop": "electron ."
+    "desktop": "electron .",
+    "build:offline-airports": "node scripts/build-offline-airports.mjs --refresh",
+    "build:offline-airspace": "node scripts/build-offline-airspace.mjs",
+    "build:offline-tiles": "node scripts/build-offline-tiles.mjs",
+    "build:faa-aircraft-registry": "node scripts/build-faa-aircraft-registry.mjs",
+    "build:offline-data": "npm run build:offline-airports && npm run build:offline-airspace && npm run build:offline-tiles && npm run validate:offline-data",
+    "validate:offline-data": "node scripts/validate-offline-data.mjs",
+    "test:tais-motion": "node scripts/test-tais-motion.mjs",
+    "test:traffic-sweep": "node scripts/test-traffic-sweep.mjs",
+    "test:faa-aircraft-registry": "node scripts/test-faa-aircraft-registry.mjs",
+    "validate:faa-aircraft-registry": "node scripts/validate-faa-aircraft-registry.mjs"
   },
   "devDependencies": {
     "electron": "^37.2.0"

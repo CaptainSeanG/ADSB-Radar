@@ -4,16 +4,31 @@ import WebKit
 struct RadarWebView: UIViewRepresentable {
     @ObservedObject var stratusBridge: StratusBridge
     @Binding var notesText: String
+    @Binding var scratchpadActive: Bool
     var onScratchpadRequested: () -> Void
+    var onScratchpadDismissRequested: () -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(stratusBridge: stratusBridge, onScratchpadRequested: onScratchpadRequested)
+        Coordinator(
+            stratusBridge: stratusBridge,
+            onScratchpadRequested: onScratchpadRequested,
+            onScratchpadDismissRequested: onScratchpadDismissRequested
+        )
     }
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(context.coordinator, name: "stratus")
         configuration.userContentController.add(context.coordinator, name: "scratchpad")
+#if DEBUG
+        configuration.userContentController.addUserScript(
+            WKUserScript(
+                source: "window.ADSB_RADAR_DEBUG_TRAFFIC = true;",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            )
+        )
+#endif
         configuration.setURLSchemeHandler(RadarAssetSchemeHandler(), forURLScheme: "adsbradar")
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
 
@@ -22,7 +37,12 @@ struct RadarWebView: UIViewRepresentable {
         webView.backgroundColor = .black
         webView.scrollView.backgroundColor = .black
         webView.scrollView.bounces = false
+        webView.scrollView.bouncesZoom = false
+        webView.scrollView.minimumZoomScale = 1
+        webView.scrollView.maximumZoomScale = 1
+        webView.scrollView.delegate = context.coordinator
         context.coordinator.webView = webView
+        context.coordinator.installDeviceHeadingBridge()
 
         webView.load(URLRequest(url: URL(string: "adsbradar://app/index.html")!))
 
@@ -31,23 +51,49 @@ struct RadarWebView: UIViewRepresentable {
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onScratchpadRequested = onScratchpadRequested
+        context.coordinator.onScratchpadDismissRequested = onScratchpadDismissRequested
         context.coordinator.sendNotesTextIfNeeded(notesText)
+        context.coordinator.sendScratchpadPauseIfNeeded(scratchpadActive)
     }
 
-    final class Coordinator: NSObject, WKScriptMessageHandler {
+    final class Coordinator: NSObject, WKScriptMessageHandler, UIScrollViewDelegate {
         let stratusBridge: StratusBridge
         var onScratchpadRequested: () -> Void
+        var onScratchpadDismissRequested: () -> Void
         weak var webView: WKWebView?
         private var lastSentNotesText: String?
+        private var lastSentScratchpadActive: Bool?
 
-        init(stratusBridge: StratusBridge, onScratchpadRequested: @escaping () -> Void) {
+        init(
+            stratusBridge: StratusBridge,
+            onScratchpadRequested: @escaping () -> Void,
+            onScratchpadDismissRequested: @escaping () -> Void
+        ) {
             self.stratusBridge = stratusBridge
             self.onScratchpadRequested = onScratchpadRequested
+            self.onScratchpadDismissRequested = onScratchpadDismissRequested
+        }
+
+        func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+            nil
+        }
+
+        func installDeviceHeadingBridge() {
+            stratusBridge.onDeviceHeadingUpdate = { [weak self] payload in
+                self?.sendDeviceHeading(payload)
+            }
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             if message.name == "scratchpad" {
-                DispatchQueue.main.async { self.onScratchpadRequested() }
+                let type = (message.body as? [String: Any])?["type"] as? String
+                DispatchQueue.main.async {
+                    if type == "dismissForTrafficAlert" {
+                        self.onScratchpadDismissRequested()
+                    } else {
+                        self.onScratchpadRequested()
+                    }
+                }
                 return
             }
 
@@ -84,6 +130,34 @@ struct RadarWebView: UIViewRepresentable {
             """
             DispatchQueue.main.async {
                 self.webView?.evaluateJavaScript(script)
+            }
+        }
+
+        func sendScratchpadPauseIfNeeded(_ active: Bool) {
+            guard active != lastSentScratchpadActive else { return }
+            lastSentScratchpadActive = active
+            let script = """
+            window.dispatchEvent(new CustomEvent("adsb-scratchpad-pause", {
+              detail: {"paused":\(active ? "true" : "false")}
+            }));
+            """
+            DispatchQueue.main.async {
+                self.webView?.evaluateJavaScript(script)
+            }
+        }
+
+        private func sendDeviceHeading(_ payload: DeviceHeadingPayload) {
+            do {
+                let payloadData = try JSONEncoder().encode(payload)
+                guard let payloadJSON = String(data: payloadData, encoding: .utf8) else { return }
+                let script = """
+                window.dispatchEvent(new CustomEvent("adsb-native-device-heading", {
+                  detail: \(payloadJSON)
+                }));
+                """
+                self.webView?.evaluateJavaScript(script)
+            } catch {
+                return
             }
         }
 
@@ -164,7 +238,10 @@ final class RadarAssetSchemeHandler: NSObject, WKURLSchemeHandler {
         }
 
         let requestedPath = normalizedPath(for: url)
-        guard let assetURL = Bundle.main.url(forResource: "public", withExtension: nil)?.appendingPathComponent(requestedPath),
+        let resolvedURL = applicationSupportOverride(for: requestedPath)
+            ?? Bundle.main.url(forResource: "public", withExtension: nil)?.appendingPathComponent(requestedPath)
+
+        guard let assetURL = resolvedURL,
               isSafeAssetURL(assetURL),
               let data = try? Data(contentsOf: assetURL)
         else {
@@ -187,10 +264,38 @@ final class RadarAssetSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 
     private func isSafeAssetURL(_ url: URL) -> Bool {
+        if let supportURL = offlineDataDirectory(),
+           url.standardizedFileURL.path.hasPrefix(supportURL.standardizedFileURL.path) {
+            return true
+        }
+
         guard let publicURL = Bundle.main.url(forResource: "public", withExtension: nil) else {
             return false
         }
         return url.standardizedFileURL.path.hasPrefix(publicURL.standardizedFileURL.path)
+    }
+
+    private func applicationSupportOverride(for requestedPath: String) -> URL? {
+        guard requestedPath.hasPrefix("data/"),
+              let supportURL = offlineDataDirectory()
+        else {
+            return nil
+        }
+
+        let candidate = supportURL.appendingPathComponent(String(requestedPath.dropFirst("data/".count)))
+        return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
+    }
+
+    private func offlineDataDirectory() -> URL? {
+        guard let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+
+        let directory = appSupportURL
+            .appendingPathComponent("ADSB Radar", isDirectory: true)
+            .appendingPathComponent("OfflineData", isDirectory: true)
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
     }
 
     private func finish(_ task: WKURLSchemeTask, status: Int, body: Data, mimeType: String) {

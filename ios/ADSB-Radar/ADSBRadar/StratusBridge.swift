@@ -45,23 +45,27 @@ struct StratusAircraftPayload: Codable {
     let ownshipFrameCount: Int
     let heartbeatFrameCount: Int
     let fisbFrameCount: Int
-    let batteryPercent: Int?
-    let powerStatus: String?
+    let receiverState: String
+    let packetsPerSecond: Double
+    let framesPerSecond: Double
+    let trafficFramesPerSecond: Double
+    let lastUdpReceiveAgeSeconds: Double?
+    let lastDecodedFrameAgeSeconds: Double?
+    let lastTrafficReportAgeSeconds: Double?
+    let lastOwnshipReportAgeSeconds: Double?
+    let staleReason: String?
+    let nativePayloadGeneratedAt: Double
     var deviceHeading: Double?
     var deviceHeadingAccuracy: Double?
     var deviceHeadingAgeSeconds: Double?
-    let messageCounts: [String: Int]
-    let vendorFrameSamples: [String: String]
-    let vendorAsciiSamples: [String: String]
-    let rawPacketSamples: [String: String]
-    let rawPacketTailSamples: [String: String]
-    let rawPacketAsciiSamples: [String: String]
-    let rawPacketLengths: [String: Int]
-    let frameSamples: [String: String]
-    let frameLengths: [String: Int]
-    let recentMessageIds: [Int]
-    let batteryCandidates: [String: String]
     let decodeErrors: Int
+}
+
+struct DeviceHeadingPayload: Codable {
+    let heading: Double
+    let accuracy: Double?
+    let magnetic: Bool
+    let timestamp: Double
 }
 
 final class StratusBridge: NSObject, ObservableObject, CLLocationManagerDelegate {
@@ -73,10 +77,13 @@ final class StratusBridge: NSObject, ObservableObject, CLLocationManagerDelegate
     private var listenerStates: [UInt16: String] = [:]
     private var portStats: [UInt16: Int] = [:]
     private let ports: [UInt16] = [4000, 4001, 43211]
-    private let staleAfter: TimeInterval = 30
+    private let staleAfter: TimeInterval = 45
+    private let degradedAfter: TimeInterval = 20
     private var deviceHeading: Double?
     private var deviceHeadingAccuracy: Double?
     private var lastDeviceHeadingAt: Date?
+    private var lastHeadingEventAt = Date.distantPast
+    var onDeviceHeadingUpdate: ((DeviceHeadingPayload) -> Void)?
 
     @Published private(set) var isRunning = false
 
@@ -106,6 +113,7 @@ final class StratusBridge: NSObject, ObservableObject, CLLocationManagerDelegate
         queue.sync {
             var payload = decoder.aircraftPayload(
                 staleAfter: staleAfter,
+                degradedAfter: degradedAfter,
                 listenerStatus: listenerStatus(),
                 portStats: portStats
             )
@@ -129,13 +137,28 @@ final class StratusBridge: NSObject, ObservableObject, CLLocationManagerDelegate
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
-        let heading = newHeading.trueHeading >= 0 ? newHeading.trueHeading : newHeading.magneticHeading
+        let usesMagnetic = newHeading.trueHeading < 0
+        let heading = usesMagnetic ? newHeading.magneticHeading : newHeading.trueHeading
         guard heading >= 0 else { return }
+        let normalizedHeading = heading.truncatingRemainder(dividingBy: 360)
+        let accuracy = newHeading.headingAccuracy >= 0 ? newHeading.headingAccuracy : nil
+        let now = Date()
 
         queue.async {
-            self.deviceHeading = heading.truncatingRemainder(dividingBy: 360)
-            self.deviceHeadingAccuracy = newHeading.headingAccuracy >= 0 ? newHeading.headingAccuracy : nil
-            self.lastDeviceHeadingAt = Date()
+            self.deviceHeading = normalizedHeading
+            self.deviceHeadingAccuracy = accuracy
+            self.lastDeviceHeadingAt = now
+            guard now.timeIntervalSince(self.lastHeadingEventAt) >= 0.08 else { return }
+            self.lastHeadingEventAt = now
+            let payload = DeviceHeadingPayload(
+                heading: normalizedHeading,
+                accuracy: accuracy,
+                magnetic: usesMagnetic,
+                timestamp: now.timeIntervalSince1970
+            )
+            DispatchQueue.main.async {
+                self.onDeviceHeadingUpdate?(payload)
+            }
         }
     }
 
@@ -208,15 +231,19 @@ final class StratusBridge: NSObject, ObservableObject, CLLocationManagerDelegate
         while true {
             var sourceAddress = sockaddr_storage()
             var sourceLength = socklen_t(MemoryLayout<sockaddr_storage>.size)
-            let byteCount = withUnsafeMutablePointer(to: &sourceAddress) { pointer in
-                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
-                    recvfrom(fd, &buffer, buffer.count, 0, sockaddrPointer, &sourceLength)
+            let bufferCount = buffer.count
+            let byteCount = buffer.withUnsafeMutableBytes { bufferPointer in
+                withUnsafeMutablePointer(to: &sourceAddress) { pointer in
+                    pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { sockaddrPointer in
+                        recvfrom(fd, bufferPointer.baseAddress, bufferCount, 0, sockaddrPointer, &sourceLength)
+                    }
                 }
             }
 
             if byteCount > 0 {
                 portStats[port, default: 0] += 1
-                decoder.handle(packet: Data(buffer.prefix(byteCount)), port: port)
+                let packet = Data(buffer.prefix(byteCount))
+                decoder.handle(packet: packet, port: port)
                 continue
             }
 

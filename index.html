@@ -2,32 +2,27 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>ADSB Radar</title>
     <meta name="author" content="CaptainSeanG" />
     <meta name="copyright" content="Copyright 2026 CaptainSeanG. All rights reserved." />
     <meta name="rights" content="Unauthorized reproduction or redistribution prohibited." />
-    <link rel="stylesheet" href="./public/styles.css?v=20260811-2" />
+    <link rel="stylesheet" href="./public/styles.css?v=20260822-2" />
   </head>
   <body data-copyright-owner="CaptainSeanG" data-product="ADSB Radar" data-build-series="2026-rollout">
     <main class="shell">
       <section class="radar-wrap" aria-label="ADS-B radar display">
         <canvas id="radar" aria-label="Radar screen"></canvas>
         <div class="scope-glass"></div>
+        <div class="radar-top-actions" aria-label="Radar shortcuts">
+          <button type="button" id="radarTrackingOpen">Track</button>
+          <button type="button" id="radarSettingsOpen">Settings</button>
+        </div>
         <button type="button" class="legend-button" id="legendOpen">Legend</button>
+        <div class="range-indicator" id="rangeIndicator" aria-label="Current radar range">RNG 10 NM</div>
         <div class="data-source-indicator" id="dataSourceIndicator" hidden aria-label="ADS-B data source status">
           <span class="data-source-dot"></span>
           <span class="data-source-label" id="dataSourceLabel">ADS-B</span>
-        </div>
-        <button type="button" class="wx-range-button" id="wxRangeButton" hidden>10 NM</button>
-        <div class="bottom-range-buttons" id="bottomRangeButtons" hidden aria-label="Radar range">
-          <button type="button" data-range="2">2</button>
-          <button type="button" data-range="5">5</button>
-          <button type="button" data-range="10" class="active">10</button>
-          <button type="button" data-range="15">15</button>
-          <button type="button" data-range="20">20</button>
-          <button type="button" data-range="50">50</button>
-          <button type="button" data-range="100">100</button>
         </div>
         <button type="button" class="altitude-bracket-button" id="altitudeBracketButton" aria-label="Vertical traffic alert filter all altitudes">VFR ALL</button>
         <div class="arc-heading-override" id="arcHeadingOverride" hidden aria-label="Temporarily point ARC radar to a cardinal direction">
@@ -63,9 +58,12 @@
         </div>
 
         <form id="controls" class="controls">
-          <label>
+          <label class="airport-search-control">
             Airport
-            <select id="airportSelect" name="airport">
+            <button type="button" class="airport-search-open" id="airportSearchOpen">
+              <span id="airportSearchLabel">Use GPS location</span>
+            </button>
+            <select id="airportSelect" name="airport" aria-hidden="true" tabindex="-1">
               <option value="">Custom coordinates</option>
               <option value="gps" selected>Use GPS location</option>
               <option value="33.7292,-111.9918">Default position</option>
@@ -91,19 +89,6 @@
             </label>
           </div>
 
-          <fieldset>
-            <legend>Range (nm)</legend>
-            <div class="range-buttons" id="rangeButtons">
-              <button type="button" data-range="2">2</button>
-              <button type="button" data-range="5">5</button>
-              <button type="button" data-range="10" class="active">10</button>
-              <button type="button" data-range="15">15</button>
-              <button type="button" data-range="20">20</button>
-              <button type="button" data-range="50">50</button>
-              <button type="button" data-range="100">100</button>
-            </div>
-          </fieldset>
-
         </form>
 
         <section class="traffic">
@@ -120,6 +105,20 @@
       <button type="button" class="wx-toggle" id="wxToggle" aria-label="Precipitation layer" aria-pressed="false">WX</button>
     </main>
 
+    <div class="airport-search-modal" id="airportSearchModal" hidden>
+      <section class="airport-search-dialog" role="dialog" aria-modal="true" aria-labelledby="airportSearchTitle">
+        <header>
+          <div>
+            <p class="eyebrow">Offline Airport Search</p>
+            <h2 id="airportSearchTitle">Choose Airport</h2>
+          </div>
+          <button type="button" class="icon-button" id="airportSearchClose" aria-label="Close airport search">x</button>
+        </header>
+        <input id="airportSearch" type="search" autocomplete="off" spellcheck="false" placeholder="KPHX, KLAX, PANC, Deer Valley..." aria-controls="airportSearchResults" aria-expanded="false" />
+        <div class="airport-search-results" id="airportSearchResults" role="listbox" hidden></div>
+      </section>
+    </div>
+
     <div class="modal-backdrop" id="settingsModal" hidden>
       <section class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
         <header class="settings-header">
@@ -134,7 +133,8 @@
               <label><input type="checkbox" data-class="B" checked /><span>Class B</span></label>
               <label><input type="checkbox" data-class="C" checked /><span>Class C</span></label>
               <label><input type="checkbox" data-class="D" checked /><span>Class D</span></label>
-              <label><input type="checkbox" data-class="SUA" /><span>P/R/MOA</span></label>
+              <label><input type="checkbox" data-class="SUA" checked /><span>SUA</span></label>
+              <label><input id="smallAirportsToggle" type="checkbox" checked /><span>Small Airports</span></label>
             </div>
           </fieldset>
 
@@ -196,17 +196,11 @@
             </select>
           </label>
 
-          <fieldset>
-            <legend>Sweep color</legend>
-            <label class="switch-row color-switch">
-              <span>Green</span>
-              <input id="sweepColorToggle" type="checkbox" checked />
-              <span>Orange</span>
-            </label>
-          </fieldset>
-
           <div class="settings-meta" aria-label="Version and copyright information">
-            <div class="settings-version">Rollout <span id="settingsVersion">2026.08.11-r2</span></div>
+            <div class="settings-version">Rollout <span id="settingsVersion">2026.08.22-r2</span></div>
+            <div class="settings-disclaimer">
+              Supplemental situational awareness only. Not a certified primary flight instrument, official navigation source, or substitute for see-and-avoid. Traffic, weather, airport, and airspace data may be incomplete or inaccurate.
+            </div>
             <div class="settings-copyright">Copyright 2026 CaptainSeanG. All rights reserved.</div>
           </div>
         </div>
@@ -215,6 +209,7 @@
 
     <div class="modal-backdrop" id="aircraftModal" hidden>
       <section class="settings-modal aircraft-modal" role="dialog" aria-modal="true" aria-labelledby="aircraftTitle">
+        <button type="button" class="aircraft-track-button" id="aircraftTrack">Track</button>
         <header class="settings-header">
           <h2 id="aircraftTitle">Aircraft</h2>
           <button type="button" class="icon-button" id="aircraftClose" aria-label="Close aircraft details">x</button>
@@ -294,6 +289,10 @@
             <div><strong>Dashed blue outline</strong><span>Class D airspace.</span></div>
           </div>
           <div class="legend-item">
+            <span class="legend-airspace-sua"></span>
+            <div><strong>Amber patterned outline</strong><span>Prohibited, restricted, and MOA airspace.</span></div>
+          </div>
+          <div class="legend-item">
             <span class="legend-runway"></span>
             <div><strong>Amber runway</strong><span>Airport runway reference at close ranges.</span></div>
           </div>
@@ -307,13 +306,17 @@
           </div>
           <div class="legend-item">
             <span class="legend-source-dot legend-source-cellular"></span>
-            <div><strong>Solid blue dot</strong><span>Traffic is coming from cellular data.</span></div>
+            <div><strong>Solid blue dot</strong><span>Traffic is coming from the internet ADS-B feed.</span></div>
+          </div>
+          <div class="legend-item">
+            <span class="legend-source-dot legend-source-faa"></span>
+            <div><strong>Solid cyan dot</strong><span>Traffic is coming from FAA P50 TAIS.</span></div>
           </div>
         </div>
       </section>
     </div>
 
-    <script src="./public/config.js?v=20260811-2"></script>
-    <script type="module" src="./public/app.js?v=20260811-2"></script>
+    <script src="./public/config.js?v=20260822-2"></script>
+    <script type="module" src="./public/app.js?v=20260822-2"></script>
   </body>
 </html>

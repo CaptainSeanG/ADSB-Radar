@@ -5,7 +5,9 @@ import path from "node:path";
 const root = new URL("..", import.meta.url);
 const outputUrl = new URL("../public/data/offline-airspace.json", import.meta.url);
 const sourceUrl = "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0/query";
+const specialUseSourceUrl = "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Special_Use_Airspace/FeatureServer/0/query";
 const where = "TYPE_CODE='CLASS' AND CLASS in ('B','C','D','E')";
+const specialUseWhere = "1=1";
 const simplificationTolerance = 0.00018;
 const expectedClassBAreas = [
   ["PHX", "PHOENIX"],
@@ -131,8 +133,52 @@ function normalizeFeature(feature) {
   };
 }
 
-async function fetchJson(params) {
-  const url = `${sourceUrl}?${params}`;
+function normalizeSpecialUseType(attributes) {
+  const typeText = String(attributes.TYPE_CODE || "").toUpperCase();
+  const classText = String(attributes.CLASS || "").toUpperCase();
+  const nameText = String(attributes.NAME || "").toUpperCase();
+  const combined = `${typeText} ${classText} ${nameText}`;
+  if (typeText === "P" || combined.includes("PROHIB")) return "P";
+  if (typeText === "R" || combined.includes("RESTRICT")) return "R";
+  if (typeText === "MOA" || combined.includes("MOA") || combined.includes("MILITARY")) return "MOA";
+  if (typeText === "W" || combined.includes("WARNING")) return "W";
+  if (typeText === "A" || combined.includes("ALERT")) return "A";
+  return "";
+}
+
+function normalizeSpecialUseFeature(feature) {
+  const attributes = feature.attributes || {};
+  const typeCode = normalizeSpecialUseType(attributes);
+  if (!["P", "R", "MOA", "W", "A"].includes(typeCode)) return null;
+  const rings = (feature.geometry?.rings || [])
+    .map(normalizeRing)
+    .filter((ring) => ring.length >= 3)
+    .map((ring) => simplifyRing(ring, simplificationTolerance));
+  if (!rings.length) return null;
+
+  return {
+    id: `SUA-${attributes.OBJECTID}`,
+    ident: attributes.NAME || "",
+    name: attributes.NAME || "",
+    classCode: "SUA",
+    type: "SUA",
+    typeCode,
+    sector: "",
+    lower: "--",
+    upper: "--",
+    usage: {
+      usLow: attributes.US_LOW ?? null,
+      usHigh: attributes.US_HIGH ?? null,
+      usArea: attributes.US_AREA ?? null,
+      pacific: attributes.PACIFIC ?? null
+    },
+    bbox: boundsForRings(rings),
+    rings
+  };
+}
+
+async function fetchJson(params, urlBase = sourceUrl) {
+  const url = `${urlBase}?${params}`;
   let lastError = null;
   for (let attempt = 1; attempt <= 4; attempt += 1) {
     try {
@@ -161,6 +207,16 @@ async function fetchCount() {
   return Number(payload.count || 0);
 }
 
+async function fetchSpecialUseCount() {
+  const params = new URLSearchParams({
+    f: "json",
+    where: specialUseWhere,
+    returnCountOnly: "true"
+  });
+  const payload = await fetchJson(params, specialUseSourceUrl);
+  return Number(payload.count || 0);
+}
+
 async function fetchPage(offset, pageSize) {
   const params = new URLSearchParams({
     f: "json",
@@ -176,6 +232,21 @@ async function fetchPage(offset, pageSize) {
   return fetchJson(params);
 }
 
+async function fetchSpecialUsePage(offset, pageSize) {
+  const params = new URLSearchParams({
+    f: "json",
+    where: specialUseWhere,
+    outFields: "OBJECTID,NAME,TYPE_CODE,CLASS,US_LOW,US_HIGH,US_AREA,PACIFIC",
+    returnGeometry: "true",
+    outSR: "4326",
+    resultOffset: String(offset),
+    resultRecordCount: String(pageSize),
+    orderByFields: "OBJECTID",
+    geometryPrecision: "5"
+  });
+  return fetchJson(params, specialUseSourceUrl);
+}
+
 function validateAirspaces(airspaces) {
   const errors = [];
   const bSearchText = airspaces
@@ -187,6 +258,9 @@ function validateAirspaces(airspaces) {
     }
   }
   for (const airspace of airspaces) {
+    if (!["B", "C", "D", "E", "SUA"].includes(airspace.classCode)) {
+      errors.push(`Unexpected airspace class ${airspace.classCode}`);
+    }
     if (!airspace.rings.length) errors.push(`Airspace ${airspace.id} has no rings`);
     for (const ring of airspace.rings) {
       if (ring.length < 3) errors.push(`Airspace ${airspace.id} has an invalid ring`);
@@ -211,8 +285,16 @@ async function main() {
     console.log(`Fetched airspace ${Math.min(offset + pageSize, total)}/${total}; kept ${airspaces.length}`);
   }
 
+  const specialUseTotal = await fetchSpecialUseCount();
+  for (let offset = initialOffset; offset < specialUseTotal; offset += pageSize) {
+    const page = await fetchSpecialUsePage(offset, pageSize);
+    const rows = (page.features || []).map(normalizeSpecialUseFeature).filter(Boolean);
+    airspaces.push(...rows);
+    console.log(`Fetched special-use airspace ${Math.min(offset + pageSize, specialUseTotal)}/${specialUseTotal}; kept ${airspaces.length}`);
+  }
+
   const deduped = Array.from(new Map(airspaces.map((airspace) => [airspace.id, airspace])).values())
-    .sort((a, b) => Number(a.id) - Number(b.id));
+    .sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }));
   validateAirspaces(deduped);
 
   const generatedAt = new Date().toISOString();
@@ -220,14 +302,18 @@ async function main() {
     metadata: {
       dataset: "ADSB Radar bundled offline airspace",
       schemaVersion: 2,
-      source: "FAA ArcGIS Class_Airspace FeatureServer",
-      sourceUrl: "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0",
+      source: "FAA ArcGIS Class_Airspace and Special_Use_Airspace FeatureServers",
+      sourceUrl: [
+        "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Class_Airspace/FeatureServer/0",
+        "https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/arcgis/rest/services/Special_Use_Airspace/FeatureServer/0"
+      ],
       sourceLicense: "FAA public airspace feature service; see docs/OFFLINE_DATA.md for attribution notes.",
       sourceDate: generatedAt,
       generatedAt,
       featureCount: deduped.length,
-      coverage: "United States national class airspace coverage available from the FAA Class_Airspace service",
-      includedClasses: ["B", "C", "D", "E"],
+      coverage: "United States national class and special-use airspace coverage available from FAA feature services",
+      includedClasses: ["B", "C", "D", "E", "SUA"],
+      includedSpecialUseTypes: ["P", "R", "MOA", "W", "A"],
       coordinatePrecision: 5,
       simplificationTolerance
     },

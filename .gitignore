@@ -4,3 +4,7 @@ DerivedData/
 data/source/
 ios/**/xcuserdata/
 ios/**/project.xcworkspace/xcuserdata/
+gateway/**/target/
+build/
+.wrangler/
+ios/**/*.xcappdata/

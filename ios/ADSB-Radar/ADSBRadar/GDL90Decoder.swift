@@ -11,37 +11,57 @@ final class GDL90Decoder {
     private(set) var heartbeatFrameCount = 0
     private(set) var fisbFrameCount = 0
     private(set) var decodeErrors = 0
-    private var messageCounts: [UInt8: Int] = [:]
-    private var vendorFrameSamples: [UInt8: String] = [:]
-    private var vendorAsciiSamples: [UInt8: String] = [:]
-    private var rawPacketSamples: [UInt16: String] = [:]
-    private var rawPacketTailSamples: [UInt16: String] = [:]
-    private var rawPacketAsciiSamples: [UInt16: String] = [:]
-    private var rawPacketLengths: [UInt16: Int] = [:]
-    private var frameSamples: [UInt8: String] = [:]
-    private var frameLengths: [UInt8: Int] = [:]
-    private var recentMessageIds: [UInt8] = []
-    private var batteryCandidates: [String: String] = [:]
-    private var batteryPercent: Int?
-    private var powerStatus: String?
     private var lastPacketAt: Date?
+    private var lastFrameAt: Date?
+    private var lastTrafficReportAt: Date?
+    private var lastOwnshipReportAt: Date?
+    private var packetTimestamps: [Date] = []
+    private var frameTimestamps: [Date] = []
+    private var trafficFrameTimestamps: [Date] = []
+    private var pendingFrameBytes: [UInt8] = []
+    private var frameOpen = false
 
     func handle(packet: Data, port: UInt16) {
         packetCount += 1
-        lastPacketAt = Date()
-        captureRawPacketSample(packet, port: port)
+        let now = Date()
+        lastPacketAt = now
+        packetTimestamps.append(now)
+        packetTimestamps = packetTimestamps.filter { now.timeIntervalSince($0) <= 10 }
         parse(packet: [UInt8](packet))
     }
 
-    func aircraftPayload(staleAfter: TimeInterval, listenerStatus: String, portStats: [UInt16: Int]) -> StratusAircraftPayload {
+    func aircraftPayload(staleAfter: TimeInterval, degradedAfter: TimeInterval, listenerStatus: String, portStats: [UInt16: Int]) -> StratusAircraftPayload {
         pruneTraffic(maxAge: 90)
 
         let now = Date()
         let aircraft = traffic.values.map { $0.payload(now: now) }
-        let ageSeconds = lastPacketAt.map { Int(now.timeIntervalSince($0).rounded()) }
-        let stale = lastPacketAt.map { now.timeIntervalSince($0) > staleAfter } ?? true
+        let feedTimestamp = lastFrameAt ?? lastPacketAt
+        let ageSeconds = feedTimestamp.map { Int(now.timeIntervalSince($0).rounded()) }
+        let frameAge = lastFrameAt.map { now.timeIntervalSince($0) }
+        let packetAge = lastPacketAt.map { now.timeIntervalSince($0) }
+        let trafficAge = lastTrafficReportAt.map { now.timeIntervalSince($0) }
+        let ownshipAge = lastOwnshipReportAt.map { now.timeIntervalSince($0) }
+        let stale = frameAge.map { $0 > staleAfter } ?? true
+        let receiverState: String
+        let staleReason: String?
+        if lastPacketAt == nil {
+            receiverState = "connecting"
+            staleReason = "No UDP datagrams have been received yet."
+        } else if stale {
+            receiverState = "stale"
+            staleReason = frameAge.map { "Last decoded GDL90 frame was \(Int($0.rounded())) seconds ago." } ?? "UDP datagrams are arriving, but no valid GDL90 frames have decoded yet."
+        } else if (frameAge ?? 0) > degradedAfter || trafficAge.map({ $0 > degradedAfter }) == true {
+            receiverState = "degraded"
+            staleReason = "GDL90 cadence is slower than expected."
+        } else {
+            receiverState = "live"
+            staleReason = nil
+        }
         let ownshipPayload = ownship?.payload(now: now)
         let portStatsPayload = Dictionary(uniqueKeysWithValues: portStats.map { (String($0.key), $0.value) })
+        let packetsPerSecond = packetTimestamps.isEmpty ? 0 : Double(packetTimestamps.count) / 10.0
+        let framesPerSecond = frameTimestamps.isEmpty ? 0 : Double(frameTimestamps.count) / 10.0
+        let trafficFramesPerSecond = trafficFrameTimestamps.isEmpty ? 0 : Double(trafficFrameTimestamps.count) / 10.0
 
         return StratusAircraftPayload(
             source: "Stratus",
@@ -60,69 +80,61 @@ final class GDL90Decoder {
             ownshipFrameCount: ownshipFrameCount,
             heartbeatFrameCount: heartbeatFrameCount,
             fisbFrameCount: fisbFrameCount,
-            batteryPercent: batteryPercent,
-            powerStatus: powerStatus,
+            receiverState: receiverState,
+            packetsPerSecond: packetsPerSecond,
+            framesPerSecond: framesPerSecond,
+            trafficFramesPerSecond: trafficFramesPerSecond,
+            lastUdpReceiveAgeSeconds: packetAge,
+            lastDecodedFrameAgeSeconds: frameAge,
+            lastTrafficReportAgeSeconds: trafficAge,
+            lastOwnshipReportAgeSeconds: ownshipAge,
+            staleReason: staleReason,
+            nativePayloadGeneratedAt: now.timeIntervalSince1970,
             deviceHeading: nil,
             deviceHeadingAccuracy: nil,
             deviceHeadingAgeSeconds: nil,
-            messageCounts: Dictionary(uniqueKeysWithValues: messageCounts.map { (String($0.key), $0.value) }),
-            vendorFrameSamples: Dictionary(uniqueKeysWithValues: vendorFrameSamples.map { (String($0.key), $0.value) }),
-            vendorAsciiSamples: Dictionary(uniqueKeysWithValues: vendorAsciiSamples.map { (String($0.key), $0.value) }),
-            rawPacketSamples: Dictionary(uniqueKeysWithValues: rawPacketSamples.map { (String($0.key), $0.value) }),
-            rawPacketTailSamples: Dictionary(uniqueKeysWithValues: rawPacketTailSamples.map { (String($0.key), $0.value) }),
-            rawPacketAsciiSamples: Dictionary(uniqueKeysWithValues: rawPacketAsciiSamples.map { (String($0.key), $0.value) }),
-            rawPacketLengths: Dictionary(uniqueKeysWithValues: rawPacketLengths.map { (String($0.key), $0.value) }),
-            frameSamples: Dictionary(uniqueKeysWithValues: frameSamples.map { (String($0.key), $0.value) }),
-            frameLengths: Dictionary(uniqueKeysWithValues: frameLengths.map { (String($0.key), $0.value) }),
-            recentMessageIds: recentMessageIds.map { Int($0) },
-            batteryCandidates: batteryCandidates,
             decodeErrors: decodeErrors
         )
     }
 
-    private func captureRawPacketSample(_ packet: Data, port: UInt16) {
-        rawPacketLengths[port] = packet.count
-        let bytes = [UInt8](packet.prefix(96))
-        guard !bytes.isEmpty else { return }
-        rawPacketSamples[port] = bytes
-            .map { String(format: "%02X", $0) }
-            .joined()
-        rawPacketTailSamples[port] = packet
-            .suffix(96)
-            .map { String(format: "%02X", $0) }
-            .joined()
-        rawPacketAsciiSamples[port] = bytes
-            .map { byte in byte >= 0x20 && byte <= 0x7e ? String(UnicodeScalar(byte)) : "." }
-            .joined()
-        captureBatteryCandidates(bytes: [UInt8](packet.prefix(512)), label: "pkt\(port)")
-    }
-
     private func parse(packet: [UInt8]) {
-        var start: Int?
-
-        for index in packet.indices {
-            guard packet[index] == 0x7e else { continue }
-
-            if let frameStart = start, index > frameStart + 1 {
-                let rawFrame = Array(packet[(frameStart + 1)..<index])
-                do {
-                    let frame = try unescape(rawFrame)
-                    let payload = frame.count > 2 ? Array(frame.dropLast(2)) : frame
-                    frameCount += 1
-                    decode(frame: payload)
-                } catch {
-                    decodeErrors += 1
+        for byte in packet {
+            if byte == 0x7e {
+                if frameOpen && !pendingFrameBytes.isEmpty {
+                    decodeRawFrame(pendingFrameBytes)
                 }
+                pendingFrameBytes.removeAll(keepingCapacity: true)
+                frameOpen = true
+                continue
             }
 
-            start = index
+            guard frameOpen else { continue }
+            pendingFrameBytes.append(byte)
+            if pendingFrameBytes.count > 4096 {
+                pendingFrameBytes.removeAll(keepingCapacity: true)
+                frameOpen = false
+                decodeErrors += 1
+            }
+        }
+    }
+
+    private func decodeRawFrame(_ rawFrame: [UInt8]) {
+        do {
+            let frame = try unescape(rawFrame)
+            let payload = frame.count > 2 ? Array(frame.dropLast(2)) : frame
+            let now = Date()
+            frameCount += 1
+            lastFrameAt = now
+            frameTimestamps.append(now)
+            frameTimestamps = frameTimestamps.filter { now.timeIntervalSince($0) <= 10 }
+            decode(frame: payload)
+        } catch {
+            decodeErrors += 1
         }
     }
 
     private func decode(frame: [UInt8]) {
         guard let messageId = frame.first else { return }
-        messageCounts[messageId, default: 0] += 1
-        captureFrameSample(frame)
 
         switch messageId {
         case 0:
@@ -135,6 +147,7 @@ final class GDL90Decoder {
                 ownshipReport.geoAltitude = ownshipGeoAltitude
                 ownship = ownshipReport
                 ownshipFrameCount += 1
+                lastOwnshipReportAt = Date()
             }
         case 11:
             if let altitude = decodeOwnshipGeoAltitude(frame: frame) {
@@ -148,61 +161,14 @@ final class GDL90Decoder {
             if let report = decodeTrafficReport(frame: frame) {
                 traffic[report.key] = report
                 trafficFrameCount += 1
+                let now = Date()
+                lastTrafficReportAt = now
+                trafficFrameTimestamps.append(now)
+                trafficFrameTimestamps = trafficFrameTimestamps.filter { now.timeIntervalSince($0) <= 10 }
             }
         default:
-            captureVendorFrameSample(frame)
             return
         }
-    }
-
-    private func captureFrameSample(_ frame: [UInt8]) {
-        guard let messageId = frame.first else { return }
-        recentMessageIds.append(messageId)
-        if recentMessageIds.count > 24 {
-            recentMessageIds.removeFirst(recentMessageIds.count - 24)
-        }
-        frameSamples[messageId] = frame
-            .prefix(64)
-            .map { String(format: "%02X", $0) }
-            .joined()
-        frameLengths[messageId] = frame.count
-        captureBatteryCandidates(bytes: frame, label: "msg\(messageId)")
-    }
-
-    private func captureVendorFrameSample(_ frame: [UInt8]) {
-        guard let messageId = frame.first else { return }
-        guard messageId >= 0x40 || ![0, 7, 10, 11, 20].contains(messageId) else { return }
-
-        let sample = frame
-            .prefix(32)
-            .map { String(format: "%02X", $0) }
-            .joined()
-        vendorFrameSamples[messageId] = sample
-        vendorAsciiSamples[messageId] = asciiSnippet(frame)
-    }
-
-    private func captureBatteryCandidates(bytes: [UInt8], label: String) {
-        guard !bytes.isEmpty else { return }
-
-        let lowercaseAscii = String(bytes: bytes.map { $0 >= 0x20 && $0 <= 0x7e ? $0 : 0x20 }, encoding: .ascii)?.lowercased() ?? ""
-        if lowercaseAscii.contains("bat") || lowercaseAscii.contains("batt") || lowercaseAscii.contains("battery") || lowercaseAscii.contains("pwr") {
-            batteryCandidates["\(label)-ascii"] = asciiSnippet(bytes)
-        }
-
-        for (index, byte) in bytes.enumerated() where byte <= 100 {
-            let previous = index > 0 ? bytes[index - 1] : 0
-            let next = index + 1 < bytes.count ? bytes[index + 1] : 0
-            if previous == 0 || next == 0 || (byte >= 5 && byte <= 100) {
-                batteryCandidates["\(label)-pct\(index)"] = "\(byte)"
-                if batteryCandidates.count > 32 { return }
-            }
-        }
-    }
-
-    private func asciiSnippet(_ bytes: [UInt8]) -> String {
-        String(bytes: bytes.prefix(80).map { byte in
-            byte >= 0x20 && byte <= 0x7e ? byte : 0x2e
-        }, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
     private func decodeTrafficReport(frame: [UInt8]) -> DecodedAircraft? {

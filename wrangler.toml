@@ -1,0 +1,7 @@
+name = "adsb-radar-proxy"
+main = "workers/adsb-proxy.js"
+compatibility_date = "2026-08-14"
+
+[[kv_namespaces]]
+binding = "ADSB_LKG_KV"
+id = "010b08b03266401c8d6364dbdbd8ae08"
