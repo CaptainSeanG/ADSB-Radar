@@ -18,8 +18,9 @@ import { FaaAircraftRegistry, normalizeIcaoHex } from "./aircraft-registry.js?v=
 import {
   aircraftIconClass as radarAircraftIconClass,
   aircraftIconClassLabel,
-  classifyAircraftForRadar
-} from "./aircraft-classification.js?v=20260823-1";
+  classifyAircraftForRadar,
+  classifyAircraftForRadarDetailed
+} from "./aircraft-classification.js?v=20260824-1";
 import {
   calculateBestWindRunway,
   formatMetarWind,
@@ -30,8 +31,61 @@ import {
 
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.08.23-r4";
+const APP_ROLLOUT_VERSION = "2026.08.24-r1";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
+
+const aircraftIconAssetUrls = Object.freeze({
+  [radarAircraftIconClass.SINGLE_PROP]: new URL("./assets/aircraft/single-prop.svg", import.meta.url).href,
+  [radarAircraftIconClass.MULTI_PROP]: new URL("./assets/aircraft/multi-prop.svg", import.meta.url).href,
+  [radarAircraftIconClass.SMALL_JET]: new URL("./assets/aircraft/small-jet.svg", import.meta.url).href,
+  [radarAircraftIconClass.LARGE_JET]: new URL("./assets/aircraft/large-jet.svg", import.meta.url).href,
+  [radarAircraftIconClass.HELICOPTER]: new URL("./assets/aircraft/helicopter.svg", import.meta.url).href
+});
+const aircraftIconImages = new Map();
+const aircraftIconImagePromises = new Map();
+const tintedAircraftIconCache = new Map();
+
+function loadAircraftIcon(classification) {
+  const source = aircraftIconAssetUrls[classification];
+  if (!source) return Promise.resolve(null);
+  if (aircraftIconImages.has(classification)) return Promise.resolve(aircraftIconImages.get(classification));
+  if (aircraftIconImagePromises.has(classification)) return aircraftIconImagePromises.get(classification);
+
+  const promise = new Promise((resolve) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => {
+      aircraftIconImages.set(classification, image);
+      resolve(image);
+    };
+    image.onerror = () => resolve(null);
+    image.src = source;
+  });
+  aircraftIconImagePromises.set(classification, promise);
+  return promise;
+}
+
+function preloadAircraftIcons() {
+  Object.keys(aircraftIconAssetUrls).forEach((classification) => loadAircraftIcon(classification));
+}
+
+function tintedAircraftIcon(classification, color) {
+  const image = aircraftIconImages.get(classification);
+  if (!image || !image.complete || !image.naturalWidth) return null;
+  const cacheKey = `${classification}|${color}`;
+  if (tintedAircraftIconCache.has(cacheKey)) return tintedAircraftIconCache.get(cacheKey);
+
+  const mask = document.createElement("canvas");
+  mask.width = 256;
+  mask.height = 256;
+  const maskContext = mask.getContext("2d");
+  maskContext.drawImage(image, 0, 0, mask.width, mask.height);
+  maskContext.globalCompositeOperation = "source-in";
+  maskContext.fillStyle = color;
+  maskContext.fillRect(0, 0, mask.width, mask.height);
+  tintedAircraftIconCache.set(cacheKey, mask);
+  return mask;
+}
 const anonymousClientStorageKey = "ADSB_RADAR_ANONYMOUS_CLIENT_ID";
 
 function loadAnonymousClientId() {
@@ -265,6 +319,7 @@ const faaAircraftRegistry = new FaaAircraftRegistry();
 const radarBlips = new Map();
 const trafficTargetStates = new Map();
 const aircraftHighlights = new Map();
+const aircraftClassificationFailureLogs = new Set();
 const aircraftTypeNames = new Map([
   ["A109", "AgustaWestland AW109"],
   ["A119", "AgustaWestland AW119"],
@@ -5965,7 +6020,7 @@ function drawTrack(scope, plane, alpha = 1) {
   ctx.restore();
 }
 
-function drawAircraftIconSymbol(classification) {
+function drawNativeAircraftIconSymbol(classification) {
   ctx.beginPath();
   if (classification === radarAircraftIconClass.HELICOPTER) {
     ctx.ellipse(0, 0, 4.5, 8, 0, 0, Math.PI * 2);
@@ -6033,6 +6088,47 @@ function drawAircraftIconSymbol(classification) {
   ctx.fill();
 }
 
+function drawAircraftIconSymbol(classification, color) {
+  const icon = tintedAircraftIcon(classification, color);
+  if (!icon) {
+    drawNativeAircraftIconSymbol(classification);
+    return false;
+  }
+
+  const dimensions = {
+    [radarAircraftIconClass.SINGLE_PROP]: [15, 15],
+    [radarAircraftIconClass.MULTI_PROP]: [18, 16],
+    [radarAircraftIconClass.SMALL_JET]: [17, 15],
+    [radarAircraftIconClass.LARGE_JET]: [19, 17],
+    [radarAircraftIconClass.HELICOPTER]: [17, 17]
+  }[classification] || [16, 16];
+  ctx.drawImage(icon, -dimensions[0] / 2, -dimensions[1] / 2, dimensions[0], dimensions[1]);
+  return true;
+}
+
+function radarAircraftIconClassification(plane) {
+  const result = classifyAircraftForRadarDetailed(plane);
+  if (!trafficDebugEnabled || result.classification !== radarAircraftIconClass.UNKNOWN) {
+    return result.classification;
+  }
+
+  const logKey = `${aircraftKey(plane)}|${JSON.stringify(result.normalized)}`;
+  if (!aircraftClassificationFailureLogs.has(logKey)) {
+    if (aircraftClassificationFailureLogs.size >= 200) aircraftClassificationFailureLogs.clear();
+    aircraftClassificationFailureLogs.add(logKey);
+    console.info("Aircraft icon classification fallback", {
+      icao: plane.icao || plane.hex || "",
+      taisType: plane.taisAircraftType || plane.taisType || plane.rawAircraftType || "",
+      faaManufacturer: plane.manufacturer || "",
+      faaModel: plane.model || "",
+      normalizedFields: result.normalized,
+      classificationResult: result.classification,
+      reason: result.reason
+    });
+  }
+  return result.classification;
+}
+
 function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   const theme = currentRadarTheme();
   const highlightMix = highlight?.highlightMix || 0;
@@ -6041,10 +6137,13 @@ function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   const hasTrack = track !== null;
   const screenAngle = trafficSymbolScreenAngleDegrees(track, radarRotationDegrees());
   const heading = screenAngle === null ? 0 : (screenAngle * Math.PI) / 180;
+  const iconClassification = aircraftIconsEnabled ? radarAircraftIconClassification(plane) : radarAircraftIconClass.UNKNOWN;
+  const useSvgIcon = aircraftIconsEnabled && hasTrack && iconClassification !== radarAircraftIconClass.UNKNOWN;
   ctx.save();
   ctx.globalAlpha = alpha;
   ctx.translate(point.x, point.y);
-  if (hasTrack) ctx.rotate(heading);
+  if (useSvgIcon) ctx.rotate(heading + Math.PI / 2);
+  else if (hasTrack) ctx.rotate(heading);
   ctx.scale(highlight?.scale || 1, highlight?.scale || 1);
   if (tracked) {
     ctx.save();
@@ -6066,11 +6165,10 @@ function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   ctx.fillStyle = targetColor;
   ctx.shadowColor = lightTheme && targetColor === theme.lowTarget ? "rgba(255, 255, 255, 0.98)" : targetColor;
   ctx.shadowBlur = lightTheme && targetColor === theme.lowTarget ? 10 : 8;
-  const iconClassification = aircraftIconsEnabled ? classifyAircraftForRadar(plane) : radarAircraftIconClass.UNKNOWN;
-  if (aircraftIconsEnabled && iconClassification !== radarAircraftIconClass.UNKNOWN) {
+  if (useSvgIcon) {
     ctx.strokeStyle = targetColor;
     ctx.lineWidth = 1.2;
-    drawAircraftIconSymbol(iconClassification);
+    drawAircraftIconSymbol(iconClassification, targetColor);
   } else {
     ctx.beginPath();
     if (hasTrack) {
@@ -8056,6 +8154,7 @@ const initialCenterApplied = applySelectedAirport();
 applySavedAirspaceDefaults();
 if (smallAirportsToggle) smallAirportsToggle.checked = showSmallAirports;
 if (aircraftIconsToggle) aircraftIconsToggle.checked = aircraftIconsEnabled;
+preloadAircraftIcons();
 updateCoordinateVisibility();
 applyResponsivePanelMode({ initial: true });
 updateRangeIndicator();

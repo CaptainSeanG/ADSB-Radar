@@ -1947,7 +1947,7 @@ fieldset {
 
 .airport-frequency-list strong,
 .airport-frequency-list span {
-  font-size: 0.86rem;
+  font-size: 0.9rem;
 }
 
 .airport-detail-list li {
@@ -2011,8 +2011,9 @@ fieldset {
 .airport-metar-raw {
   margin: 5px 0 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.94rem;
-  line-height: 1.5;
+  font-size: 1.12rem;
+  line-height: 1.55;
+  font-weight: 850;
   overflow-wrap: anywhere;
 }
 
@@ -2845,10 +2846,6 @@ body.light-theme .legend-trend {
     gap: 4px;
   }
 
-  .airport-frequency-list {
-    grid-template-columns: 1fr;
-  }
-
   .airport-detail-list span {
     text-align: left;
   }
@@ -2974,6 +2971,16 @@ body.light-theme .legend-trend {
     max-width: calc(100% - 86px);
     font-size: 0.98rem;
     padding: 9px 12px;
+  }
+}
+
+@media (max-width: 500px) {
+  .airport-frequency-list {
+    grid-template-columns: 1fr;
+  }
+
+  .airport-metar-raw {
+    font-size: 1rem;
   }
 }
 
