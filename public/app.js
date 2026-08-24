@@ -31,7 +31,7 @@ import {
 
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.08.24-r1";
+const APP_ROLLOUT_VERSION = "2026.08.24-r2";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 
 const aircraftIconAssetUrls = Object.freeze({
@@ -502,7 +502,7 @@ let showFlightLevelsTraffic = true;
 let showRadarData = true;
 const smallAirportsPreferenceKey = "ADSB_RADAR_SMALL_AIRPORTS";
 const savedSmallAirportsPreference = window.localStorage.getItem(smallAirportsPreferenceKey);
-let showSmallAirports = savedSmallAirportsPreference === "true";
+let showSmallAirports = savedSmallAirportsPreference !== "false";
 const aircraftIconsPreferenceKey = "ADSB_RADAR_AIRCRAFT_ICONS";
 let aircraftIconsEnabled = window.localStorage.getItem(aircraftIconsPreferenceKey) === "true";
 const savedWxDisplayMode = window.localStorage.getItem("ADSB_RADAR_WX_DISPLAY_MODE");
