@@ -15,11 +15,34 @@ import {
   sweepPaintDecision
 } from "./traffic-sweep.js?v=20260821-2";
 import { FaaAircraftRegistry, normalizeIcaoHex } from "./aircraft-registry.js?v=20260822-2";
+import {
+  aircraftIconClass as radarAircraftIconClass,
+  aircraftIconClassLabel,
+  classifyAircraftForRadar
+} from "./aircraft-classification.js?v=20260823-1";
+import {
+  calculateBestWindRunway,
+  formatMetarWind,
+  formatAirportLocalTime,
+  normalizeTpaRemark,
+  parseMetarWind
+} from "./airport-information.js?v=20260823-1";
 
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.08.22-r2";
+const APP_ROLLOUT_VERSION = "2026.08.23-r4";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
+const anonymousClientStorageKey = "ADSB_RADAR_ANONYMOUS_CLIENT_ID";
+
+function loadAnonymousClientId() {
+  const stored = String(window.localStorage.getItem(anonymousClientStorageKey) || "").trim();
+  if (/^[A-Za-z0-9_-]{16,128}$/.test(stored)) return stored;
+  const generated = window.crypto?.randomUUID?.() || `client_${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`;
+  window.localStorage.setItem(anonymousClientStorageKey, generated);
+  return generated;
+}
+
+const anonymousClientId = loadAnonymousClientId();
 const radarWrap = document.querySelector(".radar-wrap");
 const shell = document.querySelector(".shell");
 const form = document.querySelector("#controls");
@@ -87,6 +110,12 @@ const airportSearchOpen = document.querySelector("#airportSearchOpen");
 const airportSearchLabel = document.querySelector("#airportSearchLabel");
 const airportSearchModal = document.querySelector("#airportSearchModal");
 const airportSearchClose = document.querySelector("#airportSearchClose");
+const airportGpsButton = document.querySelector("#airportGpsButton");
+const airportModal = document.querySelector("#airportModal");
+const airportClose = document.querySelector("#airportClose");
+const airportTitle = document.querySelector("#airportTitle");
+const airportDetail = document.querySelector("#airportDetail");
+const aircraftIconsToggle = document.querySelector("#aircraftIconsToggle");
 
 window.ADSB_RADAR_OWNERSHIP = Object.freeze({
   product: "ADSB Radar",
@@ -212,6 +241,7 @@ const adsbProxyBaseUrl = (
   window.ADSB_RADAR_PROXY_URL ||
   ""
 ).replace(/\/$/, "");
+const airportMetarUrl = `${adsbProxyBaseUrl}/api/metar`;
 const internetTrafficPollMs = 1500;
 const internetTrafficStalePollMs = 2500;
 const stratusBridgeBaseUrl = (
@@ -221,6 +251,7 @@ const stratusBridgeBaseUrl = (
   ""
 ).replace(/\/$/, "");
 const nativeStratusHandler = window.webkit?.messageHandlers?.stratus || null;
+const nativeLocationHandler = window.webkit?.messageHandlers?.location || null;
 const trafficDebugEnabled =
   queryParams.get("debug") === "traffic" ||
   queryParams.get("debugTraffic") === "1" ||
@@ -417,6 +448,8 @@ let showRadarData = true;
 const smallAirportsPreferenceKey = "ADSB_RADAR_SMALL_AIRPORTS";
 const savedSmallAirportsPreference = window.localStorage.getItem(smallAirportsPreferenceKey);
 let showSmallAirports = savedSmallAirportsPreference === "true";
+const aircraftIconsPreferenceKey = "ADSB_RADAR_AIRCRAFT_ICONS";
+let aircraftIconsEnabled = window.localStorage.getItem(aircraftIconsPreferenceKey) === "true";
 const savedWxDisplayMode = window.localStorage.getItem("ADSB_RADAR_WX_DISPLAY_MODE");
 let wxDisplayMode = ["off", "on", "wxOnly"].includes(savedWxDisplayMode) ? savedWxDisplayMode : "on";
 let showPrecipitation = wxDisplayMode !== "off";
@@ -481,18 +514,26 @@ let airportRowsCacheTileKey = "";
 let nationwideAirportSearchPromise = null;
 let selectedAirportLabel = "Use GPS location";
 let runwayRowsCache = null;
+let frequencyRowsCache = null;
+let frequencyRowsPromise = null;
 let airportCacheRetryAt = 0;
 let runwayCacheRetryAt = 0;
 let airportRefreshInFlight = false;
 let runwayRefreshInFlight = false;
+let airportDetailsRequestSequence = 0;
+let airportLocalClockTimer = null;
+let openAirportCardAirport = null;
+const airportMetarCache = new Map();
 let offlineAirportDataActive = false;
 let offlineAirspaceDataActive = false;
 let lastAirspaceKey = "";
 let aircraftHitAreas = [];
+let airportHitAreas = [];
 let currentAircraftContacts = [];
 let aircraftTextObstacles = [];
 let gpsWatchId = null;
 let gpsActive = false;
+let nativeGpsRequestPending = false;
 let gpsTrackDegrees = null;
 let gpsSpeedKts = 0;
 let gpsAltitudeFt = null;
@@ -686,6 +727,7 @@ function prepareUIForTrafficAlert() {
     closeTracking();
     closeLegend();
     closeAircraftDetails();
+    closeAirportDetails();
     closeAirportSearchModal();
     closeSidebarPanel();
 
@@ -1939,6 +1981,7 @@ function parseRunwaysCsv(csv) {
         heLon,
         lengthFt: parseNumber(row[index.length_ft]),
         widthFt: parseNumber(row[index.width_ft]),
+        surface: row[index.surface],
         leHeading: parseNumber(row[index.le_heading_degT]),
         heHeading: parseNumber(row[index.he_heading_degT])
       };
@@ -3974,12 +4017,21 @@ function normalizeBundledAirportRows(payload) {
       elevationFt: parseNumber(airport.elevationFt),
       municipality: airport.municipality || "",
       state: airport.state || "",
+      country: airport.country || "",
+      publicUse: airport.publicUse,
+      scheduledService: Boolean(airport.scheduledService),
       isoRegion: airport.isoRegion || airport.region || "",
       icao: airport.icao || airport.gpsCode || "",
       gpsCode: airport.gpsCode || airport.icao || "",
       localCode: airport.localCode || airport.faa || "",
       iata: airport.iata || "",
-      runways: Array.isArray(airport.runways) ? airport.runways : []
+      runways: Array.isArray(airport.runways) ? airport.runways : [],
+      frequencies: Array.isArray(airport.frequencies) ? airport.frequencies : [],
+      tpa: airport.tpa || null,
+      towered: typeof airport.towered === "boolean" ? airport.towered : null,
+      towerHours: airport.towerHours || "",
+      facilityHours: airport.facilityHours || "",
+      faaSourceCycle: airport.faaSourceCycle || ""
     }))
     .filter((airport) => airport.ident && Number.isFinite(airport.lat) && Number.isFinite(airport.lon));
 }
@@ -3999,8 +4051,11 @@ function normalizeBundledRunwayRows(payload) {
       heLon: parseNumber(runway.heLon),
       lengthFt: parseNumber(runway.lengthFt),
       widthFt: parseNumber(runway.widthFt),
+      surface: runway.surface || "",
       leHeading: parseNumber(runway.leHeading),
-      heHeading: parseNumber(runway.heHeading)
+      heHeading: parseNumber(runway.heHeading),
+      headingReference: runway.headingReference || "true",
+      source: runway.source || ""
     })))
     .filter(
       (runway) =>
@@ -4010,6 +4065,22 @@ function normalizeBundledRunwayRows(payload) {
         Number.isFinite(runway.heLat) &&
         Number.isFinite(runway.heLon)
     );
+}
+
+function normalizeBundledFrequencyRows(payload) {
+  const airportRows = Array.isArray(payload) ? payload : payload?.airports;
+  if (!Array.isArray(airportRows)) return [];
+
+  return airportRows.flatMap((airport) =>
+    (Array.isArray(airport.frequencies) ? airport.frequencies : []).map((frequency) => ({
+      airportIdent: airport.ident,
+      type: String(frequency.type || "").trim(),
+      description: String(frequency.description || "").trim(),
+      frequencyMHz: parseNumber(frequency.frequencyMHz),
+      roles: Array.isArray(frequency.roles) ? frequency.roles : [],
+      source: frequency.source || ""
+    }))
+  ).filter((frequency) => frequency.airportIdent && Number.isFinite(frequency.frequencyMHz));
 }
 
 function mergeRowsByKey(primaryRows, fallbackRows, keyName) {
@@ -4080,7 +4151,7 @@ async function loadLocalAirportRows() {
   const persisted = storageReadJson("ADSB_RADAR_AIRPORT_ROWS", []);
   const tiledRows = await loadLocalAirportTileRows();
   const bundledRows = tiledRows.length ? tiledRows : normalizeBundledAirportRows(await loadBundledAirportSeed());
-  const rows = mergeRowsByKey(persisted, bundledRows, "ident");
+  const rows = mergeRowsByKey(bundledRows, persisted, "ident");
   offlineAirportDataActive = rows.length > 0;
   return rows;
 }
@@ -4217,12 +4288,26 @@ async function loadLocalRunwayRows() {
   const persisted = storageReadJson("ADSB_RADAR_RUNWAY_ROWS", []);
   const bundledPayload = await loadBundledAirportSeed();
   const bundledRows = normalizeBundledRunwayRows(bundledPayload);
-  const rows = [...(persisted || []), ...bundledRows];
+  const rows = bundledRows.length ? bundledRows : persisted || [];
   offlineAirportDataActive = offlineAirportDataActive || rows.length > 0;
   return rows;
 }
 
+async function loadLocalFrequencyRows() {
+  const bundledPayload = await loadBundledAirportSeed();
+  const bundledRows = normalizeBundledFrequencyRows(bundledPayload);
+  offlineAirportDataActive = offlineAirportDataActive || bundledRows.length > 0;
+  return bundledRows;
+}
+
+async function loadFrequencyCache() {
+  if (!frequencyRowsPromise) frequencyRowsPromise = loadLocalFrequencyRows();
+  frequencyRowsCache = await frequencyRowsPromise;
+  return frequencyRowsCache;
+}
+
 function refreshAirportCacheInBackground() {
+  if (offlineAirportDataActive) return;
   if (airportRefreshInFlight || Date.now() < airportCacheRetryAt) return;
   airportRefreshInFlight = true;
   fetchTextWithTimeout(airportsCsvUrl, { timeoutMs: 4500, accept: "text/csv,*/*" })
@@ -4245,6 +4330,7 @@ function refreshAirportCacheInBackground() {
 }
 
 function refreshRunwayCacheInBackground() {
+  if (offlineAirportDataActive) return;
   if (runwayRefreshInFlight || Date.now() < runwayCacheRetryAt) return;
   runwayRefreshInFlight = true;
   fetchTextWithTimeout(runwaysCsvUrl, { timeoutMs: 4500, accept: "text/csv,*/*" })
@@ -4279,35 +4365,59 @@ function pruneLargeRangeAirports(airportMatches) {
     .sort((a, b) => a.distanceMiles - b.distanceMiles);
 }
 
-function attachRunwaysToAirports(airportRows, runwayRows) {
+function attachRunwaysToAirports(airportRows, runwayRows, frequencyRows = []) {
+  const frequencyOrder = ["ATIS", "AWOS", "ASOS", "Clearance", "Ground", "Tower / CTAF", "Tower", "CTAF", "UNICOM", "Approach / Departure", "Approach", "Departure"];
+  const frequencySortIndex = (category) => {
+    const exact = frequencyOrder.indexOf(category);
+    if (exact >= 0) return exact;
+    const normalized = String(category || "");
+    const related = frequencyOrder.findIndex((entry) => normalized.startsWith(`${entry} /`) || normalized.includes(` / ${entry}`));
+    return related >= 0 ? related : 999;
+  };
   const runwaysByAirport = new Map();
+  const frequenciesByAirport = new Map();
   for (const runway of runwayRows) {
     if (!runwaysByAirport.has(runway.airportIdent)) runwaysByAirport.set(runway.airportIdent, []);
     runwaysByAirport.get(runway.airportIdent).push(runway);
+  }
+  for (const frequency of frequencyRows) {
+    if (!frequenciesByAirport.has(frequency.airportIdent)) frequenciesByAirport.set(frequency.airportIdent, []);
+    frequenciesByAirport.get(frequency.airportIdent).push(frequency);
   }
 
   return airportRows.map((airport) => ({
     ...airport,
     runways: (runwaysByAirport.get(airport.ident) || airport.runways || [])
       .sort((a, b) => (b.lengthFt || 0) - (a.lengthFt || 0))
-      .slice(0, 12)
+      .slice(0, 12),
+    frequencies: (frequenciesByAirport.get(airport.ident) || airport.frequencies || [])
+      .sort((a, b) => {
+        const left = frequencySortIndex(airportFrequencyCategory(a));
+        const right = frequencySortIndex(airportFrequencyCategory(b));
+        return left - right || a.frequencyMHz - b.frequencyMHz;
+      })
+      .slice(0, 24)
   }));
 }
 
 async function loadNearbyAirportContext() {
-  const [airportResult, runwayResult] = await Promise.allSettled([loadAirportCache(), loadRunwayCache()]);
+  const [airportResult, runwayResult, frequencyResult] = await Promise.allSettled([loadAirportCache(), loadRunwayCache(), loadFrequencyCache()]);
   const airportRows = airportResult.status === "fulfilled" ? airportResult.value : [];
   const runwayRows = runwayResult.status === "fulfilled" ? runwayResult.value : [];
+  const frequencyRows = frequencyResult.status === "fulfilled" ? frequencyResult.value : [];
   if (airportResult.status === "rejected") {
     console.warn("Unable to load local airport database", airportResult.reason);
   }
   if (runwayResult.status === "rejected") {
     console.warn("Unable to load local runway database", runwayResult.reason);
   }
+  if (frequencyResult.status === "rejected") {
+    console.warn("Unable to load local airport frequency database", frequencyResult.reason);
+  }
 
   const airportContextMiles = radiusMiles * 1.7;
   return pruneLargeRangeAirports(
-    attachRunwaysToAirports(airportRows, runwayRows)
+    attachRunwaysToAirports(airportRows, runwayRows, frequencyRows)
     .map((airport) => ({
       ...airport,
       distanceMiles: milesBetween(center.lat, center.lon, airport.lat, airport.lon)
@@ -4442,7 +4552,14 @@ async function fetchAircraftFeed(baseUrl, { displaySource, timeoutMs = 6500 } = 
     const response = await fetch(aircraftUrl, {
       signal: controller.signal,
       headers: {
-        accept: "application/json"
+        accept: "application/json",
+        ...(sourceIsInternet
+          ? {
+              "X-ADSB-Radar-Client": anonymousClientId,
+              "X-ADSB-Radar-Version": APP_ROLLOUT_VERSION,
+              "X-ADSB-Radar-Source": trafficPipelineDiagnostics.selectedTrafficSource || lastDataSource || "unknown"
+            }
+          : {})
       }
     });
     const data = await response.json().catch(() => ({}));
@@ -5571,6 +5688,7 @@ function drawAirportLabel(airport, point, scope) {
 }
 
 function drawAirports(scope) {
+  airportHitAreas = [];
   ctx.save();
   ctx.font = "700 11px ui-monospace, SFMono-Regular, Consolas, monospace";
   for (const airport of airports) {
@@ -5578,6 +5696,7 @@ function drawAirports(scope) {
     const point = project(airport.lat, airport.lon, scope);
     const margin = 36;
     if (point.x < -margin || point.x > scope.width + margin || point.y < -margin || point.y > scope.height + margin) continue;
+    airportHitAreas.push({ airport, x: point.x, y: point.y });
 
     const hasRunwayGraphic = drawAirportRunways(airport, scope);
 
@@ -5846,6 +5965,74 @@ function drawTrack(scope, plane, alpha = 1) {
   ctx.restore();
 }
 
+function drawAircraftIconSymbol(classification) {
+  ctx.beginPath();
+  if (classification === radarAircraftIconClass.HELICOPTER) {
+    ctx.ellipse(0, 0, 4.5, 8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-9, 0);
+    ctx.lineTo(9, 0);
+    ctx.moveTo(-7, -4);
+    ctx.lineTo(7, -4);
+    ctx.stroke();
+    return;
+  }
+
+  if (classification === radarAircraftIconClass.LARGE_JET || classification === radarAircraftIconClass.SMALL_JET) {
+    ctx.moveTo(10, 0);
+    ctx.lineTo(-5, -2.5);
+    ctx.lineTo(-2, -5.5);
+    ctx.lineTo(-1, -6.5);
+    ctx.lineTo(0, -5.5);
+    ctx.lineTo(-1, -1.8);
+    ctx.lineTo(-7, -4.5);
+    ctx.lineTo(-8, -3);
+    ctx.lineTo(-3, 0);
+    ctx.lineTo(-8, 3);
+    ctx.lineTo(-7, 4.5);
+    ctx.lineTo(-1, 1.8);
+    ctx.lineTo(0, 5.5);
+    ctx.lineTo(-1, 6.5);
+    ctx.lineTo(-2, 5.5);
+    ctx.lineTo(-5, 2.5);
+    ctx.closePath();
+  } else if (classification === radarAircraftIconClass.MULTI_PROP) {
+    ctx.moveTo(9, 0);
+    ctx.lineTo(-5, -2.8);
+    ctx.lineTo(-2, -5);
+    ctx.lineTo(-1, -4.5);
+    ctx.lineTo(-1, -1.5);
+    ctx.lineTo(-7, -4);
+    ctx.lineTo(-7.5, -2.5);
+    ctx.lineTo(-2.5, 0);
+    ctx.lineTo(-7.5, 2.5);
+    ctx.lineTo(-7, 4);
+    ctx.lineTo(-1, 1.5);
+    ctx.lineTo(-1, 4.5);
+    ctx.lineTo(-2, 5);
+    ctx.lineTo(-5, 2.8);
+    ctx.closePath();
+  } else {
+    ctx.moveTo(9, 0);
+    ctx.lineTo(-4, -2.5);
+    ctx.lineTo(-1, -5.5);
+    ctx.lineTo(0, -5);
+    ctx.lineTo(0, -1.5);
+    ctx.lineTo(-7, -4);
+    ctx.lineTo(-7, -2.5);
+    ctx.lineTo(-2, 0);
+    ctx.lineTo(-7, 2.5);
+    ctx.lineTo(-7, 4);
+    ctx.lineTo(0, 1.5);
+    ctx.lineTo(0, 5);
+    ctx.lineTo(-1, 5.5);
+    ctx.lineTo(-4, 2.5);
+    ctx.closePath();
+  }
+  ctx.fill();
+}
+
 function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   const theme = currentRadarTheme();
   const highlightMix = highlight?.highlightMix || 0;
@@ -5879,22 +6066,29 @@ function drawAircraftContact({ plane, point, alpha, highlight, compactLabel }) {
   ctx.fillStyle = targetColor;
   ctx.shadowColor = lightTheme && targetColor === theme.lowTarget ? "rgba(255, 255, 255, 0.98)" : targetColor;
   ctx.shadowBlur = lightTheme && targetColor === theme.lowTarget ? 10 : 8;
-  ctx.beginPath();
-  if (hasTrack) {
-    ctx.moveTo(10, 0);
-    ctx.lineTo(-7, -5);
-    ctx.lineTo(-4, 0);
-    ctx.lineTo(-7, 5);
-    ctx.closePath();
+  const iconClassification = aircraftIconsEnabled ? classifyAircraftForRadar(plane) : radarAircraftIconClass.UNKNOWN;
+  if (aircraftIconsEnabled && iconClassification !== radarAircraftIconClass.UNKNOWN) {
+    ctx.strokeStyle = targetColor;
+    ctx.lineWidth = 1.2;
+    drawAircraftIconSymbol(iconClassification);
   } else {
+    ctx.beginPath();
+    if (hasTrack) {
+      ctx.moveTo(10, 0);
+      ctx.lineTo(-7, -5);
+      ctx.lineTo(-4, 0);
+      ctx.lineTo(-7, 5);
+      ctx.closePath();
+    } else {
     // Unknown TAIS motion is intentionally nondirectional rather than a false north heading.
-    ctx.moveTo(0, -6);
-    ctx.lineTo(6, 0);
-    ctx.lineTo(0, 6);
-    ctx.lineTo(-6, 0);
-    ctx.closePath();
+      ctx.moveTo(0, -6);
+      ctx.lineTo(6, 0);
+      ctx.lineTo(0, 6);
+      ctx.lineTo(-6, 0);
+      ctx.closePath();
+    }
+    ctx.fill();
   }
-  ctx.fill();
   ctx.restore();
 
   ctx.fillStyle = theme.aircraftText;
@@ -7021,13 +7215,201 @@ function updateTrackedAircraftAlert() {
   `;
 }
 
+function airportFrequencyCategory(frequency) {
+  const roles = Array.isArray(frequency?.roles) ? frequency.roles.filter(Boolean) : [];
+  if (roles.length) {
+    if (roles.includes("Tower") && roles.includes("CTAF")) return "Tower / CTAF";
+    if (roles.includes("Approach") && roles.includes("Departure")) return "Approach / Departure";
+    return roles.join(" / ");
+  }
+  const type = String(frequency?.type || "").toUpperCase();
+  const description = String(frequency?.description || "").toUpperCase();
+  if (type.includes("ATIS") || /ATIS/.test(description)) return "ATIS";
+  if (type.includes("AWOS") || /AWOS/.test(description)) return "AWOS";
+  if (type.includes("ASOS") || /ASOS/.test(description)) return "ASOS";
+  if (type === "CLD" || /CLEARANCE|CLNC DEL/.test(description)) return "Clearance";
+  if (type === "GND" || /GROUND|GND/.test(description)) return "Ground";
+  if (type === "TWR" || /TOWER|TWR/.test(description)) return "Tower";
+  if (type === "APP" || /APPROACH|\bAPP\b/.test(description)) return "Approach";
+  if (type === "DEP" || /DEPARTURE|\bDEP\b/.test(description)) return "Departure";
+  if (type === "A/D") return "Approach / Departure";
+  if (type === "CTAF" || /CTAF/.test(description)) return "CTAF";
+  if (type === "UNIC" || /UNICOM/.test(description)) return "UNICOM";
+  return frequency?.type || "Other";
+}
+
+function formatAirportFrequency(value) {
+  const frequency = Number(value);
+  if (!Number.isFinite(frequency)) return "--";
+  return frequency.toFixed(3);
+}
+
+function formatRunwaySurface(value) {
+  const surface = String(value || "").trim();
+  if (!surface) return "Surface unavailable";
+  return surface.charAt(0).toUpperCase() + surface.slice(1).toLowerCase();
+}
+
+function formatAirportTpa(airport) {
+  const tpa = airport?.tpa;
+  if (tpa?.kind === "remarks") {
+    const remark = normalizeTpaRemark(tpa.remark);
+    return remark || "See Remarks";
+  }
+  if (tpa?.kind === "published" && Number.isFinite(Number(tpa.mslFt))) {
+    const msl = `${Math.round(Number(tpa.mslFt)).toLocaleString()} ft MSL`;
+    const agl = Number.isFinite(Number(tpa.aglFt)) ? ` / ${Math.round(Number(tpa.aglFt)).toLocaleString()} AGL` : "";
+    return `${msl}${agl}`;
+  }
+  return `${Math.round(Number(tpa?.aglFt) || 1000).toLocaleString()} AGL (standard)`;
+}
+
+function airportHoursLine(airport) {
+  const formatHours = (value) => String(value || "").replace(/^(\d{4})-(\d{4})$/, "$1–$2");
+  if (airport?.towered && airport.towerHours) {
+    const suffix = airport.towerHours === "24 HR" || /REMARK/i.test(airport.towerHours) ? "" : " local";
+    return `Tower: ${formatHours(airport.towerHours)}${suffix}`;
+  }
+  if (!airport?.towered && airport?.facilityHours && airport.facilityHours !== "Unattended") {
+    return `Hours: ${formatHours(airport.facilityHours)}`;
+  }
+  return "";
+}
+
+function updateAirportLocalClock() {
+  if (!openAirportCardAirport || airportModal?.hidden) return;
+  const clock = airportDetail?.querySelector(".airport-local-time");
+  if (clock) clock.textContent = `Local: ${formatAirportLocalTime(openAirportCardAirport)}`;
+}
+
+function startAirportLocalClock(airport) {
+  window.clearInterval(airportLocalClockTimer);
+  openAirportCardAirport = airport;
+  updateAirportLocalClock();
+  airportLocalClockTimer = window.setInterval(updateAirportLocalClock, 60_000);
+}
+
+function airportMetarStation(airport) {
+  const candidate = String(airport?.icao || airport?.gpsCode || airport?.ident || "").trim().toUpperCase();
+  return /^[A-Z0-9]{4}$/.test(candidate) ? candidate : "";
+}
+
+async function loadAirportMetar(airport) {
+  const station = airportMetarStation(airport);
+  if (!station || !adsbProxyBaseUrl) return null;
+  const cached = airportMetarCache.get(station);
+  if (cached && Date.now() - cached.fetchedAt < 60_000) return cached.report;
+  const url = new URL(airportMetarUrl);
+  url.searchParams.set("id", station);
+  const payload = await fetchJsonWithTimeout(url.href, { timeoutMs: 4500, cache: "no-store" });
+  const report = payload?.report || null;
+  airportMetarCache.set(station, { fetchedAt: Date.now(), report });
+  return report;
+}
+
+function runwayDetailsHtml(runways, bestWind) {
+  const bestIds = new Set((bestWind?.bestEnds || []).map((entry) => entry.id));
+  return runways.map((runway) => {
+    const ends = [runway.leIdent, runway.heIdent].filter(Boolean);
+    const dimensions = [runway.lengthFt, runway.widthFt]
+      .filter((value) => Number.isFinite(Number(value)))
+      .map((value) => Math.round(Number(value)).toLocaleString());
+    const bestEnds = ends.filter((end) => bestIds.has(end));
+    return `
+      <li class="${bestEnds.length ? "best-wind-runway" : ""}">
+        <span class="airport-runway-ident"><strong>${escapeHtml(ends.join(" / ") || "Runway")}</strong>${bestEnds.map((end) => `<em>${escapeHtml(end)} - BEST WIND</em>`).join("")}</span>
+        <span>${dimensions.length ? `${dimensions.join(" x ")} ft` : "Dimensions unavailable"}${runway.surface ? ` - ${escapeHtml(formatRunwaySurface(runway.surface))}` : ""}</span>
+      </li>`;
+  }).join("");
+}
+
+function renderAirportDetails(airport, { metarReport = null, weatherLoading = false } = {}) {
+  const airportIdent = airport.icao || airport.ident || airport.iata || "Airport";
+  const location = [airport.municipality, airport.state].filter(Boolean).join(", ");
+  const distanceMiles = milesBetween(center.lat, center.lon, airport.lat, airport.lon);
+  const distanceNm = milesToNauticalMiles(distanceMiles);
+  const bearing = bearingDegrees(center.lat, center.lon, airport.lat, airport.lon);
+  const elevation = Number(airport.elevationFt);
+  const runways = (airport.runways || []).filter((runway) => runway.leIdent || runway.heIdent).slice(0, 12);
+  const frequencies = (airport.frequencies || []).filter((frequency) => Number.isFinite(Number(frequency.frequencyMHz))).slice(0, 24);
+  const wind = parseMetarWind(metarReport);
+  const bestWind = calculateBestWindRunway(runways, wind);
+  const hours = airportHoursLine(airport);
+  const windText = weatherLoading
+    ? "Loading current METAR..."
+    : wind
+      ? formatMetarWind(wind)
+      : "Best Wind unavailable";
+
+  airportTitle.textContent = `${airportIdent} - ${airport.name || "Airport"}`;
+  airportDetail.innerHTML = `
+    <p class="airport-hours-line">${hours ? `<span>${escapeHtml(hours)}</span>` : ""}<span class="airport-local-time">Local: ${escapeHtml(formatAirportLocalTime(airport))}</span></p>
+    <div class="detail-title">${escapeHtml(location || airport.name || airportIdent)}</div>
+    <section class="airport-detail-section">
+      <h3>Basic information</h3>
+      <dl class="airport-info-grid">
+        <div><dt>Elevation</dt><dd>${Number.isFinite(elevation) ? `${Math.round(elevation).toLocaleString()} ft MSL` : "Unavailable"}</dd></div>
+        <div><dt>Towered</dt><dd>${airport.towered === true ? "YES" : "NO"}</dd></div>
+        <div class="airport-info-wide"><dt>TPA</dt><dd>${escapeHtml(formatAirportTpa(airport))}</dd></div>
+        <div><dt>Distance</dt><dd>${distanceNm.toFixed(1)} NM</dd></div>
+        <div><dt>Bearing</dt><dd>${formatHeading(bearing)} deg</dd></div>
+      </dl>
+    </section>
+    <section class="airport-detail-section">
+      <h3>Runways</h3>
+      ${runways.length ? `<ul class="airport-detail-list airport-runway-list">${runwayDetailsHtml(runways, bestWind)}</ul>` : `<p class="airport-detail-muted">No runway details in the bundled dataset.</p>`}
+    </section>
+    <section class="airport-detail-section">
+      <h3>Frequencies</h3>
+      ${frequencies.length ? `<ul class="airport-detail-list airport-frequency-list">${frequencies.map((frequency) => `<li><strong>${escapeHtml(airportFrequencyCategory(frequency))}</strong><span>${formatAirportFrequency(frequency.frequencyMHz)} MHz</span></li>`).join("")}</ul>` : `<p class="airport-detail-muted">No frequency details in the bundled dataset.</p>`}
+    </section>
+    <section class="airport-detail-section airport-weather-section">
+      <h3>METAR</h3>
+      <p class="airport-wind-line">${escapeHtml(windText)}</p>
+      ${wind?.rawObservation ? `<p class="airport-detail-muted airport-metar-raw">${escapeHtml(wind.rawObservation)}</p>` : ""}
+    </section>
+    <p class="airport-safety-note">Best Wind is based only on reported wind and is not a runway assignment.</p>
+  `;
+}
+
+function openAirportDetails(airport) {
+  if (!airport) return;
+  closeAircraftDetails();
+  const requestSequence = ++airportDetailsRequestSequence;
+  renderAirportDetails(airport, { weatherLoading: Boolean(airportMetarStation(airport) && adsbProxyBaseUrl) });
+  airportModal.hidden = false;
+  startAirportLocalClock(airport);
+  loadAirportMetar(airport)
+    .then((metarReport) => {
+      if (requestSequence !== airportDetailsRequestSequence || airportModal.hidden) return;
+      renderAirportDetails(airport, { metarReport });
+    })
+    .catch(() => {
+      if (requestSequence !== airportDetailsRequestSequence || airportModal.hidden) return;
+      renderAirportDetails(airport);
+    });
+}
+
+function closeAirportDetails() {
+  if (!airportModal) return;
+  airportDetailsRequestSequence += 1;
+  window.clearInterval(airportLocalClockTimer);
+  airportLocalClockTimer = null;
+  openAirportCardAirport = null;
+  airportModal.hidden = true;
+  airportTitle.textContent = "Airport";
+  airportDetail.innerHTML = "";
+}
+
 function openAircraftDetails(plane) {
   if (!plane) return;
+  closeAirportDetails();
   const distance = milesBetween(center.lat, center.lon, plane.lat, plane.lon);
   const friendlyType = friendlyAircraftType(plane) || aircraftType(plane) || "Aircraft type unavailable";
   const registration = plane.registration || plane.nNumber || "";
   const callsign = usefulAircraftCallsign(plane);
   const rawType = String(plane.rawAircraftType || plane.type || "").trim();
+  const iconCategory = aircraftIconClassLabel(classifyAircraftForRadar(plane));
   const icaoHex = normalizeIcaoHex(plane.hex || plane.icao);
   const primaryIdentity = callsign || registration || (icaoHex ? `ICAO ${icaoHex}` : planeLabel(plane));
   const detailKey = aircraftKey(plane);
@@ -7053,6 +7435,7 @@ function openAircraftDetails(plane) {
       <div><dt>Registration</dt><dd>${escapeHtml(registration || "Not available")}</dd></div>
       <div><dt>Callsign</dt><dd>${escapeHtml(callsign || "Not available")}</dd></div>
       <div><dt>Aircraft type</dt><dd>${escapeHtml(rawType || "Not available")}</dd></div>
+      ${iconCategory ? `<div><dt>Radar category</dt><dd>${escapeHtml(iconCategory)}</dd></div>` : ""}
       <div><dt>Altitude</dt><dd>${formatAltitude(plane.altitude)}</dd></div>
       <div><dt>Speed</dt><dd>${formatSpeed(plane.speed)}</dd></div>
       <div><dt>Distance</dt><dd>${distance.toFixed(1)} mi</dd></div>
@@ -7076,10 +7459,13 @@ function stopGpsTracking() {
   }
   gpsWatchId = null;
   gpsActive = false;
+  nativeGpsRequestPending = false;
   gpsTrackDegrees = null;
   gpsSpeedKts = 0;
   gpsAltitudeFt = null;
   compassHeadingDegrees = null;
+  airportGpsButton?.classList.remove("active");
+  airportGpsButton?.setAttribute("aria-pressed", "false");
 }
 
 function fallbackToKdvt(message = "GPS unavailable. Using KDVT fallback.") {
@@ -7091,9 +7477,79 @@ function fallbackToKdvt(message = "GPS unavailable. Using KDVT fallback.") {
   updateCenter(kdvtFallbackCenter.lat, kdvtFallbackCenter.lon);
 }
 
+function requestNativeGpsLocation() {
+  if (!nativeLocationHandler) return false;
+  stopGpsTracking();
+  nativeGpsRequestPending = true;
+  airportGpsButton?.classList.add("active");
+  airportGpsButton?.setAttribute("aria-pressed", "true");
+  statusEl.textContent = "Requesting device GPS position...";
+  try {
+    nativeLocationHandler.postMessage({ type: "request" });
+  } catch (error) {
+    nativeGpsRequestPending = false;
+    stopGpsTracking();
+    statusEl.textContent = `Location unavailable: ${error.message || "native GPS request failed"}.`;
+  }
+  return true;
+}
+
+function handleNativeGpsLocation(detail) {
+  if (!nativeGpsRequestPending) return;
+  nativeGpsRequestPending = false;
+  if (detail?.error) {
+    stopGpsTracking();
+    statusEl.textContent = `Location unavailable: ${detail.error}`;
+    return;
+  }
+
+  const lat = Number(detail?.latitude);
+  const lon = Number(detail?.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    stopGpsTracking();
+    statusEl.textContent = "Location unavailable: no valid GPS fix was returned.";
+    return;
+  }
+
+  const previousCenter = { ...center };
+  const movedMiles = milesBetween(center.lat, center.lon, lat, lon);
+  const shouldRefresh = movedMiles > 0.05 || !lastFetchAt || (getVisibleAirspaceClasses().size && (!lastAirspaceKey || !airspaces.length));
+  gpsActive = true;
+  gpsSpeedKts = Number.isFinite(Number(detail?.speed)) && Number(detail?.speed) >= 0 ? Number(detail.speed) * 1.94384 : 0;
+  gpsAltitudeFt = Number.isFinite(Number(detail?.altitude)) ? Number(detail.altitude) * 3.28084 : null;
+  gpsTrackDegrees = Number.isFinite(Number(detail?.heading)) ? Number(detail.heading) : gpsTrackDegrees;
+  latInput.value = lat.toFixed(4);
+  lonInput.value = lon.toFixed(4);
+  center = { lat, lon };
+  resetWeatherImageIfMoved(previousCenter, center);
+  setAirportSearchLabel("Device GPS location");
+  airportGpsButton?.classList.add("active");
+  airportGpsButton?.setAttribute("aria-pressed", "true");
+  statusEl.textContent = `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
+  const now = Date.now();
+  if (!lastGpsTrailAt || now - lastGpsTrailAt >= 30000) {
+    gpsTrail.push({ lat, lon, at: now });
+    gpsTrail = gpsTrail.slice(-120);
+    lastGpsTrailAt = now;
+  }
+  updateProximityAlert();
+  if (shouldRefresh) {
+    tracks.clear();
+    radarBlips.clear();
+    trafficTargetStates.clear();
+    previousSweepAngle = null;
+    previousRadarSweepBearing = null;
+    previousWxTrafficSweepBearing = null;
+    lastAirspaceKey = "";
+    fetchAirspace();
+    fetchTraffic({ force: true });
+  }
+}
+
 function startGpsTracking() {
   if (!navigator.geolocation) {
-    fallbackToKdvt("GPS is not available in this browser. Using KDVT fallback.");
+    stopGpsTracking();
+    statusEl.textContent = "Location unavailable: GPS is not available in this browser.";
     return;
   }
 
@@ -7104,6 +7560,8 @@ function startGpsTracking() {
   gpsTrackDegrees = null;
   gpsSpeedKts = 0;
   gpsAltitudeFt = null;
+  airportGpsButton?.classList.add("active");
+  airportGpsButton?.setAttribute("aria-pressed", "true");
   statusEl.textContent = "Requesting GPS position...";
   queueCompassHeadingEnable();
 
@@ -7128,6 +7586,9 @@ function startGpsTracking() {
 
       latInput.value = lat.toFixed(4);
       lonInput.value = lon.toFixed(4);
+      airportGpsButton?.classList.add("active");
+      airportGpsButton?.setAttribute("aria-pressed", "true");
+      setAirportSearchLabel("Device GPS location");
       center = { lat, lon };
       resetWeatherImageIfMoved(previousCenter, center);
       statusEl.textContent = `GPS center active at ${center.lat.toFixed(4)}, ${center.lon.toFixed(4)}.`;
@@ -7152,7 +7613,8 @@ function startGpsTracking() {
       }
     },
     (error) => {
-      fallbackToKdvt(`GPS unavailable: ${error.message}. Using KDVT fallback.`);
+      stopGpsTracking();
+      statusEl.textContent = `Location unavailable: ${error.message || "permission denied"}.`;
     },
     {
       enableHighAccuracy: true,
@@ -7241,6 +7703,7 @@ legendModal.addEventListener("click", (event) => {
 });
 
 aircraftClose.addEventListener("click", closeAircraftDetails);
+airportClose?.addEventListener("click", closeAirportDetails);
 
 aircraftTrack?.addEventListener("click", () => {
   const key = aircraftModal.dataset.aircraftKey;
@@ -7252,12 +7715,17 @@ aircraftModal.addEventListener("click", (event) => {
   if (event.target === aircraftModal) closeAircraftDetails();
 });
 
+airportModal?.addEventListener("click", (event) => {
+  if (event.target === airportModal) closeAirportDetails();
+});
+
 window.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && airportSearchModal && !airportSearchModal.hidden) closeAirportSearchModal();
   if (event.key === "Escape" && !settingsModal.hidden) closeSettings();
   if (event.key === "Escape" && trackingModal && !trackingModal.hidden) closeTracking();
   if (event.key === "Escape" && !legendModal.hidden) closeLegend();
   if (event.key === "Escape" && !aircraftModal.hidden) closeAircraftDetails();
+  if (event.key === "Escape" && airportModal && !airportModal.hidden) closeAirportDetails();
 });
 
 trackingForm?.addEventListener("submit", (event) => {
@@ -7301,6 +7769,12 @@ flightLevelsToggle.addEventListener("change", () => {
 
 radarDataToggle.addEventListener("change", () => {
   showRadarData = radarDataToggle.checked;
+});
+
+aircraftIconsToggle?.addEventListener("change", () => {
+  aircraftIconsEnabled = aircraftIconsToggle.checked;
+  window.localStorage.setItem(aircraftIconsPreferenceKey, String(aircraftIconsEnabled));
+  scheduleRender();
 });
 
 performanceModeSelect?.addEventListener("change", () => {
@@ -7376,14 +7850,19 @@ canvas.addEventListener("click", (event) => {
   const x = event.clientX - rect.left;
   const y = event.clientY - rect.top;
   const hit = aircraftHitAreas.find((area) => Math.hypot(area.x - x, area.y - y) <= 18);
-  if (hit) openAircraftDetails(hit.plane);
+  if (hit) {
+    openAircraftDetails(hit.plane);
+    return;
+  }
+  const airportHit = airportHitAreas.find((area) => Math.hypot(area.x - x, area.y - y) <= 18);
+  if (airportHit) openAirportDetails(airportHit.airport);
 });
 
 function applySelectedAirport() {
   updateCoordinateVisibility();
   if (airportSelect.value === "gps") {
     setAirportSearchLabel("Use GPS location");
-    startGpsTracking();
+    if (!requestNativeGpsLocation()) startGpsTracking();
     return true;
   }
 
@@ -7429,6 +7908,13 @@ function selectAirportSearchResult(button) {
 
 airportSearchOpen?.addEventListener("click", openAirportSearchModal);
 airportSearchClose?.addEventListener("click", closeAirportSearchModal);
+airportGpsButton?.addEventListener("click", () => {
+  airportSelect.value = "gps";
+  setAirportSearchLabel("Requesting device GPS...");
+  updateCoordinateVisibility();
+  closeAirportSearchModal();
+  if (!requestNativeGpsLocation()) startGpsTracking();
+});
 airportSearchModal?.addEventListener("click", (event) => {
   if (event.target === airportSearchModal) closeAirportSearchModal();
 });
@@ -7527,6 +8013,10 @@ window.addEventListener("adsb-native-device-heading", (event) => {
   applyCompassHeading(detail.heading, { accuracy: detail.accuracy, source: "native" });
 });
 
+window.addEventListener("adsb-native-device-location", (event) => {
+  handleNativeGpsLocation(event.detail || {});
+});
+
 window.addEventListener("resize", () => {
   applyResponsivePanelMode();
   resizeCanvas();
@@ -7565,6 +8055,7 @@ if ("ResizeObserver" in window && radarWrap) {
 const initialCenterApplied = applySelectedAirport();
 applySavedAirspaceDefaults();
 if (smallAirportsToggle) smallAirportsToggle.checked = showSmallAirports;
+if (aircraftIconsToggle) aircraftIconsToggle.checked = aircraftIconsEnabled;
 updateCoordinateVisibility();
 applyResponsivePanelMode({ initial: true });
 updateRangeIndicator();

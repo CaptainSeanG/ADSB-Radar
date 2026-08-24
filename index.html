@@ -7,7 +7,7 @@
     <meta name="author" content="CaptainSeanG" />
     <meta name="copyright" content="Copyright 2026 CaptainSeanG. All rights reserved." />
     <meta name="rights" content="Unauthorized reproduction or redistribution prohibited." />
-    <link rel="stylesheet" href="./public/styles.css?v=20260822-2" />
+    <link rel="stylesheet" href="./public/styles.css?v=20260823-4" />
   </head>
   <body data-copyright-owner="CaptainSeanG" data-product="ADSB Radar" data-build-series="2026-rollout">
     <main class="shell">
@@ -55,9 +55,12 @@
         <form id="controls" class="controls">
           <label class="airport-search-control">
             Airport
-            <button type="button" class="airport-search-open" id="airportSearchOpen">
-              <span id="airportSearchLabel">Use GPS location</span>
-            </button>
+            <span class="airport-location-row">
+              <button type="button" class="airport-search-open" id="airportSearchOpen">
+                <span id="airportSearchLabel">Use GPS location</span>
+              </button>
+              <button type="button" class="airport-gps-button" id="airportGpsButton" aria-label="Use device GPS location">GPS</button>
+            </span>
             <select id="airportSelect" name="airport" aria-hidden="true" tabindex="-1">
               <option value="">Custom coordinates</option>
               <option value="gps" selected>Use GPS location</option>
@@ -148,6 +151,11 @@
             <input id="radarDataToggle" type="checkbox" checked />
           </label>
 
+          <label class="switch-row">
+            <span>Aircraft Icons</span>
+            <input id="aircraftIconsToggle" type="checkbox" />
+          </label>
+
           <label class="performance-mode-row">
             <span>Performance</span>
             <select id="performanceModeSelect" aria-label="Radar performance mode">
@@ -192,7 +200,7 @@
           </label>
 
           <div class="settings-meta" aria-label="Version and copyright information">
-            <div class="settings-version">Rollout <span id="settingsVersion">2026.08.22-r2</span></div>
+            <div class="settings-version">Rollout <span id="settingsVersion">2026.08.23-r3</span></div>
             <div class="settings-disclaimer">
               Supplemental situational awareness only. Not a certified primary flight instrument, official navigation source, or substitute for see-and-avoid. Traffic, weather, airport, and airspace data may be incomplete or inaccurate.
             </div>
@@ -210,6 +218,16 @@
           <button type="button" class="icon-button" id="aircraftClose" aria-label="Close aircraft details">x</button>
         </header>
         <div class="aircraft-detail" id="aircraftDetail"></div>
+      </section>
+    </div>
+
+    <div class="modal-backdrop" id="airportModal" hidden>
+      <section class="settings-modal airport-modal" role="dialog" aria-modal="true" aria-labelledby="airportTitle">
+        <header class="settings-header">
+          <h2 id="airportTitle">Airport</h2>
+          <button type="button" class="icon-button" id="airportClose" aria-label="Close airport details">x</button>
+        </header>
+        <div class="airport-detail" id="airportDetail"></div>
       </section>
     </div>
 
@@ -311,7 +329,7 @@
       </section>
     </div>
 
-    <script src="./public/config.js?v=20260822-2"></script>
-    <script type="module" src="./public/app.js?v=20260822-2"></script>
+    <script src="./public/config.js?v=20260823-4"></script>
+    <script type="module" src="./public/app.js?v=20260823-4"></script>
   </body>
 </html>

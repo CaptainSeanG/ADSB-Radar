@@ -1503,10 +1503,17 @@ select {
   position: relative;
 }
 
+.airport-location-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+
 .airport-search-open {
   display: flex;
   min-height: 44px;
-  width: 100%;
+  width: auto;
   align-items: center;
   justify-content: flex-start;
   margin-top: 7px;
@@ -1518,6 +1525,27 @@ select {
   padding: 11px 12px;
   text-align: left;
   touch-action: manipulation;
+}
+
+.airport-gps-button {
+  min-width: 58px;
+  min-height: 44px;
+  margin-top: 7px;
+  border: 1px solid rgba(98, 213, 255, 0.55);
+  border-radius: 6px;
+  background: rgba(0, 70, 92, 0.34);
+  color: var(--cyan);
+  cursor: pointer;
+  font: 850 0.72rem ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 0.06em;
+  touch-action: manipulation;
+}
+
+.airport-gps-button.active,
+.airport-gps-button:hover {
+  border-color: var(--green);
+  background: rgba(77, 255, 155, 0.16);
+  color: var(--green);
 }
 
 .airport-search-open span {
@@ -1642,9 +1670,33 @@ select {
   color: var(--text);
 }
 
+.shell.light-theme .airport-gps-button {
+  border-color: rgba(0, 78, 128, 0.48);
+  background: rgba(98, 213, 255, 0.2);
+  color: #003c69;
+}
+
+.shell.light-theme .airport-gps-button.active,
+.shell.light-theme .airport-gps-button:hover {
+  border-color: #00633f;
+  background: rgba(0, 128, 72, 0.16);
+  color: #004f36;
+}
+
 .shell.light-theme .airport-result {
   border-color: rgba(20, 68, 50, 0.15);
   background: rgba(207, 226, 216, 0.96);
+}
+
+.shell.light-theme .airport-detail-section dl div,
+.shell.light-theme .airport-detail-list li {
+  border-color: rgba(0, 57, 40, 0.22);
+  background: rgba(177, 204, 190, 0.72);
+}
+
+.shell.light-theme .airport-detail-section h3,
+.shell.light-theme .airport-detail-list strong {
+  color: #004f72;
 }
 
 select {
@@ -1776,6 +1828,10 @@ fieldset {
   z-index: 50;
 }
 
+#airportModal {
+  z-index: 49;
+}
+
 .settings-modal {
   width: min(440px, 100%);
   border: 1px solid rgba(132, 255, 194, 0.26);
@@ -1804,6 +1860,176 @@ fieldset {
 
 .aircraft-modal {
   position: relative;
+}
+
+.airport-modal {
+  width: min(680px, 100%);
+  max-height: min(780px, calc(100dvh - 32px));
+  overflow-y: auto;
+}
+
+#airportTitle {
+  color: var(--green);
+}
+
+.airport-hours-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 18px;
+  margin: -8px 0 8px;
+  color: var(--amber);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.airport-local-time {
+  color: var(--cyan);
+  white-space: nowrap;
+}
+
+.airport-detail-section {
+  margin-top: 16px;
+}
+
+.airport-detail-section h3 {
+  margin: 0 0 8px;
+  color: var(--cyan);
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.airport-detail-section dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.airport-info-wide {
+  grid-column: 1 / -1;
+}
+
+.airport-detail-section dl div,
+.airport-detail-list li {
+  border: 1px solid rgba(132, 255, 194, 0.16);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.18);
+  padding: 9px 10px;
+}
+
+.airport-detail-section dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.airport-detail-section dd {
+  margin: 4px 0 0;
+  color: var(--text);
+  font-weight: 750;
+}
+
+.airport-detail-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.airport-frequency-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.airport-frequency-list strong,
+.airport-frequency-list span {
+  font-size: 0.86rem;
+}
+
+.airport-detail-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.airport-runway-ident {
+  display: grid;
+  gap: 3px;
+}
+
+.airport-runway-ident em {
+  color: #7dffad;
+  font-size: 0.67rem;
+  font-style: normal;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.airport-detail-list li.best-wind-runway {
+  border-color: rgba(77, 255, 155, 0.62);
+  background: rgba(22, 118, 66, 0.2);
+  box-shadow: inset 3px 0 0 rgba(77, 255, 155, 0.86);
+}
+
+.airport-detail-list strong {
+  color: var(--amber);
+}
+
+.airport-detail-list span {
+  color: var(--text);
+  text-align: right;
+}
+
+.airport-detail-muted {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.airport-detail-note,
+.airport-wind-line,
+.airport-safety-note {
+  margin: 8px 0 0;
+}
+
+.airport-detail-note {
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+.airport-wind-line {
+  color: var(--text);
+  font-size: 0.96rem;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.airport-metar-raw {
+  margin: 5px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.94rem;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.airport-safety-note {
+  color: var(--muted);
+  font-size: 0.65rem;
+  line-height: 1.35;
+}
+
+.shell.light-theme .airport-runway-ident em {
+  color: #005c31;
+}
+
+.shell.light-theme .airport-detail-list li.best-wind-runway {
+  border-color: rgba(0, 105, 57, 0.58);
+  background: rgba(50, 171, 105, 0.18);
+  box-shadow: inset 3px 0 0 rgba(0, 105, 57, 0.82);
 }
 
 .aircraft-track-button {
@@ -2604,6 +2830,27 @@ body.light-theme .legend-trend {
     grid-template-columns: 1fr;
     height: auto;
     min-height: 100vh;
+  }
+
+  .airport-detail-section dl {
+    grid-template-columns: 1fr;
+  }
+
+  .airport-detail-section dl.airport-info-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .airport-detail-list li {
+    display: grid;
+    gap: 4px;
+  }
+
+  .airport-frequency-list {
+    grid-template-columns: 1fr;
+  }
+
+  .airport-detail-list span {
+    text-align: left;
   }
 
   body.native-app {
