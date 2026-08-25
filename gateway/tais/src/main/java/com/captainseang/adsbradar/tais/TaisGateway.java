@@ -47,6 +47,7 @@ public final class TaisGateway implements AutoCloseable {
     private final AtomicLong positionUpdates = new AtomicLong();
     private final AtomicLong parseErrors = new AtomicLong();
     private final AtomicLong reconnects = new AtomicLong();
+    private final Instant startedAt = Instant.now();
     private final ArrayDeque<Long> recentMessageTimes = new ArrayDeque<>();
     private final ArrayDeque<RateSample> recentPositionSamples = new ArrayDeque<>();
     private volatile Connection connection;
@@ -246,8 +247,12 @@ public final class TaisGateway implements AutoCloseable {
         return new JSONObject()
             .put("ok", "live".equals(sourceState(now)))
             .put("gatewayVersion", VERSION)
+            .put("startedAt", startedAt.toString())
+            .put("uptimeSeconds", Math.max(0, Duration.between(startedAt, now).toSeconds()))
             .put("connectionState", sourceState(now))
             .put("connected", connected.get())
+            .put("queueConnected", connected.get())
+            .put("lastMessageTimestamp", last == null ? JSONObject.NULL : last.toString())
             .put("lastMessageAgeSeconds", last == null ? JSONObject.NULL : Math.max(0, Duration.between(last, now).toMillis() / 1000.0))
             .put("messagesPerSecond", messagesPerSecond(now.toEpochMilli()))
             .put("normalizedPositionUpdatesPerSecond", positionUpdatesPerSecond(now.toEpochMilli()))

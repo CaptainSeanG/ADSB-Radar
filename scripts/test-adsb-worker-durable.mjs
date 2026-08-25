@@ -87,7 +87,7 @@ try {
   let worker = await loadWorker();
   let result = await request(worker, 20);
   assert.equal(result.status, 200);
-  assert.equal(result.body.workerVersion, "2026-08-21-p50-tais-worker-v12");
+  assert.equal(result.body.workerVersion, "2026-08-24-quota-protection-worker-v16");
   assert.equal(result.body.cacheRadiusMiles, 100);
   assert.equal(result.body.requestedRadiusMiles, 20);
   assert.equal(result.body.durableFallback, false);

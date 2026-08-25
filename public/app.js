@@ -28,10 +28,14 @@ import {
   normalizeTpaRemark,
   parseMetarWind
 } from "./airport-information.js?v=20260823-1";
+import {
+  trafficPollIntervalMs,
+  workerTrafficPollingAllowed
+} from "./traffic-polling.js?v=20260824-1";
 
 const canvas = document.querySelector("#radar");
 const ctx = canvas.getContext("2d");
-const APP_ROLLOUT_VERSION = "2026.08.24-r2";
+const APP_ROLLOUT_VERSION = "2026.08.24-r3";
 const APP_COPYRIGHT_NOTICE = "Copyright 2026 CaptainSeanG. All rights reserved.";
 
 const aircraftIconAssetUrls = Object.freeze({
@@ -296,8 +300,6 @@ const adsbProxyBaseUrl = (
   ""
 ).replace(/\/$/, "");
 const airportMetarUrl = `${adsbProxyBaseUrl}/api/metar`;
-const internetTrafficPollMs = 1500;
-const internetTrafficStalePollMs = 2500;
 const stratusBridgeBaseUrl = (
   stratusUrlFromQuery ||
   window.localStorage.getItem("ADSB_RADAR_STRATUS_URL") ||
@@ -556,6 +558,8 @@ let trafficFetchInFlight = false;
 let trafficBackoffMs = 0;
 let nextTrafficFetchAt = 0;
 let trafficPumpTimer = null;
+let pageTrafficVisible = !document.hidden;
+let nativeAppActive = true;
 let lastTrafficPipelineDebugAt = 0;
 let pixelRatio = window.devicePixelRatio || 1;
 let airportsCachePromise = null;
@@ -1058,21 +1062,11 @@ function scheduleNextTrafficFetch({ failed = false, source = lastDataSource, sta
   const staleStratus = sourceText.includes("stratus") && stale;
   const liveLocalWifi = localWifi && !stale;
   const staleLocalWifi = localWifi && stale;
-  const baseDelay = liveStratus
-    ? 750
-    : staleStratus
-      ? 1400
-      : liveLocalWifi
-        ? 1200
-        : staleLocalWifi
-          ? 1800
-          : faaSource
-            ? internetTrafficPollMs
-          : internetSource && !stale
-            ? internetTrafficPollMs
-            : internetSource && stale
-              ? internetTrafficStalePollMs
-              : 6500;
+  const baseDelay = trafficPollIntervalMs({
+    source,
+    stale,
+    localNetworkProxy: isLocalNetworkUrl(adsbProxyBaseUrl)
+  });
   const jitter =
     liveStratus || liveLocalWifi
       ? randomJitter(50, 180)
@@ -5437,6 +5431,7 @@ async function fetchAirspace() {
 }
 
 async function fetchTraffic({ force = false } = {}) {
+  if (!workerTrafficPollingAllowed({ pageVisible: pageTrafficVisible, nativeAppActive })) return;
   if (trafficFetchInFlight) return;
   if (!force && Date.now() < nextTrafficFetchAt) return;
 
@@ -5522,6 +5517,7 @@ async function fetchTraffic({ force = false } = {}) {
 
 function pumpTrafficFeed() {
   if (!running) return;
+  if (!workerTrafficPollingAllowed({ pageVisible: pageTrafficVisible, nativeAppActive })) return;
   if (Date.now() < nextTrafficFetchAt) return;
   fetchTraffic();
 }
@@ -8095,7 +8091,7 @@ function updateCoordinateVisibility() {
 }
 
 function refreshNetworkFeeds() {
-  if (scratchpadPaused) return;
+  if (!workerTrafficPollingAllowed({ pageVisible: pageTrafficVisible, nativeAppActive })) return;
   nextTrafficFetchAt = 0;
   fetchTraffic({ force: true });
   resetWeatherImage();
@@ -8104,6 +8100,12 @@ function refreshNetworkFeeds() {
 
 window.addEventListener("adsb-scratchpad-pause", (event) => {
   setScratchpadPaused(Boolean(event.detail?.paused));
+});
+
+window.addEventListener("adsb-native-app-visibility", (event) => {
+  const wasActive = nativeAppActive;
+  nativeAppActive = event.detail?.active !== false;
+  if (nativeAppActive && !wasActive) refreshNetworkFeeds();
 });
 
 window.addEventListener("adsb-native-device-heading", (event) => {
@@ -8130,12 +8132,18 @@ window.addEventListener("orientationchange", () => {
   window.setTimeout(resizeCanvas, 320);
 });
 window.addEventListener("pageshow", () => {
+  pageTrafficVisible = !document.hidden;
   applyResponsivePanelMode();
   resizeCanvas();
+  refreshNetworkFeeds();
+});
+window.addEventListener("pagehide", () => {
+  pageTrafficVisible = false;
 });
 window.addEventListener("online", refreshNetworkFeeds);
 window.addEventListener("focus", refreshNetworkFeeds);
 document.addEventListener("visibilitychange", () => {
+  pageTrafficVisible = !document.hidden;
   if (!document.hidden) {
     resizeCanvas();
     refreshNetworkFeeds();

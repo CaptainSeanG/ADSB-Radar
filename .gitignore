@@ -8,3 +8,4 @@ gateway/**/target/
 build/
 .wrangler/
 ios/**/*.xcappdata/
+tools/**/.build/

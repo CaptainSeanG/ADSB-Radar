@@ -68,6 +68,16 @@ struct DeviceHeadingPayload: Codable {
     let timestamp: Double
 }
 
+struct DeviceLocationPayload: Codable {
+    let latitude: Double?
+    let longitude: Double?
+    let altitude: Double?
+    let speed: Double?
+    let heading: Double?
+    let accuracy: Double?
+    let timestamp: Double
+}
+
 final class StratusBridge: NSObject, ObservableObject, CLLocationManagerDelegate {
     private let queue = DispatchQueue(label: "ADSB.StratusBridge")
     private let decoder = GDL90Decoder()
@@ -84,6 +94,8 @@ final class StratusBridge: NSObject, ObservableObject, CLLocationManagerDelegate
     private var lastDeviceHeadingAt: Date?
     private var lastHeadingEventAt = Date.distantPast
     var onDeviceHeadingUpdate: ((DeviceHeadingPayload) -> Void)?
+    var onDeviceLocationUpdate: ((DeviceLocationPayload) -> Void)?
+    var onDeviceLocationError: ((String) -> Void)?
 
     @Published private(set) var isRunning = false
 
@@ -136,6 +148,20 @@ final class StratusBridge: NSObject, ObservableObject, CLLocationManagerDelegate
         }
     }
 
+    func requestDeviceLocation() {
+        DispatchQueue.main.async {
+            switch self.locationManager.authorizationStatus {
+            case .denied, .restricted:
+                self.onDeviceLocationError?("Location permission is denied or restricted.")
+            case .notDetermined:
+                self.locationManager.requestWhenInUseAuthorization()
+                self.locationManager.startUpdatingLocation()
+            default:
+                self.locationManager.startUpdatingLocation()
+            }
+        }
+    }
+
     func locationManager(_ manager: CLLocationManager, didUpdateHeading newHeading: CLHeading) {
         let usesMagnetic = newHeading.trueHeading < 0
         let heading = usesMagnetic ? newHeading.magneticHeading : newHeading.trueHeading
@@ -160,6 +186,35 @@ final class StratusBridge: NSObject, ObservableObject, CLLocationManagerDelegate
                 self.onDeviceHeadingUpdate?(payload)
             }
         }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        let payload = DeviceLocationPayload(
+            latitude: location.coordinate.latitude,
+            longitude: location.coordinate.longitude,
+            altitude: location.altitude.isFinite ? location.altitude : nil,
+            speed: location.speed >= 0 ? location.speed : nil,
+            heading: location.course >= 0 ? location.course : nil,
+            accuracy: location.horizontalAccuracy >= 0 ? location.horizontalAccuracy : nil,
+            timestamp: location.timestamp.timeIntervalSince1970
+        )
+        DispatchQueue.main.async {
+            self.onDeviceLocationUpdate?(payload)
+            self.locationManager.stopUpdatingLocation()
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        DispatchQueue.main.async {
+            self.onDeviceLocationError?(error.localizedDescription)
+            self.locationManager.stopUpdatingLocation()
+        }
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        guard manager.authorizationStatus == .authorizedAlways || manager.authorizationStatus == .authorizedWhenInUse else { return }
+        manager.startUpdatingLocation()
     }
 
     func locationManagerShouldDisplayHeadingCalibration(_ manager: CLLocationManager) -> Bool {

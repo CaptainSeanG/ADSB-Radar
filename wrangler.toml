@@ -5,3 +5,11 @@ compatibility_date = "2026-08-14"
 [[kv_namespaces]]
 binding = "ADSB_LKG_KV"
 id = "010b08b03266401c8d6364dbdbd8ae08"
+
+[[durable_objects.bindings]]
+name = "ACTIVE_CLIENTS"
+class_name = "ActiveClientTelemetry"
+
+[[migrations]]
+tag = "v1-active-client-telemetry"
+new_sqlite_classes = ["ActiveClientTelemetry"]

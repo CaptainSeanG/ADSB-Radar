@@ -21,7 +21,7 @@ const SOURCES = [
     forbiddenCooldownMs: 6 * 60 * 60 * 1000
   }
 ];
-const VERSION = "2026-08-21-p50-tais-worker-v12";
+const VERSION = "2026-08-24-quota-protection-worker-v16";
 const CACHE_TTL_SECONDS = 2;
 const TARGET_UPSTREAM_REFRESH_MS = 6000;
 const UPSTREAM_TIMEOUT_MS = 6500;
@@ -37,6 +37,12 @@ const TAIS_COVERAGE_CENTER = { lat: 33.4342, lon: -112.0116 };
 const TAIS_COVERAGE_RADIUS_MILES = 125;
 const TAIS_TIMEOUT_MS = 1200;
 const TAIS_RETRY_MS = 5000;
+const ACTIVE_CLIENT_RETENTION_MS = 60 * 60 * 1000;
+const ACTIVE_CLIENT_FLUSH_MS = 30 * 1000;
+const ACTIVE_CLIENT_STORAGE_KEY = "active-clients-v1";
+const ACTIVE_CLIENT_OBJECT_NAME = "global";
+const METAR_CACHE_MS = 60 * 1000;
+const METAR_STALE_MS = 15 * 60 * 1000;
 const aircraftCache = new Map();
 const refreshFlights = new Map();
 const providerHealth = new Map();
@@ -44,11 +50,13 @@ const taisFlights = new Map();
 const taisResults = new Map();
 let taisLastAttemptAt = 0;
 let taisLastResult = null;
+const metarCache = new Map();
 
 const CORS = {
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, OPTIONS",
-  "access-control-allow-headers": "content-type",
+  "access-control-allow-headers": "content-type, x-adsb-radar-client, x-adsb-radar-version, x-adsb-radar-source",
+  "access-control-max-age": "86400",
   "cache-control": "no-store"
 };
 
@@ -67,6 +75,231 @@ const nm = (miles) => miles * 0.868976;
 
 function nowMs() {
   return Date.now();
+}
+
+function normalizeAnonymousClientId(value) {
+  const candidate = String(value || "").trim();
+  return /^[A-Za-z0-9_-]{16,128}$/.test(candidate) ? candidate : "";
+}
+
+function normalizeClientSource(value) {
+  const source = String(value || "").trim().toLowerCase();
+  if (source.includes("faa")) return "faaTais";
+  if (source.includes("stratus") || source.includes("wifi")) return "local";
+  if (source.includes("stale")) return "stale";
+  if (source.includes("internet") || source.includes("cellular")) return "internet";
+  if (source.includes("none") || source.includes("no-data") || source.includes("unavailable")) return "noData";
+  return "unknown";
+}
+
+function activeClientMetrics(clients, requestBuckets, at = nowMs()) {
+  const records = Array.from(clients instanceof Map ? clients.values() : clients || []);
+  const active = (windowMs) => records.filter((record) => at - Number(record.lastSeenAt || 0) <= windowMs);
+  const active2m = active(2 * 60 * 1000);
+  const active15m = active(15 * 60 * 1000);
+  const active1h = active(ACTIVE_CLIENT_RETENTION_MS);
+  const sources = { faaTais: 0, local: 0, internet: 0, stale: 0, noData: 0, unknown: 0 };
+  for (const record of active2m) sources[normalizeClientSource(record.source)] += 1;
+  const currentMinute = Math.floor(at / 60000);
+  const requestsPerMinute = Number(requestBuckets instanceof Map ? requestBuckets.get(currentMinute) || 0 : requestBuckets?.[currentMinute] || 0);
+  return {
+    activeClients2m: active2m.length,
+    activeClients15m: active15m.length,
+    activeClients1h: active1h.length,
+    requestsPerMinute,
+    sources,
+    generatedAt: new Date(at).toISOString()
+  };
+}
+
+export class ActiveClientTelemetry {
+  constructor(state) {
+    this.state = state;
+    this.clients = new Map();
+    this.requestBuckets = new Map();
+    this.dirty = false;
+    const load = async () => {
+      const stored = await this.state.storage.get(ACTIVE_CLIENT_STORAGE_KEY);
+      for (const record of stored?.clients || []) {
+        const id = normalizeAnonymousClientId(record?.id);
+        if (id) this.clients.set(id, { ...record, id });
+      }
+      for (const [minute, count] of stored?.requestBuckets || []) {
+        this.requestBuckets.set(Number(minute), Number(count));
+      }
+      this.prune(nowMs());
+    };
+    this.ready = this.state.blockConcurrencyWhile ? this.state.blockConcurrencyWhile(load) : load();
+  }
+
+  prune(at) {
+    for (const [id, record] of this.clients) {
+      if (at - Number(record.lastSeenAt || 0) > ACTIVE_CLIENT_RETENTION_MS) this.clients.delete(id);
+    }
+    const oldestMinute = Math.floor((at - ACTIVE_CLIENT_RETENTION_MS) / 60000);
+    for (const minute of this.requestBuckets.keys()) {
+      if (minute < oldestMinute) this.requestBuckets.delete(minute);
+    }
+  }
+
+  async scheduleFlush(at) {
+    if (!this.state.storage.setAlarm) return;
+    const existing = this.state.storage.getAlarm ? await this.state.storage.getAlarm() : null;
+    if (!existing) await this.state.storage.setAlarm(at + ACTIVE_CLIENT_FLUSH_MS);
+  }
+
+  async persist(at = nowMs()) {
+    this.prune(at);
+    await this.state.storage.put(ACTIVE_CLIENT_STORAGE_KEY, {
+      schemaVersion: 1,
+      clients: Array.from(this.clients.values()),
+      requestBuckets: Array.from(this.requestBuckets.entries()),
+      updatedAt: at
+    });
+    this.dirty = false;
+  }
+
+  async fetch(request) {
+    await this.ready;
+    const url = new URL(request.url);
+    if (url.pathname === "/observe" && request.method === "POST") {
+      const payload = await request.json().catch(() => ({}));
+      const id = normalizeAnonymousClientId(payload.clientId);
+      if (!id) return json({ error: "Invalid anonymous client identifier" }, 400);
+      const at = nowMs();
+      this.prune(at);
+      this.clients.set(id, {
+        id,
+        lastSeenAt: at,
+        version: String(payload.version || "").slice(0, 64),
+        source: normalizeClientSource(payload.source)
+      });
+      const minute = Math.floor(at / 60000);
+      this.requestBuckets.set(minute, Number(this.requestBuckets.get(minute) || 0) + 1);
+      this.dirty = true;
+      await this.scheduleFlush(at);
+      return json({ ok: true });
+    }
+    if (url.pathname === "/metrics") {
+      return json(activeClientMetrics(this.clients, this.requestBuckets));
+    }
+    return json({ error: "Not found" }, 404);
+  }
+
+  async alarm() {
+    await this.ready;
+    if (this.dirty) await this.persist();
+  }
+}
+
+function activeClientStub(env) {
+  if (!env?.ACTIVE_CLIENTS?.idFromName || !env?.ACTIVE_CLIENTS?.get) return null;
+  return env.ACTIVE_CLIENTS.get(env.ACTIVE_CLIENTS.idFromName(ACTIVE_CLIENT_OBJECT_NAME));
+}
+
+async function recordActiveClient(request, env) {
+  const clientId = normalizeAnonymousClientId(request.headers.get("x-adsb-radar-client"));
+  const stub = activeClientStub(env);
+  if (!clientId || !stub) return;
+  await stub.fetch("https://active-clients.internal/observe", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      clientId,
+      version: request.headers.get("x-adsb-radar-version") || "",
+      source: request.headers.get("x-adsb-radar-source") || "unknown"
+    })
+  });
+}
+
+async function tokenMatches(supplied, expected) {
+  if (!supplied || !expected) return false;
+  const encoder = new TextEncoder();
+  const [left, right] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(supplied)),
+    crypto.subtle.digest("SHA-256", encoder.encode(expected))
+  ]);
+  const leftBytes = new Uint8Array(left);
+  const rightBytes = new Uint8Array(right);
+  return leftBytes.every((byte, index) => byte === rightBytes[index]);
+}
+
+async function adminMetrics(request, env) {
+  const authorization = request.headers.get("authorization") || "";
+  const supplied = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  if (!(await tokenMatches(supplied, String(env?.ADSB_ADMIN_TOKEN || "")))) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const stub = activeClientStub(env);
+  if (!stub) return json({ error: "Active-client telemetry is not configured" }, 503);
+  const response = await stub.fetch("https://active-clients.internal/metrics");
+  const telemetry = await response.json();
+  return json({
+    ...telemetry,
+    workerVersion: VERSION,
+    tais: taisLastResult
+      ? {
+          state: taisLastResult.state || "unavailable",
+          selected: Boolean(taisLastResult.ok),
+          lastAttemptAgeSeconds: secondsSince(taisLastAttemptAt),
+          activeTracks: taisLastResult.gateway?.activeTracks ?? null
+        }
+      : null,
+    providerHealth: providerHealthSummary()
+  });
+}
+
+async function handleMetar(url) {
+  const station = String(url.searchParams.get("id") || url.searchParams.get("ids") || "").trim().toUpperCase();
+  if (!/^[A-Z0-9]{3,4}$/.test(station)) return json({ error: "A valid METAR station identifier is required" }, 400);
+  const now = nowMs();
+  const cached = metarCache.get(station);
+  if (cached && now - cached.fetchedAt < METAR_CACHE_MS) {
+    return json({ ...cached.payload, cacheAgeSeconds: Math.round((now - cached.fetchedAt) / 1000), stale: false });
+  }
+
+  try {
+    const endpoint = new URL("https://aviationweather.gov/api/data/metar");
+    endpoint.searchParams.set("ids", station);
+    endpoint.searchParams.set("format", "json");
+    const response = await fetch(endpoint, {
+      headers: {
+        accept: "application/json",
+        "user-agent": "ADSB-Radar airport information (captainseang.github.io/ADSB-Radar)"
+      }
+    });
+    if (!response.ok) throw new Error(`AviationWeather.gov returned ${response.status}`);
+    const reports = await response.json();
+    const report = Array.isArray(reports) ? reports[0] || null : null;
+    const payload = {
+      station,
+      report,
+      source: "AviationWeather.gov",
+      fetchedAt: new Date(now).toISOString(),
+      cacheAgeSeconds: 0,
+      stale: false,
+      workerVersion: VERSION
+    };
+    metarCache.set(station, { fetchedAt: now, payload });
+    return json(payload);
+  } catch (error) {
+    if (cached && now - cached.fetchedAt < METAR_STALE_MS) {
+      return json({
+        ...cached.payload,
+        cacheAgeSeconds: Math.round((now - cached.fetchedAt) / 1000),
+        stale: true,
+        warning: error?.message || "Current METAR unavailable"
+      });
+    }
+    return json({
+      station,
+      report: null,
+      source: "AviationWeather.gov",
+      stale: true,
+      error: error?.message || "Current METAR unavailable",
+      workerVersion: VERSION
+    }, 502);
+  }
 }
 
 function miles(aLat, aLon, bLat, bLon) {
@@ -942,6 +1175,8 @@ export default {
   async fetch(request, env, context) {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS });
     const url = new URL(request.url);
+    if (url.pathname === "/admin/metrics") return adminMetrics(request, env);
+    if (url.pathname === "/api/metar") return handleMetar(url);
     if (url.pathname === "/" || url.pathname === "/health") {
       return json({
         ok: true,
@@ -952,6 +1187,7 @@ export default {
         trafficCacheCellDegrees: TRAFFIC_CACHE_CELL_DEGREES,
         durableSnapshotTtlSeconds: DURABLE_SNAPSHOT_TTL_SECONDS,
         durableSnapshotBindingConfigured: Boolean(env?.ADSB_LKG_KV),
+        activeClientTelemetryConfigured: Boolean(activeClientStub(env)),
         taisGatewayConfigured: taisConfiguration(env).configured,
         taisCoverage: {
           sourceFacility: "P50",
@@ -970,7 +1206,14 @@ export default {
         providerHealth: providerHealthSummary()
       });
     }
-    if (url.pathname === "/api/aircraft") return handleAircraft(url, context, env);
+    if (url.pathname === "/api/aircraft") {
+      const observation = recordActiveClient(request, env).catch((error) => {
+        console.log(`Active-client telemetry failed: ${error?.message || error}`);
+      });
+      if (context?.waitUntil) context.waitUntil(observation);
+      else await observation;
+      return handleAircraft(url, context, env);
+    }
     return json({ error: "Not found", workerVersion: VERSION }, 404);
   }
 };
@@ -978,5 +1221,10 @@ export default {
 export const __test = {
   fetchTaisGateway,
   taisCoverageEligible,
-  taisFallbackMetadata
+  taisFallbackMetadata,
+  normalizeAnonymousClientId,
+  normalizeClientSource,
+  activeClientMetrics,
+  tokenMatches,
+  handleMetar
 };

@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var stratusBridge: StratusBridge
     @State private var notesText = ""
     @State private var showingScratchpad = false
@@ -13,6 +14,7 @@ struct ContentView: View {
                 stratusBridge: stratusBridge,
                 notesText: $notesText,
                 scratchpadActive: $showingScratchpad,
+                appActive: scenePhase == .active,
                 onScratchpadRequested: { showingScratchpad = true },
                 onScratchpadDismissRequested: { showingScratchpad = false }
             )

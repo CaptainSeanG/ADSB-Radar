@@ -5,6 +5,7 @@ struct RadarWebView: UIViewRepresentable {
     @ObservedObject var stratusBridge: StratusBridge
     @Binding var notesText: String
     @Binding var scratchpadActive: Bool
+    var appActive: Bool
     var onScratchpadRequested: () -> Void
     var onScratchpadDismissRequested: () -> Void
 
@@ -20,6 +21,7 @@ struct RadarWebView: UIViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController.add(context.coordinator, name: "stratus")
         configuration.userContentController.add(context.coordinator, name: "scratchpad")
+        configuration.userContentController.add(context.coordinator, name: "location")
 #if DEBUG
         configuration.userContentController.addUserScript(
             WKUserScript(
@@ -54,6 +56,7 @@ struct RadarWebView: UIViewRepresentable {
         context.coordinator.onScratchpadDismissRequested = onScratchpadDismissRequested
         context.coordinator.sendNotesTextIfNeeded(notesText)
         context.coordinator.sendScratchpadPauseIfNeeded(scratchpadActive)
+        context.coordinator.sendAppVisibilityIfNeeded(appActive)
     }
 
     final class Coordinator: NSObject, WKScriptMessageHandler, UIScrollViewDelegate {
@@ -63,6 +66,7 @@ struct RadarWebView: UIViewRepresentable {
         weak var webView: WKWebView?
         private var lastSentNotesText: String?
         private var lastSentScratchpadActive: Bool?
+        private var lastSentAppActive: Bool?
 
         init(
             stratusBridge: StratusBridge,
@@ -82,6 +86,12 @@ struct RadarWebView: UIViewRepresentable {
             stratusBridge.onDeviceHeadingUpdate = { [weak self] payload in
                 self?.sendDeviceHeading(payload)
             }
+            stratusBridge.onDeviceLocationUpdate = { [weak self] payload in
+                self?.sendDeviceLocation(payload)
+            }
+            stratusBridge.onDeviceLocationError = { [weak self] message in
+                self?.sendDeviceLocationError(message)
+            }
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -93,6 +103,14 @@ struct RadarWebView: UIViewRepresentable {
                     } else {
                         self.onScratchpadRequested()
                     }
+                }
+                return
+            }
+
+            if message.name == "location" {
+                let type = (message.body as? [String: Any])?["type"] as? String
+                if type == "request" {
+                    stratusBridge.requestDeviceLocation()
                 }
                 return
             }
@@ -146,6 +164,19 @@ struct RadarWebView: UIViewRepresentable {
             }
         }
 
+        func sendAppVisibilityIfNeeded(_ active: Bool) {
+            guard active != lastSentAppActive else { return }
+            lastSentAppActive = active
+            let script = """
+            window.dispatchEvent(new CustomEvent("adsb-native-app-visibility", {
+              detail: {"active":\(active ? "true" : "false")}
+            }));
+            """
+            DispatchQueue.main.async {
+                self.webView?.evaluateJavaScript(script)
+            }
+        }
+
         private func sendDeviceHeading(_ payload: DeviceHeadingPayload) {
             do {
                 let payloadData = try JSONEncoder().encode(payload)
@@ -159,6 +190,34 @@ struct RadarWebView: UIViewRepresentable {
             } catch {
                 return
             }
+        }
+
+        private func sendDeviceLocation(_ payload: DeviceLocationPayload) {
+            do {
+                let payloadData = try JSONEncoder().encode(payload)
+                guard let payloadJSON = String(data: payloadData, encoding: .utf8) else { return }
+                let script = """
+                window.dispatchEvent(new CustomEvent("adsb-native-device-location", {
+                  detail: \(payloadJSON)
+                }));
+                """
+                self.webView?.evaluateJavaScript(script)
+            } catch {
+                return
+            }
+        }
+
+        private func sendDeviceLocationError(_ message: String) {
+            let escaped = message
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "\n", with: "\\n")
+            let script = """
+            window.dispatchEvent(new CustomEvent("adsb-native-device-location", {
+              detail: {"error":"\(escaped)"}
+            }));
+            """
+            self.webView?.evaluateJavaScript(script)
         }
 
         private func sendResponse<T: Encodable>(id: String, type: String, payload: T) {
